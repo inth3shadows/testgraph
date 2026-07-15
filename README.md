@@ -17,8 +17,17 @@ functions; 2 were exercised; these 3 journeys are now high risk — run them").
 
 ## Status
 
-Pre-code. Dogfood-first against honeyslate and signedintake. Direction and
-phases: `~/.claude/plans/testgraph-test-intelligence-mcp.md`.
+PARKED 2026-07-15, pre-code — deferred in favor of a revenue-bearing project.
+The direction below is recommended, not confirmed, and five unresolved holes
+are recorded in the plan (chief among them: static call-graph
+over-approximation may name so many journeys per change that the selector
+degenerates to "run everything").
+
+Everything needed to resume cold — holes, phases, scoring table, and the
+cheapest next action (a selectivity probe over 5 honeyslate commits, hours not
+days, which gates the whole project) — is in
+`~/.claude/plans/testgraph-test-intelligence-mcp.md`. Dogfood-first against
+honeyslate and signedintake.
 
 ## Shape
 
