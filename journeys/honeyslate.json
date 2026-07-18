@@ -1,0 +1,30 @@
+{
+  "target": "honeyslate",
+  "note": "Hand-authored journey registry. Entries are route handlers + the scheduler sweep. name+file resolves node ids at run time.",
+  "journeys": {
+    "J1": {"name": "submit task",   "entries": [{"name": "create_task", "file": "routers/tasks.py"}]},
+    "J2": {"name": "browse tasks",  "entries": [
+      {"name": "list_tasks", "file": "routers/tasks.py"},
+      {"name": "get_task", "file": "routers/tasks.py"},
+      {"name": "list_task_types", "file": "routers/tasks.py"}]},
+    "J3": {"name": "edit task",     "entries": [{"name": "patch_task", "file": "routers/tasks.py"}]},
+    "J4": {"name": "reschedule",    "entries": [{"name": "reschedule_task", "file": "routers/tasks.py"}]},
+    "J5": {"name": "comments",      "entries": [
+      {"name": "list_comments", "file": "routers/tasks.py"},
+      {"name": "add_comment", "file": "routers/tasks.py"}]},
+    "J6": {"name": "auth / sign-in", "entries": [
+      {"name": "mint_magic_link", "file": "routers/auth.py"},
+      {"name": "request_link", "file": "routers/auth.py"},
+      {"name": "consume", "file": "routers/auth.py"},
+      {"name": "logout", "file": "routers/auth.py"},
+      {"name": "me", "file": "routers/auth.py"}]},
+    "J7": {"name": "gcal sync",     "entries": [{"name": "gcal_push", "file": "routers/webhooks.py"}]},
+    "J8": {"name": "auto-scheduler", "entries": [
+      {"name": "sweep", "file": "scheduler.py"},
+      {"name": "start", "file": "scheduler.py"}]}
+  },
+  "spot_checks": {
+    "get_settings": {"min_caller_edges": 10, "file": "config.py"},
+    "Task": {"min_caller_edges": 8, "file": "models.py"}
+  }
+}
