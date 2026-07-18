@@ -1,41 +1,74 @@
 # testgraph
 
-Test intelligence above the tools that already exist: correlate what changed
-(git diff), what it affects (CodeGraph edges), what actually runs (RunEcho /
-runtime evidence), and what has been exercised (a behavior-coverage ledger) —
-then hand a risk-ranked test plan to whatever executes tests (Playwright MCP,
-Claude Code, CI).
+Journey-level test selection. Given a git diff, testgraph answers "which
+user-facing flows could this change have broken, and in what order should they
+be tested?" — reading the change, walking a CodeGraph index of how the code
+connects, and returning a short ranked list instead of "re-run everything."
 
-## Positioning (from 2026-07-15 brainstorm)
+It sits above the tools that already exist: it does NOT drive browsers, generate
+tests, or self-heal (Playwright's Planner/Generator/Healer agents commoditized
+that). Its job is the layer no driver has — deciding *what is worth testing*.
 
-The browser-driving layer is commoditized: Playwright ships Planner, Generator,
-and Healer agents on top of its official MCP server. testgraph does NOT drive
-browsers and does NOT generate Playwright scripts. Its moat is the layer no
-driver has: a persistent map of user journeys ↔ code symbols ↔ last-exercised
-evidence, and change-aware selection over that map ("this PR changed 6
-functions; 2 were exercised; these 3 journeys are now high risk — run them").
+## How It Works
+
+A **journey registry** names each user journey and its entry symbols (route
+handlers, the scheduler sweep, etc.). For a diff, testgraph:
+
+1. maps changed line ranges to the symbols that own them (the *seeds*);
+2. walks the CodeGraph edge graph in reverse — transitively — to every symbol
+   that depends on a seed (the *impacted set*);
+3. reports the journeys whose entry symbols fall in that set, ranked by fan-in.
+
+It is **recall-first**: it would rather over-select (flag a journey that turned
+out fine) than silently drop a journey a change really did affect. A shared
+config edit therefore fans out to many journeys on purpose.
+
+Before answering, an **integrity guard** refuses to run off a corrupted or stale
+CodeGraph index — because a wrong graph produces a confidently-wrong "you don't
+need to test that" answer, the one failure mode a test selector must never have.
+
+## Prerequisites
+
+- Python 3.11+ (standard library only — no third-party dependencies).
+- A target repo with a CodeGraph index (`.codegraph/codegraph.db`). Build one
+  with `codegraph init <path>`.
+- `git` (diff input).
+
+## Quick Start
+
+```bash
+# From the testgraph repo root, against a CodeGraph-indexed target:
+python3 -m testgraph.select \
+  --repo /home/ericm/personal_projects/honeyslate/main \
+  --base HEAD~1 --head HEAD
+
+# JSON output (for a CI gate or another agent to consume):
+python3 -m testgraph.select --repo <path> --json
+
+# Run the tests and the accuracy harness:
+python3 -m unittest tests.test_core
+python3 harness/accuracy.py
+```
+
+## Project Structure
+
+- `testgraph/` — the package: `db.py` (graph traversal), `integrity.py` (the
+  guard), `registry.py` (journey resolution), `select.py` (the CLI).
+- `journeys/honeyslate.json` — the hand-authored journey registry for the first
+  dogfood target.
+- `harness/` — the recall/precision accuracy harness and its labeled commits.
+- `tests/` — unit tests over a synthetic fixture (no CodeGraph needed).
 
 ## Status
 
-PARKED 2026-07-15, pre-code — deferred in favor of a revenue-bearing project.
-The direction below is recommended, not confirmed, and five unresolved holes
-are recorded in the plan (chief among them: static call-graph
-over-approximation may name so many journeys per change that the selector
-degenerates to "run everything").
+Phase-1 spike, working and validated on honeyslate: recall 1.00 across 5
+commits, mean precision 0.84, integrity guard tested. Scoped to honeyslate and
+Python. Next increments (confidence-weighted edges, an MCP wrapper, the
+`/verify` gate) are in the plan.
 
-Everything needed to resume cold — holes, phases, scoring table, and the
-cheapest next action (a selectivity probe over 5 honeyslate commits, hours not
-days, which gates the whole project) — is in
-`~/.claude/plans/testgraph-test-intelligence-mcp.md`. Dogfood-first against
-honeyslate and signedintake.
+## Related Documentation
 
-## Shape
+- [Technical Reference](TECHNICAL.md) — architecture, the traversal, the guard, limitations.
+- [Usage Guide](USAGE.md) — how to run it and read its output.
 
-- CLI first (like codegraph), thin MCP wrapper second.
-- Journey registry: named user journeys per repo, each mapped to entry
-  symbols; CodeGraph expands symbol → impacted-journey sets.
-- `testgraph plan` — diff in, risk-ranked journey list out.
-- Results ledger — executions, failures, and root-cause notes feed the next
-  plan (learn-from-failure).
-- Consumer #1: the /verify gate in autonomous merge loops (forage/autorun) —
-  agent-written code gets behavior-verified before merge.
+Design plan: `~/.claude/plans/testgraph-phase1-graph-traversal-spike.md`.
