@@ -1,0 +1,10 @@
+{
+  "note": "Hand-labeled ground truth: journeys a careful engineer would retest given each commit's diff. Recall oracle = these must all be selected. Labels derived from reading each diff 2026-07-18.",
+  "commits": [
+    {"sha": "1cd0385", "desc": "health /api/health DB status (isolated handler)", "oracle": []},
+    {"sha": "e86bada", "desc": "auth self-serve sign-in link (auth + new notify fn)", "oracle": ["J6"]},
+    {"sha": "9961ef5", "desc": "scheduler paused-sweep fix (scheduler.start)", "oracle": ["J8"]},
+    {"sha": "0b4135f", "desc": "gcal transport timeout (Settings field + gcal build)", "oracle": ["J4", "J7", "J8"]},
+    {"sha": "d6ed34a", "desc": "task comments + editable dates + submitter notify (Task model, patch/reschedule, comments)", "oracle": ["J1", "J2", "J3", "J4", "J5"], "label_note": "J8 removed on review: scheduler.py/placement.py untouched; a Task comments-relationship does not change sweep/placement behavior. Submitter notification is sent from the patch/reschedule/create paths, not the scheduler."}
+  ]
+}
