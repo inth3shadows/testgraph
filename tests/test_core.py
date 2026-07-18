@@ -11,6 +11,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from testgraph import db as dbmod  # noqa: E402
 from testgraph import integrity  # noqa: E402
+from testgraph import select as sel  # noqa: E402
 
 
 def build_fixture():
@@ -97,6 +98,29 @@ class IntegrityTests(unittest.TestCase):
         self.conn.execute("INSERT INTO unresolved_refs(status) VALUES ('pending')")
         blocking, _ = integrity.check(self.conn, "/nonexistent", {})
         self.assertTrue(any("pending" in b for b in blocking))
+
+
+class DiffParseTests(unittest.TestCase):
+    def test_addition_seeds_range(self):
+        diff = (
+            "diff --git a/app/svc.py b/app/svc.py\n"
+            "--- a/app/svc.py\n+++ b/app/svc.py\n"
+            "@@ -10,0 +11,3 @@\n+x\n+y\n+z\n"
+        )
+        self.assertEqual(sel._parse_unified_diff(diff), {"app/svc.py": [(11, 13)]})
+
+    def test_deletion_only_still_seeds(self):
+        # +124,0 is a pure deletion — must STILL seed (recall-first regression).
+        diff = "--- a/app/svc.py\n+++ b/app/svc.py\n@@ -125,3 +124,0 @@\n"
+        self.assertEqual(sel._parse_unified_diff(diff), {"app/svc.py": [(124, 125)]})
+
+    def test_deleted_file_not_seeded(self):
+        diff = "--- a/app/svc.py\n+++ /dev/null\n@@ -1,5 +0,0 @@\n"
+        self.assertEqual(sel._parse_unified_diff(diff), {})
+
+    def test_test_files_excluded(self):
+        diff = "+++ b/backend/tests/test_x.py\n@@ -1,0 +1,2 @@\n+a\n+b\n"
+        self.assertEqual(sel._parse_unified_diff(diff), {})
 
 
 if __name__ == "__main__":

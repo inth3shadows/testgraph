@@ -32,17 +32,18 @@ def _is_test(path):
     )
 
 
-def changed_ranges(repo, base, head):
-    """{file: [(lo, hi), ...]} of added/changed line ranges in product .py files."""
-    diff = subprocess.run(
-        ["git", "-C", repo, "diff", "--unified=0", f"{base}..{head}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+def _parse_unified_diff(diff):
+    """{file: [(lo, hi), ...]} of changed line ranges in product .py files.
+
+    Split out from git invocation so it is unit-testable. A '+++ ' line is only
+    treated as a file header when it carries a 'b/' or '/dev/null' path, so a
+    changed content line that renders as '+++ ...' is not misread as a header.
+    """
     ranges, cur = {}, None
     for line in diff.splitlines():
-        if line.startswith("+++ "):
+        if line.startswith("+++ ") and (
+            line[4:].startswith("b/") or line[4:] == "/dev/null"
+        ):
             path = line[4:]
             if path.startswith("b/"):
                 path = path[2:]
@@ -54,9 +55,25 @@ def changed_ranges(repo, base, head):
             if m:
                 start = int(m.group(1))
                 cnt = int(m.group(2) or 1)
-                if cnt > 0:  # cnt==0 is a pure deletion; no new lines to map
+                if cnt > 0:
                     ranges[cur].append((start, start + cnt - 1))
+                else:
+                    # Pure deletion (+N,0): no new lines, but behavior changed.
+                    # Seed the enclosing node at the deletion boundary so the
+                    # affected journey is still selected (recall-first).
+                    lo = max(1, start)
+                    ranges[cur].append((lo, lo + 1))
     return {f: r for f, r in ranges.items() if r}
+
+
+def changed_ranges(repo, base, head):
+    diff = subprocess.run(
+        ["git", "-C", repo, "diff", "--unified=0", f"{base}..{head}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return _parse_unified_diff(diff)
 
 
 def select(repo, base, head, db_path, registry_path):
