@@ -53,7 +53,8 @@ python3 -m testgraph.select --repo <path> --json
 
 # Run the tests and the accuracy harness:
 python3 -m unittest tests.test_core
-python3 harness/accuracy.py
+python3 harness/accuracy.py            # 5 hand-labeled real commits
+python3 harness/seed_regressions.py    # ~20 seeded mutation sites
 ```
 
 ## Project Structure
@@ -62,14 +63,17 @@ python3 harness/accuracy.py
   guard), `registry.py` (journey resolution), `select.py` (the CLI).
 - `journeys/honeyslate.json` — the hand-authored journey registry for the first
   dogfood target.
-- `harness/` — the recall/precision accuracy harness and its labeled commits.
+- `harness/` — `accuracy.py` (recall/precision on labeled commits),
+  `seed_regressions.py` + `ast_oracle.py` (seeded-mutation eval against an
+  independent oracle), `adjudications.json` (hand-ruled disagreements).
 - `tests/` — unit tests over a synthetic fixture (no CodeGraph needed).
 
 ## Status
 
 Phase-1 spike plus B1 (confidence-weighted paths), working and validated on
-honeyslate: recall 1.00 across 5 commits, mean precision 0.84, integrity guard
-tested. Scoped to honeyslate and Python. Next increments (the results ledger, an
+honeyslate: recall 1.00 across 5 hand-labeled commits (mean precision 0.84) and
+1.00 across 20 seeded mutation sites scored against an independent AST oracle;
+integrity guard tested and schema-pinned. Scoped to honeyslate and Python. Next increments (the results ledger, an
 MCP wrapper, the `/verify` gate) are in the plan.
 
 ## Related Documentation

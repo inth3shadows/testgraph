@@ -100,6 +100,35 @@ python3 harness/accuracy.py             # recall/precision on labeled commits
 codegraph index <repo>                  # rebuild a target index (NOT sync, on corruption)
 ```
 
+## Seeded-Regression Eval (issue #5)
+
+`harness/seed_regressions.py` manufactures the hard cases the 5 hand-labeled
+commits don't cover. It checks honeyslate out once, indexes once, then for each
+of ~20 sampled functions edits one line *inside* that function, commits, and asks
+the selector which journeys the change endangers. The edit preserves the
+function's line count, so the base index stays aligned and no re-index is needed
+per site.
+
+Ground truth is `harness/ast_oracle.py` — a call graph built from source text by
+Python's own `ast`, walked **forward** from each journey entry, whereas the
+selector walks **backward** from changed symbols. Same relation, independently
+derived; a shared missing edge cannot hide in both.
+
+**It measures selection, not detection.** Whether a behavioral mutation would
+actually fail a journey needs runnable journeys (issue #8's environment). To the
+selector, a seeded diff and a seeded bug are identical — it only reads the diff.
+
+**Adjudication.** The oracle matches calls by bare name, so it over-approximates
+by construction. A disagreement is therefore a *question*, not a verdict: each is
+recorded in `harness/adjudications.json` as `oracle-false-positive` (with the
+call-path evidence) or `selector-miss` (a real recall bug — fix the closure).
+Unadjudicated disagreements fail the run deliberately, and the oracle is never
+tuned to agree.
+
+Current result: **20 sites, adjudicated recall 1.00, mean worst rank 3.17, mean
+3.33 of 8 journeys named.** Three disagreements, all adjudicated as oracle false
+positives with sole-caller evidence.
+
 ## Schema Pin (R1)
 
 `integrity.check()` reads the index's `schema_versions` row and compares it to
