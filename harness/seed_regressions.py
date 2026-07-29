@@ -89,13 +89,16 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--sites", type=int, default=20)
     ap.add_argument("--base", default="main")
+    ap.add_argument("--strict-adjudications", action="store_true",
+                    help="fail if any excuse was adjudicated against a "
+                         "different base commit")
     args = ap.parse_args(argv)
 
     registry = json.load(open(REGISTRY))
     adj = json.load(open(os.path.join(HERE, "adjudications.json")))["verdicts"]
     tmp = tempfile.mkdtemp(prefix="tg-seed-")
     wt = os.path.join(tmp, "wt")
-    rows, misses, blocked = [], [], []
+    rows, misses, blocked, stale = [], [], [], []
     try:
         add = run(["git", "-C", BARE, "worktree", "add", "--detach", wt, args.base])
         if add.returncode:
@@ -141,8 +144,14 @@ def main(argv=None):
             # a path. Only a recorded 'selector-miss' counts against recall.
             verdict = adj.get(f"{rel}:{fname}")
             excused = set()
-            if verdict and verdict["verdict"] == "oracle-false-positive":
+            if verdict and verdict.get("verdict") == "oracle-false-positive":
                 excused = set(verdict.get("journeys", []))
+                # An excuse is a claim about a call path at a point in time. If
+                # the code has moved, the path may now exist and the excuse would
+                # suppress a REAL miss -- the failure mode this project exists to
+                # prevent, reintroduced inside its own harness. Report loudly.
+                if not base_sha.startswith(verdict.get("base_sha", "")):
+                    stale.append((rel, fname, verdict.get("base_sha", "?")))
             unexcused = [j for j in missing if j not in excused]
             if missing:
                 misses.append((rel, fname, missing, ranked, sorted(excused),
@@ -199,12 +208,19 @@ def main(argv=None):
             print(f"        excused by harness/adjudications.json: {excused}")
     print(f"  adjudicated as oracle false positives: "
           f"{len(misses) - len(open_misses)} / {len(misses)}")
+    if stale:
+        print(f"\n  STALE EXCUSES ({len(stale)}) — adjudicated against a different"
+              f" base; re-read the call path:")
+        for rel, fname, was in stale:
+            print(f"    {rel}:{fname} (adjudicated @ {was}, run @ {base_sha[:7]})")
     if open_misses:
         print("\n  OPEN: read each call path. If a real path exists it is a recall")
         print("  bug — fix the closure. If not, record the evidence in")
         print("  harness/adjudications.json. Do NOT tune the oracle to agree.")
 
     ok = bool(recalls) and min(recalls) >= 1.0 and not open_misses
+    if stale and args.strict_adjudications:
+        ok = False
     print(f"\n  VERDICT : {'PASS' if ok else 'FAIL'}  "
           f"(adjudicated recall must be 1.00; no open disagreements)")
     return 0 if ok else 1
