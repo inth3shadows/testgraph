@@ -123,8 +123,10 @@ Current map: 137 symbols across 21 files (8.4 KB).
 ### Where the map lives
 
 `--into-target` writes to `<repo>/.testgraph/journey-map.md`, so the map sits in
-the repo it describes and is versioned alongside it. The default `--out` keeps a
-copy under `maps/` in this repo. The skill resolves, in order: `$TESTGRAPH_MAP`,
+the repo it describes and is versioned alongside it. The central copy under
+`maps/` is **not** automatic — it requires an explicit
+`--out maps/<target>.md`, and with no flag at all the map goes to stdout.
+Resolution step 3 below is therefore manually maintained. The skill resolves, in order: `$TESTGRAPH_MAP`,
 then `<repo-root>/.testgraph/journey-map.md`, then
 `~/personal_projects/testgraph/main/maps/<repo-basename>.md`.
 

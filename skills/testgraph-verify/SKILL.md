@@ -23,7 +23,9 @@ journey registry today.
 
 ## Steps
 
-1. List the product files you changed: `git diff --name-only`. Ignore test files.
+1. List the product files you changed. Use `git diff --name-only HEAD` so
+   **staged** work is included — plain `git diff` shows only unstaged changes and
+   would report nothing after a `git add`. Ignore test files.
 2. Open the map and find the `###` section for each changed file.
 3. **Match rows by symbol name first.** Find the symbols you edited and read
    their journey IDs. Line ranges are a *hint only* — they are frozen at the
@@ -35,20 +37,38 @@ journey registry today.
 
 ## When the map cannot answer — escalate, never conclude
 
-The map lists only symbols that existed **when it was generated**. These cases
-are outside it, and every one of them means *unknown*, never *none*:
+The map lists only symbols that existed **when it was generated**. Every case
+below means *unknown*, never *none*:
 
 | Situation | What to do |
 |---|---|
-| You **added** a function or file | Run `testgraph.select` (below). A new symbol has no row by definition. |
-| You **deleted** or **renamed** a file | Run `testgraph.select`. It treats an unmappable whole-file change as **unbounded** impact and lists every journey — the map cannot express that. |
-| The file has no `###` section at all | Unknown, not none. The indexer may not cover it. Escalate. |
-| `generated from commit` is far behind HEAD | The map under-reports. Regenerate or escalate. |
+| You **added** a `.py` function or file | Run `select` (below). A new symbol has no row by definition. |
+| You **deleted** or **renamed** a `.py` file | Run `select`. If the file is still in the index it seeds that file's symbols precisely and returns a *narrow* list — correct, not a malfunction. Only when the file has already left the index does it report unbounded impact and list every journey. |
+| You changed **any non-`.py` file** (`.js`, `.svelte`, …) | **Do NOT rely on `select` — it is blind to non-Python paths and will answer NONE** (issue #21). Use the map's rows for that file and treat the result as *unknown*, not complete. |
+| The file has no `###` section at all | Unknown. The indexer may not cover it. Escalate and say so. |
+| `generated from commit` is far behind HEAD | The map under-reports. Regenerate (below) or escalate. |
 
-Escalation is one command:
+### Running select
+
+`select` reads **committed history only** — it cannot see uncommitted edits, so
+commit or stash first, then:
 
 ```bash
-python3 -m testgraph.select --repo <repo> --base HEAD --head <your-branch>
+python3 -m testgraph.select --repo <repo> \
+  --base "$(git -C <repo> merge-base main HEAD)" --head HEAD
+```
+
+Do **not** pass `--base HEAD --head <your-branch>` while checked out on that
+branch: both resolve to the same commit, the diff is empty, and `select` prints
+`journeys to test: NONE` — an answer that looks confident and means nothing.
+
+### Regenerating a stale map
+
+```bash
+# into the repo it describes:
+python3 -m testgraph.export --repo <repo> --into-target
+# or into the central store:
+python3 -m testgraph.export --repo <repo> --out maps/<target>.md
 ```
 
 ## Rules
@@ -60,9 +80,8 @@ python3 -m testgraph.select --repo <repo> --base HEAD --head <your-branch>
 - **Do not narrow the set on a hunch.** The map is recall-first: a shared symbol
   fanning out to every journey is correct output, not a bug. Deciding a listed
   journey "obviously isn't affected" is the other harmful move.
-- **Non-Python files are unreliable today.** The map lists frontend symbols but
-  `testgraph.select` ignores non-`.py` paths, so the two disagree (issue #21).
-  Trust the map's rows and treat a frontend change as at least those journeys.
+- **`NONE` from `select` is only trustworthy for a non-empty, all-Python diff.**
+  Confirm the diff was non-empty and contained `.py` paths before believing it.
 - Do not edit the map by hand. It is generated, and a hand-edit that drops a
   journey is indistinguishable from a graph bug.
 

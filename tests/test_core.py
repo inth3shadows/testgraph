@@ -364,5 +364,56 @@ class ExportMapTests(unittest.TestCase):
                 )
 
 
+class IntoTargetTests(unittest.TestCase):
+    """`--into-target` is what makes the skill's in-repo lookup work, so its path
+    construction and its refusal to litter a blocked target are both load-bearing."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.tmp, ".codegraph"))
+        db = os.path.join(self.tmp, ".codegraph", "codegraph.db")
+        src = build_fixture()
+        dst = sqlite3.connect(db)
+        src.backup(dst)
+        dst.close()
+        self.reg = os.path.join(self.tmp, "reg.json")
+        with open(self.reg, "w") as fh:
+            json.dump(
+                {
+                    "codegraph_schema_version": 8,
+                    "journeys": {"J1": {"name": "one", "entries": [
+                        {"name": "handler_a", "file": "app/svc.py"}]}},
+                    "spot_checks": {},
+                },
+                fh,
+            )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_writes_where_the_skill_looks(self):
+        rc = exp.main(["--repo", self.tmp, "--registry", self.reg, "--into-target"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.tmp, ".testgraph", "journey-map.md"))
+        )
+
+    def test_out_and_into_target_are_exclusive(self):
+        rc = exp.main(["--repo", self.tmp, "--registry", self.reg, "--into-target",
+                       "--out", os.path.join(self.tmp, "x.md")])
+        self.assertEqual(rc, 2)
+
+    def test_blocked_run_leaves_no_directory_behind(self):
+        # a run that says "map NOT written" must not litter the target repo.
+        with open(self.reg) as fh:
+            reg = json.load(fh)
+        reg["codegraph_schema_version"] = 99
+        with open(self.reg, "w") as fh:
+            json.dump(reg, fh)
+        rc = exp.main(["--repo", self.tmp, "--registry", self.reg, "--into-target"])
+        self.assertEqual(rc, 2)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, ".testgraph")))
+
+
 if __name__ == "__main__":
     unittest.main()
