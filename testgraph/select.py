@@ -33,18 +33,46 @@ def _is_test(path):
 
 
 def _parse_unified_diff(diff):
-    """{file: [(lo, hi), ...]} of changed line ranges in product .py files.
+    """Parse a `git diff --unified=0` into
+    `(ranges, whole_files)` where
 
-    Split out from git invocation so it is unit-testable. A '+++ ' line is only
-    treated as a file header when it carries a 'b/' or '/dev/null' path, so a
-    changed content line that renders as '+++ ...' is not misread as a header.
+      ranges      = {file: [(lo, hi), ...]}  changed line ranges, and
+      whole_files = {path: reason}           files with no usable line ranges
+
+    `whole_files` covers deletions and renames. Both used to vanish silently: a
+    deleted file's '+++ ' header is '/dev/null', which is not a .py path, so the
+    file was dropped and its dependents were never seeded — silent
+    under-selection, the unsafe direction. A rename with no content edit
+    produces no '@@' hunks at all, yet changes the module path for every
+    importer.
+
+    A '+++ ' line is only treated as a file header when it carries a 'b/' or
+    '/dev/null' path, so a changed content line that renders as '+++ ...' is not
+    misread as a header.
     """
-    ranges, cur = {}, None
+    ranges, whole_files, cur, prev = {}, {}, None, None
     for line in diff.splitlines():
-        if line.startswith("+++ ") and (
+        if line.startswith("--- "):
+            p = line[4:]
+            prev = p[2:] if p.startswith("a/") else None
+        elif line.startswith("rename from "):
+            p = line[len("rename from "):]
+            if p.endswith(".py") and not _is_test(p):
+                whole_files[p] = "renamed from"
+        elif line.startswith("rename to "):
+            p = line[len("rename to "):]
+            if p.endswith(".py") and not _is_test(p):
+                whole_files[p] = "renamed to"
+        elif line.startswith("+++ ") and (
             line[4:].startswith("b/") or line[4:] == "/dev/null"
         ):
             path = line[4:]
+            if path == "/dev/null":
+                # whole-file deletion: the surviving path is on the '---' line
+                if prev and prev.endswith(".py") and not _is_test(prev):
+                    whole_files[prev] = "deleted"
+                cur = None
+                continue
             if path.startswith("b/"):
                 path = path[2:]
             cur = path if path.endswith(".py") and not _is_test(path) else None
@@ -63,12 +91,14 @@ def _parse_unified_diff(diff):
                     # affected journey is still selected (recall-first).
                     lo = max(1, start)
                     ranges[cur].append((lo, lo + 1))
-    return {f: r for f, r in ranges.items() if r}
+    return {f: r for f, r in ranges.items() if r}, whole_files
 
 
 def changed_ranges(repo, base, head):
     diff = subprocess.run(
-        ["git", "-C", repo, "diff", "--unified=0", f"{base}..{head}"],
+        # -M: detect renames so a moved module is seeded whole rather than read
+        # as an unrelated delete + add.
+        ["git", "-C", repo, "diff", "--unified=0", "-M", f"{base}..{head}"],
         capture_output=True,
         text=True,
         check=True,
@@ -80,18 +110,37 @@ def select(repo, base, head, db_path, registry_path):
     conn = dbmod.connect(db_path)
     registry = reg.load(registry_path)
 
-    blocking, warnings = integrity.check(conn, repo, registry.get("spot_checks", {}))
+    blocking, warnings = integrity.check(
+        conn,
+        repo,
+        registry.get("spot_checks", {}),
+        schema_pin=registry.get("codegraph_schema_version"),
+    )
     result = {"base": base, "head": head, "warnings": warnings}
     if blocking:
         result["status"] = "BLOCKED"
         result["blocking"] = blocking
         return result
 
-    ranges = changed_ranges(repo, base, head)
+    ranges, whole_files = changed_ranges(repo, base, head)
     seeds = set()
     for f, rs in ranges.items():
         for lo, hi in rs:
             seeds.update(dbmod.nodes_for_lines(conn, f, lo, hi))
+
+    # Whole-file changes (deletions, renames) have no line ranges to map: seed
+    # every symbol the file contains. A file deleted in `head` is usually absent
+    # from an index built at `head`, so this resolves only when the index still
+    # predates the deletion (e.g. the per-commit harness). When it does not
+    # resolve, impact is UNBOUNDED — we cannot know what depended on it — and
+    # recall-first means saying so loudly rather than returning a narrow answer.
+    unmapped = []
+    for path, reason in whole_files.items():
+        nodes = dbmod.nodes_in_file(conn, path)
+        if nodes:
+            seeds.update(nodes)
+        else:
+            unmapped.append(f"{path} ({reason})")
 
     impacted = dbmod.impacted_closure(conn, seeds)
     entry_map = reg.resolve_entries(conn, registry)
@@ -116,11 +165,36 @@ def select(repo, base, head, db_path, registry_path):
                 "verify_manually": conf <= dbmod.LOW_CONFIDENCE,
             }
         )
+    # Unmappable whole-file change -> unbounded impact. Add every journey the
+    # closure did not already select, flagged for manual verification, so the
+    # answer degrades toward "test everything" instead of toward silence.
+    if unmapped:
+        warnings.append(
+            f"{len(unmapped)} whole-file change(s) not in the index "
+            f"({', '.join(unmapped)}) — impact is unbounded; all journeys listed"
+        )
+        selected = {j["id"] for j in journeys}
+        for jid in registry.get("journeys", {}):
+            if jid not in selected:
+                journeys.append(
+                    {
+                        "id": jid,
+                        "name": reg.journey_name(registry, jid),
+                        "entries_hit": 0,
+                        "rank": 0,
+                        "confidence": 0.0,
+                        "verify_manually": True,
+                        "reason": "unmappable whole-file change",
+                    }
+                )
+
     journeys.sort(key=lambda j: (-j["rank"], j["id"]))
 
     result.update(
         status="OK",
         changed_files=sorted(ranges),
+        whole_file_changes=whole_files,
+        recall_degraded=bool(unmapped),
         seed_symbols=len(seeds),
         impacted_symbols=len(impacted),
         journeys=journeys,
@@ -141,6 +215,10 @@ def _render(result):
         f"changed .py: {len(result['changed_files'])} | "
         f"seeds: {result['seed_symbols']} | impacted symbols: {result['impacted_symbols']}"
     )
+    for path, reason in sorted(result.get("whole_file_changes", {}).items()):
+        lines.append(f"  whole-file: {path} ({reason})")
+    if result.get("recall_degraded"):
+        lines.append("  RECALL DEGRADED — unbounded impact, all journeys listed")
     if not result["journeys"]:
         lines.append("journeys to test: NONE (no product-behavior change detected)")
     else:

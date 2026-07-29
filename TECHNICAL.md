@@ -100,6 +100,29 @@ python3 harness/accuracy.py             # recall/precision on labeled commits
 codegraph index <repo>                  # rebuild a target index (NOT sync, on corruption)
 ```
 
+## Schema Pin (R1)
+
+`integrity.check()` reads the index's `schema_versions` row and compares it to
+`codegraph_schema_version` in the registry (currently `8`). Mismatch, or a pin
+with no row present, is **blocking** — codegraph's SQLite layout is an internal
+contract, so a renamed column would make the closure query return wrong rows
+rather than error. No pin in the registry downgrades to a warning that names the
+version to add.
+
+## Whole-File Changes (deletions and renames)
+
+Deletions and renames carry no usable line ranges, and both used to vanish
+silently: a deletion's `+++` header is `/dev/null` (not a `.py` path, so the file
+was dropped), and a pure rename emits no `@@` hunks at all. `git diff` runs with
+`-M` so a move is read as a rename rather than an unrelated delete + add.
+
+Each such path is seeded with *every* symbol the file contains. When the path is
+absent from the index — the normal case for a file deleted in `head` — its impact
+is **unbounded**, so the result sets `recall_degraded: true`, warns, and lists
+every registered journey with `verify_manually: true`. Degrading toward "test
+everything" is the recall-first answer; degrading toward silence is the failure
+mode the whole project exists to prevent.
+
 ## Path Confidence (B1)
 
 Each `calls`/`imports`/`references` edge carries `metadata.confidence` (observed
@@ -137,9 +160,12 @@ the heuristic cap is retained because it starts earning once TS/JSX journeys lan
   `scheduler.start`). Missing entries cause silent under-selection.
 - **Index integrity is the tool's soundness ceiling.** The guard mitigates but
   cannot fully verify a graph; a subtly wrong index yields wrong answers.
-- **Schema coupling:** reads codegraph's SQLite columns directly, so a codegraph
-  upgrade could break it. Pin/verify `schema_versions` before trusting output.
-- **Deleted files / renames** are not mapped as seeds in the spike.
+- **Deleted files absent from the index cannot be bounded.** A file deleted in
+  `head` is normally gone from an index built at `head`, so its former
+  dependents are unknowable. testgraph degrades to listing every journey with
+  `recall_degraded: true` rather than answering narrowly — correct, but useless
+  for selectivity on such commits. A base-time index (as the harness builds)
+  resolves them properly.
 - **Confidence rarely fires on honeyslate's labeled commits.** The mechanism is
   live (a weak-edge seed propagates ≤0.6 through 149 nodes on the real index),
   but all 5 harness commits reach their journey entries via 0.9 routes, so no
