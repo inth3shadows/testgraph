@@ -125,6 +125,12 @@ call-path evidence) or `selector-miss` (a real recall bug — fix the closure).
 Unadjudicated disagreements fail the run deliberately, and the oracle is never
 tuned to agree.
 
+Each verdict records the `base_sha` it was adjudicated against. An excuse is a
+claim about a call path at a point in time: if the code moves, the path may now
+exist and a stale excuse would suppress a real miss — this project's own failure
+mode, reintroduced inside its harness. Mismatches print as `STALE EXCUSES` and
+fail under `--strict-adjudications`.
+
 Current result: **20 sites, adjudicated recall 1.00, mean worst rank 3.17, mean
 3.33 of 8 journeys named.** Three disagreements, all adjudicated as oracle false
 positives with sole-caller evidence.

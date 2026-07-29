@@ -1,35 +1,50 @@
 {
-  "note": "Hand-adjudicated disagreements between the AST oracle and the selector. A disagreement is NOT a selector miss until someone reads the call path and records the verdict here. Verdicts: 'oracle-false-positive' (no real path exists; the selector was right) or 'selector-miss' (a real path exists that the closure cannot see -> a recall bug, fix the closure). Unadjudicated disagreements fail the run on purpose.",
+  "note": "Hand-adjudicated disagreements between the AST oracle and the selector. A disagreement is NOT a selector miss until someone reads the call path and records the verdict here. Verdicts: 'oracle-false-positive' (no real path exists; the selector was right) or 'selector-miss' (a real path exists that the closure cannot see -> a recall bug, fix the closure). Unadjudicated disagreements fail the run on purpose. Each verdict records the base_sha it was adjudicated against; when the run's base differs, the excuse is reported STALE because the call path it rests on may have changed.",
   "verdicts": {
     "backend/app/google_calendar.py:get_managed_calendar_id": {
       "verdict": "oracle-false-positive",
-      "journeys": ["J3"],
+      "journeys": [
+        "J3"
+      ],
       "evidence": "get_managed_calendar_id <- gcal_sync.py:69 (inside sync_channel) <- scheduler.py:64 ONLY. No path from patch_task (J3); grep for gcal/calendar/push in patch_task's body returns nothing.",
-      "adjudicated": "2026-07-29"
+      "adjudicated": "2026-07-29",
+      "base_sha": "1cd0385"
     },
     "backend/app/google_calendar.py:watch_calendar": {
       "verdict": "oracle-false-positive",
-      "journeys": ["J3"],
+      "journeys": [
+        "J3"
+      ],
       "evidence": "watch_calendar <- gcal_sync.py:71 (inside sync_channel) <- scheduler.py:64 ONLY. Same sole-caller chain as get_managed_calendar_id; J3 cannot reach it.",
-      "adjudicated": "2026-07-29"
+      "adjudicated": "2026-07-29",
+      "base_sha": "1cd0385"
     },
     "backend/app/placement.py:_parse_days": {
       "verdict": "oracle-false-positive",
-      "journeys": ["J7"],
+      "journeys": [
+        "J7"
+      ],
       "evidence": "_parse_days <- parse_window <- parse_windows <- place_task, whose only callers are routers/tasks.py:163 and scheduler.py:53. reconcile/_apply_event (the gcal_push background path) contain no placement references.",
-      "adjudicated": "2026-07-29"
+      "adjudicated": "2026-07-29",
+      "base_sha": "1cd0385"
     },
     "backend/app/placement.py:parse_window": {
       "verdict": "oracle-false-positive",
-      "journeys": ["J7"],
+      "journeys": [
+        "J7"
+      ],
       "evidence": "Same chain as _parse_days: parse_window <- parse_windows <- place_task <- {routers/tasks.py:163, scheduler.py:53}. gcal_push reaches neither.",
-      "adjudicated": "2026-07-29"
+      "adjudicated": "2026-07-29",
+      "base_sha": "1cd0385"
     },
     "backend/app/notifications.py:digest_configured": {
       "verdict": "oracle-false-positive",
-      "journeys": ["J7"],
+      "journeys": [
+        "J7"
+      ],
       "evidence": "Callers are scheduler.py:58/107 (J8), routers/tasks.py:164 (J1-J5), routers/auth.py:85 (J6), cli.py:64 (not a journey), and notifications.py internals. gcal_sync.py contains no notifications import or call, so J7 has no path.",
-      "adjudicated": "2026-07-29"
+      "adjudicated": "2026-07-29",
+      "base_sha": "1cd0385"
     }
   }
 }
