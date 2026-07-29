@@ -118,8 +118,21 @@ def main(argv=None):
                              "honeyslate.json"),
     )
     ap.add_argument("--out", default=None, help="markdown output path (default stdout)")
+    ap.add_argument(
+        "--into-target", action="store_true",
+        help="write to <repo>/.testgraph/journey-map.md so the map lives in the "
+             "repo it describes and the agent skill finds it without a "
+             "central-store lookup (issue #20)",
+    )
     ap.add_argument("--json", dest="json_out", default=None)
     args = ap.parse_args(argv)
+
+    if args.into_target:
+        if args.out:
+            print("--out and --into-target are mutually exclusive", file=sys.stderr)
+            return 2
+        args.out = os.path.join(args.repo, ".testgraph", "journey-map.md")
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
 
     db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
     conn = dbmod.connect(db_path)
