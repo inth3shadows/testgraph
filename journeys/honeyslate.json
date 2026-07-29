@@ -23,6 +23,7 @@
       {"name": "sweep", "file": "scheduler.py"},
       {"name": "start", "file": "scheduler.py"}]}
   },
+  "codegraph_schema_version": 8,
   "spot_checks": {
     "get_settings": {"min_caller_edges": 10, "file": "config.py"},
     "Task": {"min_caller_edges": 8, "file": "models.py"}

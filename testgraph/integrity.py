@@ -15,8 +15,31 @@ import os
 from . import db as dbmod
 
 
-def check(conn, repo_root, spot_checks, pending_max=0):
+def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None):
     blocking, warnings = [], []
+
+    # 0. schema pin (plan risk R1). codegraph's SQLite layout is an internal
+    #    contract, not a public API: a renamed column in a codegraph upgrade
+    #    would make the closure query return wrong rows rather than error, and a
+    #    confidently-narrow answer is the one failure mode a selector must never
+    #    have. Block on drift; the registry carries the known-good version.
+    found = dbmod.schema_version(conn)
+    if schema_pin is None:
+        warnings.append(
+            f"codegraph schema version unpinned (index reports {found}) — add "
+            f'"codegraph_schema_version": {found} to the registry to detect drift'
+        )
+    elif found is None:
+        blocking.append(
+            f"registry pins codegraph schema {schema_pin} but the index reports "
+            f"no schema_versions row — cannot verify column semantics"
+        )
+    elif found != schema_pin:
+        blocking.append(
+            f"codegraph schema {found} != pinned {schema_pin} — column semantics "
+            f"may have changed; re-verify testgraph's queries against the new "
+            f"schema, then update the registry pin"
+        )
 
     # 1. pending unresolved refs (terminal 'failed' refs are external stdlib —
     #    ignored; only non-terminal 'pending' indicates an incomplete index).

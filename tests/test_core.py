@@ -2,9 +2,13 @@
 they run without codegraph. Covers S2 (guard blocks a corrupted index) and the
 recall-critical closure behaviors (imports edge + file-expansion; leaf stays
 tight)."""
+import json
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
+import tempfile
 import time
 import unittest
 
@@ -25,6 +29,8 @@ def build_fixture():
             kind TEXT, metadata TEXT, provenance TEXT);
         CREATE TABLE unresolved_refs(id INTEGER PRIMARY KEY, status TEXT);
         CREATE TABLE files(path TEXT, language TEXT, indexed_at INTEGER);
+        CREATE TABLE schema_versions(version INT, applied_at INT, note TEXT);
+        INSERT INTO schema_versions VALUES (8, 0, 'fixture');
         """
     )
     nodes = [
@@ -146,6 +152,28 @@ class IntegrityTests(unittest.TestCase):
         blocking, _ = integrity.check(self.conn, "/nonexistent", {})
         self.assertTrue(any("pending" in b for b in blocking))
 
+    def test_matching_schema_pin_passes(self):
+        blocking, warnings = integrity.check(
+            self.conn, "/nonexistent", {}, schema_pin=8
+        )
+        self.assertEqual(blocking, [])
+        self.assertFalse(any("unpinned" in w for w in warnings))
+
+    def test_schema_drift_blocks(self):
+        # a codegraph upgrade that renames a column must fail loud, not return
+        # a confidently-wrong narrow answer (plan risk R1).
+        blocking, _ = integrity.check(self.conn, "/nonexistent", {}, schema_pin=9)
+        self.assertTrue(any("schema 8 != pinned 9" in b for b in blocking))
+
+    def test_pin_without_schema_row_blocks(self):
+        self.conn.execute("DROP TABLE schema_versions")
+        blocking, _ = integrity.check(self.conn, "/nonexistent", {}, schema_pin=8)
+        self.assertTrue(any("no schema_versions row" in b for b in blocking))
+
+    def test_unpinned_schema_warns(self):
+        _, warnings = integrity.check(self.conn, "/nonexistent", {})
+        self.assertTrue(any("unpinned" in w for w in warnings))
+
 
 class DiffParseTests(unittest.TestCase):
     def test_addition_seeds_range(self):
@@ -154,20 +182,132 @@ class DiffParseTests(unittest.TestCase):
             "--- a/app/svc.py\n+++ b/app/svc.py\n"
             "@@ -10,0 +11,3 @@\n+x\n+y\n+z\n"
         )
-        self.assertEqual(sel._parse_unified_diff(diff), {"app/svc.py": [(11, 13)]})
+        self.assertEqual(
+            sel._parse_unified_diff(diff), ({"app/svc.py": [(11, 13)]}, {})
+        )
 
     def test_deletion_only_still_seeds(self):
         # +124,0 is a pure deletion — must STILL seed (recall-first regression).
         diff = "--- a/app/svc.py\n+++ b/app/svc.py\n@@ -125,3 +124,0 @@\n"
-        self.assertEqual(sel._parse_unified_diff(diff), {"app/svc.py": [(124, 125)]})
+        self.assertEqual(
+            sel._parse_unified_diff(diff), ({"app/svc.py": [(124, 125)]}, {})
+        )
 
-    def test_deleted_file_not_seeded(self):
+    def test_deleted_file_is_a_whole_file_change(self):
+        # '+++ /dev/null' used to drop the file entirely — the surviving path is
+        # on the '---' line, and its dependents still need selecting.
         diff = "--- a/app/svc.py\n+++ /dev/null\n@@ -1,5 +0,0 @@\n"
-        self.assertEqual(sel._parse_unified_diff(diff), {})
+        ranges, whole = sel._parse_unified_diff(diff)
+        self.assertEqual(ranges, {})
+        self.assertEqual(whole, {"app/svc.py": "deleted"})
+
+    def test_rename_with_no_content_change_is_caught(self):
+        # a pure rename emits no '@@' hunks at all, but changes the module path
+        # for every importer.
+        diff = (
+            "diff --git a/app/old.py b/app/new.py\n"
+            "similarity index 100%\n"
+            "rename from app/old.py\nrename to app/new.py\n"
+        )
+        ranges, whole = sel._parse_unified_diff(diff)
+        self.assertEqual(ranges, {})
+        self.assertEqual(whole, {"app/old.py": "renamed from", "app/new.py": "renamed to"})
+
+    def test_deleted_test_file_still_ignored(self):
+        diff = "--- a/app/tests/test_x.py\n+++ /dev/null\n@@ -1,5 +0,0 @@\n"
+        self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
 
     def test_test_files_excluded(self):
         diff = "+++ b/backend/tests/test_x.py\n@@ -1,0 +1,2 @@\n+a\n+b\n"
-        self.assertEqual(sel._parse_unified_diff(diff), {})
+        self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
+
+
+class WholeFileSelectTests(unittest.TestCase):
+    """End-to-end over a real git repo + a fixture index, covering the two
+    deleted-file cases: the index still has the file (seeds resolve) and the
+    index has already dropped it (impact unbounded -> degrade to all journeys)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.repo = os.path.join(self.tmp, "repo")
+        os.makedirs(os.path.join(self.repo, "app"))
+        run = lambda *a: subprocess.run(
+            a, cwd=self.repo, check=True, capture_output=True
+        )
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "t@t")
+        run("git", "config", "user.name", "t")
+        with open(os.path.join(self.repo, "app", "gone.py"), "w") as fh:
+            fh.write("def doomed():\n    return 1\n")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "add")
+        os.remove(os.path.join(self.repo, "app", "gone.py"))
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "delete")
+
+        self.registry = os.path.join(self.tmp, "reg.json")
+        with open(self.registry, "w") as fh:
+            json.dump(
+                {
+                    "codegraph_schema_version": 8,
+                    "journeys": {
+                        "J1": {
+                            "name": "j one",
+                            "entries": [{"name": "handler_a", "file": "app/svc.py"}],
+                        },
+                        "J2": {
+                            "name": "j two",
+                            "entries": [{"name": "leaf", "file": "app/leaf.py"}],
+                        },
+                    },
+                    "spot_checks": {},
+                },
+                fh,
+            )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _db(self, with_deleted_file):
+        path = os.path.join(self.tmp, "cg.db")
+        if os.path.exists(path):
+            os.remove(path)
+        src = build_fixture()
+        dst = sqlite3.connect(path)
+        src.backup(dst)
+        if with_deleted_file:
+            # index predates the deletion: gone.py's symbol is still present and
+            # handler_a imports it, so J1 must be selected.
+            dst.execute(
+                "INSERT INTO nodes VALUES "
+                "('function:doomed','function','doomed','doomed','app/gone.py',1,2)"
+            )
+            dst.execute(
+                "INSERT INTO edges(source,target,kind,metadata,provenance) VALUES "
+                "('function:handler_a','function:doomed','calls','{\"confidence\":0.9}',NULL)"
+            )
+            dst.commit()
+        dst.close()
+        return path
+
+    def test_deleted_file_in_index_seeds_its_dependents(self):
+        res = sel.select(
+            self.repo, "HEAD~1", "HEAD", self._db(True), self.registry
+        )
+        self.assertEqual(res["status"], "OK")
+        self.assertEqual(res["whole_file_changes"], {"app/gone.py": "deleted"})
+        self.assertFalse(res["recall_degraded"])
+        self.assertIn("J1", [j["id"] for j in res["journeys"]])
+
+    def test_deleted_file_absent_from_index_degrades_to_all_journeys(self):
+        res = sel.select(
+            self.repo, "HEAD~1", "HEAD", self._db(False), self.registry
+        )
+        self.assertEqual(res["status"], "OK")
+        self.assertTrue(res["recall_degraded"])
+        self.assertEqual({"J1", "J2"}, {j["id"] for j in res["journeys"]})
+        self.assertTrue(all(j["verify_manually"] for j in res["journeys"]))
+        self.assertTrue(any("unbounded" in w for w in res["warnings"]))
 
 
 if __name__ == "__main__":

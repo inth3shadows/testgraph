@@ -64,6 +64,18 @@ def nodes_for_lines(conn, file_path, lo, hi):
     ]
 
 
+def nodes_in_file(conn, file_path):
+    """Every symbol node in `file_path`. Used to seed whole-file changes
+    (deletions, renames) where there are no line ranges to map."""
+    return [
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM nodes WHERE file_path = ? AND kind != 'file'",
+            (file_path,),
+        )
+    ]
+
+
 def file_node_id(conn, file_path):
     row = conn.execute(
         "SELECT id FROM nodes WHERE file_path = ? AND kind = 'file' LIMIT 1",
