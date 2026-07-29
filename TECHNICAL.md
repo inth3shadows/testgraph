@@ -120,9 +120,28 @@ reads as "no journeys affected".
 
 Current map: 137 symbols across 21 files (8.4 KB).
 
-`skills/testgraph-verify/SKILL.md` is the consumer: it tells an agent to union
-the journeys for its changed lines, never to narrow the set on a hunch, and to
-flag a stale `generated from commit` header.
+### Where the map lives
+
+`--into-target` writes to `<repo>/.testgraph/journey-map.md`, so the map sits in
+the repo it describes and is versioned alongside it. The default `--out` keeps a
+copy under `maps/` in this repo. The skill resolves, in order: `$TESTGRAPH_MAP`,
+then `<repo-root>/.testgraph/journey-map.md`, then
+`~/personal_projects/testgraph/main/maps/<repo-basename>.md`.
+
+### The consumer's escalation contract
+
+`skills/testgraph-verify/SKILL.md` matches rows by **symbol name**, treating line
+ranges as a hint — they are frozen at the generation commit while the agent's own
+edit has already shifted them.
+
+Crucially, the map only lists symbols that existed when it was generated, so the
+skill escalates to `testgraph.select` rather than concluding, for: an added symbol
+or file, a deletion or rename (where `select` reports unbounded impact the map
+cannot express), a file with no section at all, and a stale commit stamp. A symbol
+counts as "no journeys" **only** when the map covers its file and lists other
+symbols from it; every other absence is *unknown*. Reporting "none" for an unknown
+is the most harmful thing the skill can do, and an earlier draft instructed
+exactly that.
 
 ## Seeded-Regression Eval (issue #5)
 
