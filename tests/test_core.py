@@ -15,6 +15,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from testgraph import db as dbmod  # noqa: E402
 from testgraph import integrity  # noqa: E402
+from testgraph import registry as reg  # noqa: E402
+from testgraph import export as exp  # noqa: E402
 from testgraph import select as sel  # noqa: E402
 
 
@@ -308,6 +310,58 @@ class WholeFileSelectTests(unittest.TestCase):
         self.assertEqual({"J1", "J2"}, {j["id"] for j in res["journeys"]})
         self.assertTrue(all(j["verify_manually"] for j in res["journeys"]))
         self.assertTrue(any("unbounded" in w for w in res["warnings"]))
+
+
+class ExportMapTests(unittest.TestCase):
+    """The map is the selector's reverse index. If it disagrees with select() it
+    is worse than absent, because an agent would trust it."""
+
+    REG = {
+        "journeys": {
+            "J1": {"name": "one", "entries": [{"name": "handler_a",
+                                               "file": "app/svc.py"}]},
+            "J2": {"name": "two", "entries": [{"name": "leaf",
+                                               "file": "app/leaf.py"}]},
+        },
+        "spot_checks": {},
+    }
+
+    def setUp(self):
+        self.conn = build_fixture()
+        self.rows = exp.build_map(self.conn, self.REG)
+
+    def _row(self, path, symbol):
+        return next(r for r in self.rows[path] if r["symbol"] == symbol)
+
+    def test_entry_symbol_maps_to_its_own_journey(self):
+        self.assertEqual(self._row("app/svc.py", "handler_a")["journeys"], ["J1"])
+
+    def test_shared_global_fans_out_through_imports(self):
+        # get_settings reaches handler_a via the imports edge + file expansion,
+        # the recall path the closure exists for.
+        self.assertEqual(
+            self._row("app/config.py", "get_settings")["journeys"], ["J1"]
+        )
+
+    def test_symbol_reaching_nothing_is_omitted(self):
+        # mid_a/top are in no journey's closure -> absent, which the skill reads
+        # as "no journeys affected".
+        present = {r["symbol"] for rows in self.rows.values() for r in rows}
+        self.assertNotIn("top", present)
+
+    def test_map_agrees_with_closure_for_every_row(self):
+        entry_map = reg.resolve_entries(self.conn, self.REG)
+        for path, rows in self.rows.items():
+            for r in rows:
+                nid = dbmod.nodes_for_lines(self.conn, path, *r["lines"])
+                closure = dbmod.impacted_closure(self.conn, set(nid))
+                reachable = {jid for e, jid in entry_map.items() if e in closure}
+                # line-overlap can pull in neighbouring symbols, so the row is a
+                # subset of what a diff on those lines would select -- never more.
+                self.assertTrue(
+                    set(r["journeys"]) <= reachable,
+                    f"{path}:{r['symbol']} map={r['journeys']} > select={reachable}",
+                )
 
 
 if __name__ == "__main__":

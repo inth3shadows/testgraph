@@ -1,0 +1,2813 @@
+{
+  "meta": {
+    "repo": "/home/ericm/personal_projects/honeyslate/main",
+    "schema": 8,
+    "commit": "1cd0385",
+    "symbols": 137
+  },
+  "files": {
+    "backend/app/auth_service.py": [
+      {
+        "symbol": "sqlalchemy.orm",
+        "kind": "import",
+        "lines": [
+          7,
+          7
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          13,
+          13
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "create_magic_link",
+        "kind": "function",
+        "lines": [
+          16,
+          30
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "consume_magic_link",
+        "kind": "function",
+        "lines": [
+          33,
+          53
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/config.py": [
+      {
+        "symbol": "ENV_FILE",
+        "kind": "variable",
+        "lines": [
+          13,
+          13
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "Settings",
+        "kind": "class",
+        "lines": [
+          16,
+          78
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "get_settings",
+        "kind": "function",
+        "lines": [
+          84,
+          89
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "load_type_windows",
+        "kind": "function",
+        "lines": [
+          92,
+          109
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/db.py": [
+      {
+        "symbol": "collections.abc",
+        "kind": "import",
+        "lines": [
+          4,
+          4
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "sqlalchemy.orm",
+        "kind": "import",
+        "lines": [
+          7,
+          7
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "Base",
+        "kind": "class",
+        "lines": [
+          12,
+          13
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "SessionLocal",
+        "kind": "variable",
+        "lines": [
+          22,
+          22
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "get_db",
+        "kind": "function",
+        "lines": [
+          25,
+          31
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/deps.py": [
+      {
+        "symbol": "sqlalchemy.orm",
+        "kind": "import",
+        "lines": [
+          6,
+          6
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "require_user",
+        "kind": "function",
+        "lines": [
+          34,
+          37
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "require_operator",
+        "kind": "function",
+        "lines": [
+          40,
+          43
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/gcal_sync.py": [
+      {
+        "symbol": "sync_channel",
+        "kind": "function",
+        "lines": [
+          36,
+          91
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "reconcile",
+        "kind": "function",
+        "lines": [
+          94,
+          133
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_parse_gcal_time",
+        "kind": "function",
+        "lines": [
+          136,
+          146
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_apply_event",
+        "kind": "function",
+        "lines": [
+          149,
+          187
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/google_calendar.py": [
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          25,
+          25
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "SCOPES",
+        "kind": "variable",
+        "lines": [
+          28,
+          28
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "CALENDAR_SUMMARY",
+        "kind": "variable",
+        "lines": [
+          29,
+          29
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "calendar_configured",
+        "kind": "function",
+        "lines": [
+          33,
+          36
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_build_service",
+        "kind": "function",
+        "lines": [
+          49,
+          66
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_resolve_calendar",
+        "kind": "function",
+        "lines": [
+          69,
+          105
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_event_time",
+        "kind": "function",
+        "lines": [
+          108,
+          109
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "delete_event",
+        "kind": "function",
+        "lines": [
+          112,
+          121
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "push_block",
+        "kind": "function",
+        "lines": [
+          124,
+          146
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "get_managed_calendar_id",
+        "kind": "function",
+        "lines": [
+          149,
+          152
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "SyncTokenExpiredError",
+        "kind": "class",
+        "lines": [
+          160,
+          161
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "watch_calendar",
+        "kind": "function",
+        "lines": [
+          164,
+          198
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "stop_watch",
+        "kind": "function",
+        "lines": [
+          201,
+          211
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "initial_sync",
+        "kind": "function",
+        "lines": [
+          214,
+          234
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "list_events_incremental",
+        "kind": "function",
+        "lines": [
+          237,
+          274
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/models.py": [
+      {
+        "symbol": "sqlalchemy.orm",
+        "kind": "import",
+        "lines": [
+          22,
+          22
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "STATUSES",
+        "kind": "variable",
+        "lines": [
+          28,
+          28
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.7,
+          "J2": 0.7,
+          "J3": 0.7,
+          "J4": 0.7,
+          "J5": 0.7
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_ts",
+        "kind": "function",
+        "lines": [
+          32,
+          33
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "User",
+        "kind": "class",
+        "lines": [
+          36,
+          45
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "Session",
+        "kind": "class",
+        "lines": [
+          48,
+          60
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "MagicLink",
+        "kind": "class",
+        "lines": [
+          63,
+          73
+        ],
+        "journeys": [
+          "J6",
+          "J8"
+        ],
+        "confidence": {
+          "J6": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "TaskType",
+        "kind": "class",
+        "lines": [
+          76,
+          81
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "Task",
+        "kind": "class",
+        "lines": [
+          84,
+          121
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "Comment",
+        "kind": "class",
+        "lines": [
+          124,
+          141
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "CalendarBlock",
+        "kind": "class",
+        "lines": [
+          144,
+          160
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "GcalChannel",
+        "kind": "class",
+        "lines": [
+          163,
+          181
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/notifications.py": [
+      {
+        "symbol": "email.message",
+        "kind": "import",
+        "lines": [
+          11,
+          11
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          21,
+          21
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "digest_configured",
+        "kind": "function",
+        "lines": [
+          24,
+          25
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_send_email",
+        "kind": "function",
+        "lines": [
+          46,
+          55
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "send_scheduled",
+        "kind": "function",
+        "lines": [
+          58,
+          75
+        ],
+        "journeys": [
+          "J3",
+          "J8"
+        ],
+        "confidence": {
+          "J3": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "send_login_link",
+        "kind": "function",
+        "lines": [
+          89,
+          97
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "send_task_update",
+        "kind": "function",
+        "lines": [
+          100,
+          117
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/placement.py": [
+      {
+        "symbol": "sqlalchemy.orm",
+        "kind": "import",
+        "lines": [
+          15,
+          15
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "Busy",
+        "kind": "variable",
+        "lines": [
+          22,
+          22
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          24,
+          24
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_DAYS",
+        "kind": "variable",
+        "lines": [
+          26,
+          26
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_OVERRUN_DAYS",
+        "kind": "variable",
+        "lines": [
+          28,
+          28
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "Window",
+        "kind": "class",
+        "lines": [
+          32,
+          37
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_parse_days",
+        "kind": "function",
+        "lines": [
+          40,
+          50
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "parse_window",
+        "kind": "function",
+        "lines": [
+          53,
+          59
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "parse_windows",
+        "kind": "function",
+        "lines": [
+          62,
+          68
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_first_free",
+        "kind": "function",
+        "lines": [
+          71,
+          90
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "find_slot",
+        "kind": "function",
+        "lines": [
+          93,
+          125
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "find_earliest_slot",
+        "kind": "function",
+        "lines": [
+          128,
+          137
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "place_task",
+        "kind": "function",
+        "lines": [
+          140,
+          170
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/routers/auth.py": [
+      {
+        "symbol": "fastapi.responses",
+        "kind": "import",
+        "lines": [
+          7,
+          7
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.95
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "sqlalchemy.orm",
+        "kind": "import",
+        "lines": [
+          10,
+          10
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.95
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          23,
+          23
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "MagicLinkResponse",
+        "kind": "class",
+        "lines": [
+          30,
+          31
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "RequestLinkResponse",
+        "kind": "class",
+        "lines": [
+          34,
+          35
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_GENERIC_REQUEST_MESSAGE",
+        "kind": "variable",
+        "lines": [
+          38,
+          38
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_set_session_cookie",
+        "kind": "function",
+        "lines": [
+          48,
+          57
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "mint_magic_link",
+        "kind": "function",
+        "lines": [
+          61,
+          70
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "request_link",
+        "kind": "function",
+        "lines": [
+          74,
+          108
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "consume",
+        "kind": "function",
+        "lines": [
+          112,
+          119
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "logout",
+        "kind": "function",
+        "lines": [
+          123,
+          137
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "me",
+        "kind": "function",
+        "lines": [
+          141,
+          142
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 1.0
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/routers/tasks.py": [
+      {
+        "symbol": "sqlalchemy.orm",
+        "kind": "import",
+        "lines": [
+          16,
+          16
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.95,
+          "J2": 0.95,
+          "J3": 0.95,
+          "J4": 0.95,
+          "J5": 0.95
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          37,
+          37
+        ],
+        "journeys": [
+          "J4"
+        ],
+        "confidence": {
+          "J4": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_fmt_dt",
+        "kind": "function",
+        "lines": [
+          40,
+          43
+        ],
+        "journeys": [
+          "J4"
+        ],
+        "confidence": {
+          "J4": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_notify_others",
+        "kind": "function",
+        "lines": [
+          46,
+          57
+        ],
+        "journeys": [
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_SUBMITTER_FIELDS",
+        "kind": "variable",
+        "lines": [
+          62,
+          62
+        ],
+        "journeys": [
+          "J3"
+        ],
+        "confidence": {
+          "J3": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_validate_type",
+        "kind": "function",
+        "lines": [
+          65,
+          67
+        ],
+        "journeys": [
+          "J1",
+          "J3"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J3": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_get_task_or_404",
+        "kind": "function",
+        "lines": [
+          70,
+          74
+        ],
+        "journeys": [
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "list_task_types",
+        "kind": "function",
+        "lines": [
+          78,
+          79
+        ],
+        "journeys": [
+          "J2"
+        ],
+        "confidence": {
+          "J2": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "list_tasks",
+        "kind": "function",
+        "lines": [
+          83,
+          93
+        ],
+        "journeys": [
+          "J2"
+        ],
+        "confidence": {
+          "J2": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "get_task",
+        "kind": "function",
+        "lines": [
+          97,
+          98
+        ],
+        "journeys": [
+          "J2"
+        ],
+        "confidence": {
+          "J2": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "create_task",
+        "kind": "function",
+        "lines": [
+          102,
+          120
+        ],
+        "journeys": [
+          "J1"
+        ],
+        "confidence": {
+          "J1": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "patch_task",
+        "kind": "function",
+        "lines": [
+          124,
+          175
+        ],
+        "journeys": [
+          "J3"
+        ],
+        "confidence": {
+          "J3": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "reschedule_task",
+        "kind": "function",
+        "lines": [
+          193,
+          215
+        ],
+        "journeys": [
+          "J4"
+        ],
+        "confidence": {
+          "J4": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "list_comments",
+        "kind": "function",
+        "lines": [
+          219,
+          227
+        ],
+        "journeys": [
+          "J5"
+        ],
+        "confidence": {
+          "J5": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "add_comment",
+        "kind": "function",
+        "lines": [
+          231,
+          245
+        ],
+        "journeys": [
+          "J5"
+        ],
+        "confidence": {
+          "J5": 1.0
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/routers/webhooks.py": [
+      {
+        "symbol": "gcal_push",
+        "kind": "function",
+        "lines": [
+          19,
+          40
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 1.0
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/scheduler.py": [
+      {
+        "symbol": "apscheduler.jobstores.sqlalchemy",
+        "kind": "import",
+        "lines": [
+          17,
+          17
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.95
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "apscheduler.schedulers.background",
+        "kind": "import",
+        "lines": [
+          18,
+          18
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.95
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          28,
+          28
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "sweep",
+        "kind": "function",
+        "lines": [
+          32,
+          81
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "start",
+        "kind": "function",
+        "lines": [
+          84,
+          120
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 1.0
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/scheduling.py": [
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          8,
+          8
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "compute_due_date",
+        "kind": "function",
+        "lines": [
+          11,
+          22
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/schemas.py": [
+      {
+        "symbol": "TaskCreate",
+        "kind": "class",
+        "lines": [
+          11,
+          17
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "TaskPatch",
+        "kind": "class",
+        "lines": [
+          20,
+          34
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "status_is_valid",
+        "kind": "method",
+        "lines": [
+          33,
+          34
+        ],
+        "journeys": [
+          "J3"
+        ],
+        "confidence": {
+          "J3": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "TaskOut",
+        "kind": "class",
+        "lines": [
+          37,
+          53
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "TaskReschedule",
+        "kind": "class",
+        "lines": [
+          56,
+          60
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "TaskTypeOut",
+        "kind": "class",
+        "lines": [
+          63,
+          67
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "CommentCreate",
+        "kind": "class",
+        "lines": [
+          70,
+          71
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "CommentOut",
+        "kind": "class",
+        "lines": [
+          74,
+          82
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/security.py": [
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          18,
+          18
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "_serializer",
+        "kind": "variable",
+        "lines": [
+          19,
+          19
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "now",
+        "kind": "function",
+        "lines": [
+          22,
+          23
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6",
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "new_token",
+        "kind": "function",
+        "lines": [
+          26,
+          28
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "hash_token",
+        "kind": "function",
+        "lines": [
+          31,
+          32
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "sign_session",
+        "kind": "function",
+        "lines": [
+          35,
+          36
+        ],
+        "journeys": [
+          "J6"
+        ],
+        "confidence": {
+          "J6": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "unsign_session",
+        "kind": "function",
+        "lines": [
+          39,
+          44
+        ],
+        "journeys": [
+          "J1",
+          "J2",
+          "J3",
+          "J4",
+          "J5",
+          "J6"
+        ],
+        "confidence": {
+          "J1": 0.9,
+          "J2": 0.9,
+          "J3": 0.9,
+          "J4": 0.9,
+          "J5": 0.9,
+          "J6": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "frontend/src/lib/api.js": [
+      {
+        "symbol": "api",
+        "kind": "constant",
+        "lines": [
+          20,
+          33
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      }
+    ],
+    "frontend/src/lib/components/TaskDetail.svelte": [
+      {
+        "symbol": "TaskDetail",
+        "kind": "component",
+        "lines": [
+          1,
+          210
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "onClose",
+        "kind": "function",
+        "lines": [
+          7,
+          7
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "toLocalInput",
+        "kind": "function",
+        "lines": [
+          22,
+          27
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "loadComments",
+        "kind": "function",
+        "lines": [
+          29,
+          35
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "fmt",
+        "kind": "function",
+        "lines": [
+          82,
+          88
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      }
+    ],
+    "frontend/src/lib/queue.js": [
+      {
+        "symbol": "QUEUE_KEY",
+        "kind": "constant",
+        "lines": [
+          4,
+          4
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "TYPES_KEY",
+        "kind": "constant",
+        "lines": [
+          5,
+          5
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "readJSON",
+        "kind": "function",
+        "lines": [
+          7,
+          13
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "getQueue",
+        "kind": "function",
+        "lines": [
+          15,
+          17
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "enqueue",
+        "kind": "function",
+        "lines": [
+          19,
+          27
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "dequeue",
+        "kind": "function",
+        "lines": [
+          29,
+          37
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "cacheTypes",
+        "kind": "function",
+        "lines": [
+          39,
+          41
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "getCachedTypes",
+        "kind": "function",
+        "lines": [
+          43,
+          45
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      }
+    ],
+    "frontend/src/lib/stores.js": [
+      {
+        "symbol": "user",
+        "kind": "constant",
+        "lines": [
+          4,
+          4
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      }
+    ],
+    "frontend/src/routes/+page.svelte": [
+      {
+        "symbol": "queueCount",
+        "kind": "variable",
+        "lines": [
+          23,
+          23
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "refreshQueueCount",
+        "kind": "function",
+        "lines": [
+          48,
+          50
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "load",
+        "kind": "function",
+        "lines": [
+          52,
+          67
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "flushQueue",
+        "kind": "function",
+        "lines": [
+          69,
+          97
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "handleOnline",
+        "kind": "function",
+        "lines": [
+          99,
+          101
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      },
+      {
+        "symbol": "patch",
+        "kind": "function",
+        "lines": [
+          158,
+          165
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.5
+        },
+        "verify_manually": [
+          "J8"
+        ]
+      }
+    ]
+  }
+}
