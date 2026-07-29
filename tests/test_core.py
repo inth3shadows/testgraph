@@ -349,19 +349,49 @@ class ExportMapTests(unittest.TestCase):
         present = {r["symbol"] for rows in self.rows.values() for r in rows}
         self.assertNotIn("top", present)
 
-    def test_map_agrees_with_closure_for_every_row(self):
+    def test_map_equals_closure_for_unambiguous_rows(self):
+        """The invariant the whole design rests on.
+
+        The earlier version of this test asserted `row ⊆ reachable` while seeding
+        from the row's own line range -- which always contains the row's node, and
+        `impacted_closure` is monotone in its seed set, so it could never fail.
+        For rows whose line range maps to exactly ONE node there is no ambiguity,
+        so assert EQUALITY; only genuinely overlapping ranges get the subset form.
+        """
         entry_map = reg.resolve_entries(self.conn, self.REG)
+        checked_exact = 0
         for path, rows in self.rows.items():
             for r in rows:
-                nid = dbmod.nodes_for_lines(self.conn, path, *r["lines"])
-                closure = dbmod.impacted_closure(self.conn, set(nid))
+                nids = dbmod.nodes_for_lines(self.conn, path, *r["lines"])
+                closure = dbmod.impacted_closure(self.conn, set(nids))
                 reachable = {jid for e, jid in entry_map.items() if e in closure}
-                # line-overlap can pull in neighbouring symbols, so the row is a
-                # subset of what a diff on those lines would select -- never more.
-                self.assertTrue(
-                    set(r["journeys"]) <= reachable,
-                    f"{path}:{r['symbol']} map={r['journeys']} > select={reachable}",
-                )
+                if len(nids) == 1:
+                    checked_exact += 1
+                    self.assertEqual(
+                        set(r["journeys"]), reachable,
+                        f"{path}:{r['symbol']} map={r['journeys']} != "
+                        f"select={reachable}",
+                    )
+                else:
+                    self.assertTrue(set(r["journeys"]) <= reachable)
+        self.assertGreater(checked_exact, 0, "no unambiguous row exercised")
+
+    def test_weak_path_is_flagged_verify_manually(self):
+        """confidence/verify_manually is the map's only safety signal and had no
+        test: the fixture's 0.5 edge sat under `base`, which no entry depended on.
+        Anchor a journey on `mid_a`, reached from `base` only via that 0.5 hop."""
+        weak_reg = {
+            "journeys": {"JW": {"name": "weak", "entries": [
+                {"name": "mid_a", "file": "app/conf.py"}]}},
+            "spot_checks": {},
+        }
+        rows = exp.build_map(self.conn, weak_reg)
+        base_row = next(r for r in rows["app/conf.py"] if r["symbol"] == "base")
+        self.assertEqual(base_row["confidence"]["JW"], 0.5)
+        self.assertEqual(base_row["verify_manually"], ["JW"])
+        # and the entry itself is reached at full confidence, so NOT flagged
+        own = next(r for r in rows["app/conf.py"] if r["symbol"] == "mid_a")
+        self.assertEqual(own["verify_manually"], [])
 
 
 class UnresolvedJourneyTests(unittest.TestCase):

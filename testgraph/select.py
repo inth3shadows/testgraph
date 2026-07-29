@@ -21,14 +21,30 @@ from . import registry as reg
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
+# Extensions CodeGraph indexes for this stack. Previously only `.py` was
+# considered, so a change to any frontend file produced zero seeds and select
+# answered "journeys to test: NONE" -- while `export`'s map, which walks all
+# indexed nodes, listed those same files against J8. Two tools, different
+# answers, and the map was the correct one (issue #21). A path outside this set
+# simply has no nodes, so widening it cannot invent impact.
+PRODUCT_EXT = (".py", ".js", ".jsx", ".mjs", ".ts", ".tsx", ".svelte", ".vue")
+
+
+def _is_product(path):
+    return path.endswith(PRODUCT_EXT) and not _is_test(path)
+
 
 def _is_test(path):
     base = path.rsplit("/", 1)[-1]
     return (
         "/tests/" in path
         or "/e2e/" in path
+        or "/__tests__/" in path
         or base.startswith("test_")
         or base.endswith("_test.py")
+        # JS/TS conventions, now that non-Python paths are seeded
+        or ".test." in base
+        or ".spec." in base
     )
 
 
@@ -57,11 +73,11 @@ def _parse_unified_diff(diff):
             prev = p[2:] if p.startswith("a/") else None
         elif line.startswith("rename from "):
             p = line[len("rename from "):]
-            if p.endswith(".py") and not _is_test(p):
+            if _is_product(p):
                 whole_files[p] = "renamed from"
         elif line.startswith("rename to "):
             p = line[len("rename to "):]
-            if p.endswith(".py") and not _is_test(p):
+            if _is_product(p):
                 whole_files[p] = "renamed to"
         elif line.startswith("+++ ") and (
             line[4:].startswith("b/") or line[4:] == "/dev/null"
@@ -69,13 +85,13 @@ def _parse_unified_diff(diff):
             path = line[4:]
             if path == "/dev/null":
                 # whole-file deletion: the surviving path is on the '---' line
-                if prev and prev.endswith(".py") and not _is_test(prev):
+                if prev and _is_product(prev):
                     whole_files[prev] = "deleted"
                 cur = None
                 continue
             if path.startswith("b/"):
                 path = path[2:]
-            cur = path if path.endswith(".py") and not _is_test(path) else None
+            cur = path if _is_product(path) else None
             if cur is not None:
                 ranges.setdefault(cur, [])
         elif cur is not None and line.startswith("@@"):
@@ -234,7 +250,7 @@ def _render(result):
             lines.append(f"  x {b}")
         return "\n".join(lines)
     lines.append(
-        f"changed .py: {len(result['changed_files'])} | "
+        f"changed files: {len(result['changed_files'])} | "
         f"seeds: {result['seed_symbols']} | impacted symbols: {result['impacted_symbols']}"
     )
     for path, reason in sorted(result.get("whole_file_changes", {}).items()):

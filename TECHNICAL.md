@@ -223,6 +223,15 @@ every registered journey with `verify_manually: true`. Degrading toward "test
 everything" is the recall-first answer; degrading toward silence is the failure
 mode the whole project exists to prevent.
 
+## Non-Python Selection (issue #21)
+
+`PRODUCT_EXT` covers `.py/.js/.jsx/.mjs/.ts/.tsx/.svelte/.vue`. Previously only
+`.py` was seeded, so a frontend change produced zero seeds and `select` answered
+`journeys to test: NONE` — while `export`'s map, walking all indexed nodes, listed
+those same files against J8. Two tools, different answers, and the map was right.
+A path outside the set simply has no nodes, so widening cannot invent impact.
+`_is_test` gained the JS/TS conventions (`.test.`, `.spec.`, `__tests__/`).
+
 ## Path Confidence (B1)
 
 Each `calls`/`imports`/`references` edge carries `metadata.confidence` (observed
@@ -266,8 +275,10 @@ the heuristic cap is retained because it starts earning once TS/JSX journeys lan
   `recall_degraded: true` rather than answering narrowly — correct, but useless
   for selectivity on such commits. A base-time index (as the harness builds)
   resolves them properly.
-- **Confidence rarely fires on honeyslate's labeled commits.** The mechanism is
-  live (a weak-edge seed propagates ≤0.6 through 149 nodes on the real index),
-  but all 5 harness commits reach their journey entries via 0.9 routes, so no
-  `VERIFY MANUALLY` flag appears there. Its value is on shared/dynamic code
-  paths, and it will matter more once TS/JSX journeys are indexed.
+- **Precision is 0.68 with non-Python selection on, down from 0.84.** Widening
+  past `.py` (issue #21) added J8 as a false positive on two labeled commits,
+  both via frontend files. Recall stays 1.00. Crucially the additions arrive at
+  `confidence 0.5, verify_manually: true` while the genuine journeys are 1.0 —
+  B1's flag firing on real data for the first time, exactly as predicted when it
+  shipped. The labeled oracles were authored under a Python-only selector and may
+  need re-labelling before 0.68 is read as a regression.
