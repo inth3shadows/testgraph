@@ -131,8 +131,10 @@ def main(argv=None):
         if args.out:
             print("--out and --into-target are mutually exclusive", file=sys.stderr)
             return 2
+        # Directory creation is deferred until just before the write: creating it
+        # here would leave an empty `.testgraph/` in the target repo after a run
+        # that printed "map NOT written", and it is deliberately not gitignored.
         args.out = os.path.join(args.repo, ".testgraph", "journey-map.md")
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
 
     db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
     conn = dbmod.connect(db_path)
@@ -170,6 +172,9 @@ def main(argv=None):
 
     md = render_markdown(rows_by_file, registry, meta)
     if args.out:
+        parent = os.path.dirname(args.out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(md)
         print(f"wrote {args.out} ({meta['symbols']} symbols, "
