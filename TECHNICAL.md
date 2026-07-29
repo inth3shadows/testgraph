@@ -100,6 +100,31 @@ python3 harness/accuracy.py             # recall/precision on labeled commits
 codegraph index <repo>                  # rebuild a target index (NOT sync, on corruption)
 ```
 
+## Path Confidence (B1)
+
+Each `calls`/`imports`/`references` edge carries `metadata.confidence` (observed
+range 0.5–1.0 on honeyslate). The closure propagates it as `max over paths of
+(min over edges)` inside the recursive CTE, carrying a `conf` column and
+`GROUP BY id` with `max(conf)` at the end. Termination is unaffected: the
+confidence domain is finite and `min` is monotone, so the `(id, conf)` pair space
+is finite and `UNION` still converges.
+
+- Missing `confidence` → `DEFAULT_EDGE_CONFIDENCE = 0.9`. Deliberately high:
+  confidence annotates, never filters, so guessing low on an unmeasurable edge
+  would only manufacture false warnings.
+- `provenance='heuristic'` (synthesized JSX/dynamic-dispatch edges) → capped at
+  `0.3` whatever the metadata claims.
+- `contains` file-expansion inherits the file node's confidence — containment is
+  structural, not an inference hop.
+- A journey at or below `LOW_CONFIDENCE = 0.6` renders `VERIFY MANUALLY` and sets
+  `verify_manually: true` in `--json`.
+
+**Note on `edges.provenance`:** the parent plan proposed keying B1 on this
+column. Measured across 17 indexed repos it is binary (`NULL` / `'heuristic'`)
+and honeyslate has *zero* heuristic Python edges, so a provenance-only version
+would flag nothing. `metadata.confidence` is the mechanism that carries signal;
+the heuristic cap is retained because it starts earning once TS/JSX journeys land.
+
 ## Known Limitations
 
 - **Scope:** honeyslate + Python only. Other repos need their own journey
@@ -115,3 +140,8 @@ codegraph index <repo>                  # rebuild a target index (NOT sync, on c
 - **Schema coupling:** reads codegraph's SQLite columns directly, so a codegraph
   upgrade could break it. Pin/verify `schema_versions` before trusting output.
 - **Deleted files / renames** are not mapped as seeds in the spike.
+- **Confidence rarely fires on honeyslate's labeled commits.** The mechanism is
+  live (a weak-edge seed propagates ≤0.6 through 149 nodes on the real index),
+  but all 5 harness commits reach their journey entries via 0.9 routes, so no
+  `VERIFY MANUALLY` flag appears there. Its value is on shared/dynamic code
+  paths, and it will matter more once TS/JSX journeys are indexed.

@@ -16,6 +16,22 @@ import sqlite3
 # global. `contains`/`instantiates`/`extends`/`references` round out the model.
 REACH_KINDS = ("calls", "references", "instantiates", "extends", "imports")
 
+# Confidence assigned to an edge whose metadata carries no `confidence` field
+# (honeyslate: 61 `references` rows tagged {"valueRef":true}, plus one `calls`).
+# Deliberately high: confidence only ANNOTATES a selection, never drops it, so
+# guessing low on an unmeasurable edge would manufacture false "verify manually"
+# noise rather than protect anything.
+DEFAULT_EDGE_CONFIDENCE = 0.9
+
+# `provenance='heuristic'` marks a synthesized edge (JSX render, dynamic
+# dispatch) that no static resolution proved. Capped hard, whatever its metadata
+# claims.
+HEURISTIC_CONFIDENCE = 0.3
+
+# At or below this, a journey is reported as needing manual verification. Splits
+# the observed 0.5 edge tier from 0.7+.
+LOW_CONFIDENCE = 0.6
+
 
 def connect(db_path):
     conn = sqlite3.connect(db_path)
@@ -57,34 +73,51 @@ def file_node_id(conn, file_path):
 
 
 def impacted_closure(conn, seed_ids):
-    """Transitive reverse-reachability closure of `seed_ids`.
+    """Transitive reverse-reachability closure of `seed_ids`, as
+    `{node_id: confidence}`.
 
     Two propagation rules (validated on honeyslate):
       1. reverse over REACH_KINDS: callers/importers of an impacted node.
       2. when a FILE node enters the closure (a module-scope dependency), expand
          it to every symbol it `contains` — the whole module can be affected.
+
+    Confidence is `max over paths of (min over edges on the path)`: a chain is
+    only as trustworthy as its weakest hop, but one solid route is enough to
+    trust the selection. Seeds start at 1.0. `contains` expansion inherits the
+    file node's confidence unchanged — containment is a structural fact, not an
+    inference hop.
+
+    Terminates despite cycles: edge confidences come from a finite set and `min`
+    is monotone, so the (id, conf) pair space is finite and UNION converges.
     """
     if not seed_ids:
-        return set()
+        return {}
     conn.execute("CREATE TEMP TABLE IF NOT EXISTS _seeds(id TEXT PRIMARY KEY)")
     conn.execute("DELETE FROM _seeds")
     conn.executemany(
         "INSERT OR IGNORE INTO _seeds(id) VALUES (?)", [(s,) for s in seed_ids]
     )
     kinds = ",".join("'%s'" % k for k in REACH_KINDS)  # constants, safe to inline
+    edge_conf = (
+        f"MIN(COALESCE(json_extract(e.metadata, '$.confidence'), "
+        f"{DEFAULT_EDGE_CONFIDENCE}), "
+        f"CASE WHEN e.provenance = 'heuristic' THEN {HEURISTIC_CONFIDENCE} "
+        f"ELSE 1.0 END)"
+    )
     query = f"""
-    WITH RECURSIVE impacted(id) AS (
-        SELECT id FROM _seeds
+    WITH RECURSIVE impacted(id, conf) AS (
+        SELECT id, 1.0 FROM _seeds
         UNION
-        SELECT e.source FROM edges e JOIN impacted i ON e.target = i.id
+        SELECT e.source, MIN(i.conf, {edge_conf})
+            FROM edges e JOIN impacted i ON e.target = i.id
             WHERE e.kind IN ({kinds})
         UNION
-        SELECT e.target FROM edges e JOIN impacted i ON e.source = i.id
+        SELECT e.target, i.conf FROM edges e JOIN impacted i ON e.source = i.id
             WHERE e.kind = 'contains' AND i.id LIKE 'file:%'
     )
-    SELECT id FROM impacted
+    SELECT id, max(conf) FROM impacted GROUP BY id
     """
-    return {r[0] for r in conn.execute(query)}
+    return {r[0]: r[1] for r in conn.execute(query)}
 
 
 def caller_edge_count(conn, node_id):

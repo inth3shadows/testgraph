@@ -97,18 +97,23 @@ def select(repo, base, head, db_path, registry_path):
     entry_map = reg.resolve_entries(conn, registry)
 
     touched = {}
-    for nid in impacted & set(entry_map):
+    for nid in impacted.keys() & set(entry_map):
         touched.setdefault(entry_map[nid], set()).add(nid)
 
     journeys = []
     for jid, ents in touched.items():
         fanin = sum(dbmod.caller_edge_count(conn, e) for e in ents)
+        # Strongest route into the journey: if ANY entry is reached confidently,
+        # the selection is trustworthy.
+        conf = max(impacted[e] for e in ents)
         journeys.append(
             {
                 "id": jid,
                 "name": reg.journey_name(registry, jid),
                 "entries_hit": len(ents),
                 "rank": fanin,
+                "confidence": round(conf, 3),
+                "verify_manually": conf <= dbmod.LOW_CONFIDENCE,
             }
         )
     journeys.sort(key=lambda j: (-j["rank"], j["id"]))
@@ -141,7 +146,11 @@ def _render(result):
     else:
         lines.append(f"journeys to test ({len(result['journeys'])}), ranked:")
         for j in result["journeys"]:
-            lines.append(f"  [{j['rank']:>3}] {j['id']}  {j['name']}  ({j['entries_hit']} entry)")
+            flag = "  ! VERIFY MANUALLY (weak edge path)" if j["verify_manually"] else ""
+            lines.append(
+                f"  [{j['rank']:>3}] {j['id']}  {j['name']}  "
+                f"({j['entries_hit']} entry, conf {j['confidence']}){flag}"
+            )
     return "\n".join(lines)
 
 
