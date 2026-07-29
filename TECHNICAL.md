@@ -100,6 +100,30 @@ python3 harness/accuracy.py             # recall/precision on labeled commits
 codegraph index <repo>                  # rebuild a target index (NOT sync, on corruption)
 ```
 
+## Static Journey Map (issue #9)
+
+`python -m testgraph.export` writes the selector's **reverse index** — symbol →
+journeys that depend on it, grouped by file — as markdown plus JSON. An agent
+mid-edit then needs no CodeGraph index, no Python, and no MCP call: it looks up
+the lines it changed and reads off the journeys.
+
+Rows are computed by running the *same* `impacted_closure` the selector runs,
+seeded with one symbol at a time, and asking which journey entries land in it. A
+faster inverse traversal would risk disagreeing with `select`, and a map that
+disagrees is worse than no map because an agent would trust it. Runtime is ~0.3s
+for honeyslate's 644 nodes, so the cheap-and-consistent trade is free.
+
+Export runs the integrity guard and refuses to write on a blocking failure —
+more important than for `select`, since the file outlives the run and carries no
+warning of its own. Symbols reaching no journey are omitted, which the skill
+reads as "no journeys affected".
+
+Current map: 137 symbols across 21 files (8.4 KB).
+
+`skills/testgraph-verify/SKILL.md` is the consumer: it tells an agent to union
+the journeys for its changed lines, never to narrow the set on a hunch, and to
+flag a stale `generated from commit` header.
+
 ## Seeded-Regression Eval (issue #5)
 
 `harness/seed_regressions.py` manufactures the hard cases the 5 hand-labeled

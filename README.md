@@ -51,6 +51,9 @@ python3 -m testgraph.select \
 # JSON output (for a CI gate or another agent to consume):
 python3 -m testgraph.select --repo <path> --json
 
+# Export the static journey map an agent reads pre-commit:
+python3 -m testgraph.export --repo <path> --out maps/honeyslate.md
+
 # Run the tests and the accuracy harness:
 python3 -m unittest tests.test_core
 python3 harness/accuracy.py            # 5 hand-labeled real commits
@@ -66,6 +69,8 @@ python3 harness/seed_regressions.py    # ~20 seeded mutation sites
 - `harness/` — `accuracy.py` (recall/precision on labeled commits),
   `seed_regressions.py` + `ast_oracle.py` (seeded-mutation eval against an
   independent oracle), `adjudications.json` (hand-ruled disagreements).
+- `maps/` — generated journey maps (symbol -> journeys, grouped by file).
+- `skills/testgraph-verify/` — the agent skill that reads a map pre-commit.
 - `tests/` — unit tests over a synthetic fixture (no CodeGraph needed).
 
 ## Status
