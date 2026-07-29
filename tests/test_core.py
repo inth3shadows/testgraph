@@ -21,7 +21,8 @@ def build_fixture():
         """
         CREATE TABLE nodes(id TEXT, kind TEXT, name TEXT, qualified_name TEXT,
             file_path TEXT, start_line INT, end_line INT);
-        CREATE TABLE edges(id INTEGER PRIMARY KEY, source TEXT, target TEXT, kind TEXT);
+        CREATE TABLE edges(id INTEGER PRIMARY KEY, source TEXT, target TEXT,
+            kind TEXT, metadata TEXT, provenance TEXT);
         CREATE TABLE unresolved_refs(id INTEGER PRIMARY KEY, status TEXT);
         CREATE TABLE files(path TEXT, language TEXT, indexed_at INTEGER);
         """
@@ -33,16 +34,31 @@ def build_fixture():
         ("function:handler_a", "function", "handler_a", "handler_a",
          "app/svc.py", 10, 20),
         ("function:leaf", "function", "leaf", "leaf", "app/leaf.py", 1, 5),
+        # confidence fixture: base <- {mid_a weak, mid_b strong} <- top,
+        # plus a synthesized (heuristic) caller.
+        ("function:base", "function", "base", "base", "app/conf.py", 1, 5),
+        ("function:mid_a", "function", "mid_a", "mid_a", "app/conf.py", 10, 15),
+        ("function:mid_b", "function", "mid_b", "mid_b", "app/conf.py", 20, 25),
+        ("function:top", "function", "top", "top", "app/conf.py", 30, 35),
+        ("function:hcaller", "function", "hcaller", "hcaller", "app/conf.py", 40, 45),
     ]
     conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?)", nodes)
     edges = [
         # module-level `_settings = get_settings()` -> recorded as an imports edge
-        ("file:app/svc.py", "function:get_settings", "imports"),
+        ("file:app/svc.py", "function:get_settings", "imports", None, None),
         # svc.py contains handler_a
-        ("file:app/svc.py", "function:handler_a", "contains"),
+        ("file:app/svc.py", "function:handler_a", "contains", None, None),
+        # two routes from base up to top: a weak hop and a strong one
+        ("function:mid_a", "function:base", "calls", '{"confidence":0.5}', None),
+        ("function:mid_b", "function:base", "calls", '{"confidence":0.9}', None),
+        ("function:top", "function:mid_a", "calls", '{"confidence":0.9}', None),
+        ("function:top", "function:mid_b", "calls", '{"confidence":0.9}', None),
+        # synthesized edge: capped regardless of the confidence it claims
+        ("function:hcaller", "function:base", "calls", '{"confidence":0.9}', "heuristic"),
     ]
     conn.executemany(
-        "INSERT INTO edges(source,target,kind) VALUES (?,?,?)", edges
+        "INSERT INTO edges(source,target,kind,metadata,provenance) VALUES (?,?,?,?,?)",
+        edges,
     )
     conn.executemany(
         "INSERT INTO files VALUES (?,?,?)",
@@ -66,12 +82,43 @@ class ClosureTests(unittest.TestCase):
     def test_leaf_stays_tight(self):
         # nothing imports/calls leaf -> closure is just itself (precision).
         impacted = dbmod.impacted_closure(self.conn, {"function:leaf"})
-        self.assertEqual(impacted, {"function:leaf"})
+        self.assertEqual(set(impacted), {"function:leaf"})
+        self.assertEqual(impacted["function:leaf"], 1.0)
+
+    def test_missing_metadata_defaults_high(self):
+        # the imports/contains edges carry no metadata -> must not be treated as
+        # weak, or every shared-global journey would falsely demand manual review.
+        impacted = dbmod.impacted_closure(self.conn, {"function:get_settings"})
+        self.assertEqual(
+            impacted["function:handler_a"], dbmod.DEFAULT_EDGE_CONFIDENCE
+        )
 
     def test_line_mapping(self):
         seeds = dbmod.nodes_for_lines(self.conn, "app/svc.py", 12, 13)
         self.assertIn("function:handler_a", seeds)
         self.assertNotIn("function:leaf", seeds)
+
+
+class ConfidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.impacted = dbmod.impacted_closure(build_fixture(), {"function:base"})
+
+    def test_min_along_path(self):
+        # one 0.5 hop drags the whole route down to 0.5.
+        self.assertEqual(self.impacted["function:mid_a"], 0.5)
+        self.assertEqual(self.impacted["function:mid_b"], 0.9)
+
+    def test_max_across_paths(self):
+        # top is reachable via mid_a (min 0.5) and mid_b (min 0.9) -> 0.9 wins:
+        # one trustworthy route is enough.
+        self.assertEqual(self.impacted["function:top"], 0.9)
+
+    def test_heuristic_edge_is_capped(self):
+        # claims 0.9 in metadata, but provenance='heuristic' floors it.
+        self.assertEqual(
+            self.impacted["function:hcaller"], dbmod.HEURISTIC_CONFIDENCE
+        )
+        self.assertLessEqual(self.impacted["function:hcaller"], dbmod.LOW_CONFIDENCE)
 
 
 class IntegrityTests(unittest.TestCase):

@@ -17,7 +17,13 @@ handlers, the scheduler sweep, etc.). For a diff, testgraph:
 1. maps changed line ranges to the symbols that own them (the *seeds*);
 2. walks the CodeGraph edge graph in reverse — transitively — to every symbol
    that depends on a seed (the *impacted set*);
-3. reports the journeys whose entry symbols fall in that set, ranked by fan-in.
+3. reports the journeys whose entry symbols fall in that set, ranked by fan-in,
+   each carrying the **confidence** of the strongest edge-path that reached it.
+
+Confidence is `max over paths of (min over edges)` — a chain is only as
+trustworthy as its weakest hop, but one solid route is enough. A journey reached
+only through weak or synthesized edges is flagged `VERIFY MANUALLY` rather than
+silently trusted. It never removes a journey from the selection.
 
 It is **recall-first**: it would rather over-select (flag a journey that turned
 out fine) than silently drop a journey a change really did affect. A shared
@@ -61,10 +67,10 @@ python3 harness/accuracy.py
 
 ## Status
 
-Phase-1 spike, working and validated on honeyslate: recall 1.00 across 5
-commits, mean precision 0.84, integrity guard tested. Scoped to honeyslate and
-Python. Next increments (confidence-weighted edges, an MCP wrapper, the
-`/verify` gate) are in the plan.
+Phase-1 spike plus B1 (confidence-weighted paths), working and validated on
+honeyslate: recall 1.00 across 5 commits, mean precision 0.84, integrity guard
+tested. Scoped to honeyslate and Python. Next increments (the results ledger, an
+MCP wrapper, the `/verify` gate) are in the plan.
 
 ## Related Documentation
 
