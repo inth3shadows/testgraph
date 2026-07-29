@@ -106,7 +106,7 @@ def changed_ranges(repo, base, head):
     return _parse_unified_diff(diff)
 
 
-def select(repo, base, head, db_path, registry_path):
+def select(repo, base, head, db_path, registry_path, strict_registry=True):
     conn = dbmod.connect(db_path)
     registry = reg.load(registry_path)
 
@@ -116,7 +116,29 @@ def select(repo, base, head, db_path, registry_path):
         registry.get("spot_checks", {}),
         schema_pin=registry.get("codegraph_schema_version"),
     )
-    result = {"base": base, "head": head, "warnings": warnings}
+    # A journey whose entries do not resolve can never be selected -- silent
+    # under-selection. Blocking is right for live use. But when ANALYSING HISTORY
+    # (the accuracy harness checks out old commits) a journey that simply did not
+    # exist yet is expected, not rot, and blocking would just shrink the scored
+    # set. `strict_registry=False` downgrades it to a reported field so the
+    # distinction is explicit rather than accidental.
+    unresolved = [jid for jid, _ in reg.unresolved(conn, registry)]
+    if unresolved:
+        detail = ", ".join(
+            f"{jid} ({reg.journey_name(registry, jid)})" for jid in unresolved
+        )
+        if strict_registry:
+            blocking.append(
+                f"journeys with no resolvable entry symbol: {detail} — registry is "
+                f"stale against the index; they can never be selected"
+            )
+        else:
+            warnings.append(
+                f"journeys absent from this index (not scored): {detail}"
+            )
+
+    result = {"base": base, "head": head, "warnings": warnings,
+              "unresolved_journeys": unresolved}
     if blocking:
         result["status"] = "BLOCKED"
         result["blocking"] = blocking

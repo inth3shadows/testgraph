@@ -364,6 +364,34 @@ class ExportMapTests(unittest.TestCase):
                 )
 
 
+class UnresolvedJourneyTests(unittest.TestCase):
+    """A journey whose entries do not resolve can never be selected. It must fail
+    loud, not vanish while the registry still advertises it (issue #19)."""
+
+    BAD = {
+        "journeys": {
+            "J1": {"name": "one", "entries": [{"name": "handler_a",
+                                               "file": "app/svc.py"}]},
+            "J9": {"name": "ghost", "entries": [{"name": "long_gone",
+                                                 "file": "app/svc.py"}]},
+        },
+        "spot_checks": {},
+    }
+
+    def setUp(self):
+        self.conn = build_fixture()
+
+    def test_unresolved_is_detected(self):
+        self.assertEqual(reg.unresolved(self.conn, self.BAD), [("J9", ["long_gone"])])
+
+    def test_partially_resolvable_journey_is_not_flagged(self):
+        # one live entry is enough -- the journey is still selectable.
+        spec = {"journeys": {"J1": {"name": "one", "entries": [
+            {"name": "handler_a", "file": "app/svc.py"},
+            {"name": "long_gone", "file": "app/svc.py"}]}}, "spot_checks": {}}
+        self.assertEqual(reg.unresolved(self.conn, spec), [])
+
+
 class IntoTargetTests(unittest.TestCase):
     """`--into-target` is what makes the skill's in-repo lookup work, so its path
     construction and its refusal to litter a blocked target are both load-bearing."""

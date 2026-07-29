@@ -180,6 +180,26 @@ Current result: **20 sites, adjudicated recall 1.00, mean worst rank 3.17, mean
 3.33 of 8 journeys named.** Three disagreements, all adjudicated as oracle false
 positives with sole-caller evidence.
 
+## Registry Rot (issue #19)
+
+`registry.unresolved()` reports journeys where **no** entry symbol resolves to a
+node. Such a journey can never be selected: it silently disappears from every
+answer while the registry — and the map's legend — still advertise it as covered.
+Rename a FastAPI handler without updating `journeys/honeyslate.json` and
+testgraph would report that no change can affect that journey.
+
+`select` and `export` both **block** on it. A journey with at least one live
+entry is not flagged — one resolvable entry is enough to keep it selectable.
+
+`select(..., strict_registry=False)` downgrades it to a reported
+`unresolved_journeys` field, for one specific case: the accuracy harness checks
+out **historical** commits, where a journey that did not exist yet is expected
+rather than rot. The harness passes the flag and drops absent journeys from that
+commit's oracle, so they count against neither recall nor precision. Without the
+distinction, blocking silently shrank the scored set and moved mean precision
+from 0.84 to 0.69 — a headline metric changing for a reason unrelated to
+selection quality.
+
 ## Schema Pin (R1)
 
 `integrity.check()` reads the index's `schema_versions` row and compares it to
