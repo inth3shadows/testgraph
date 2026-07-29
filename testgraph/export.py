@@ -150,6 +150,15 @@ def main(argv=None):
     )
     for w in warnings:
         print(f"WARN: {w}", file=sys.stderr)
+    # A journey whose entries no longer resolve vanishes from every row while the
+    # legend keeps advertising it. A persisted map that lies is worse than none.
+    for jid, names in reg.unresolved(conn, registry):
+        blocking.append(
+            f"journey {jid} ({reg.journey_name(registry, jid)}) has no resolvable "
+            f"entry symbol ({', '.join(names)}) — registry is stale against the "
+            f"index; it would silently vanish from every row"
+        )
+
     if blocking:
         print("BLOCKED — index not trustworthy; map NOT written", file=sys.stderr)
         for b in blocking:

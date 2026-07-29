@@ -62,12 +62,20 @@ def main():
                 rows.append((sha, "INDEX-FAIL", idx.stderr.strip()[:60]))
                 run(["git", "-C", BARE, "worktree", "remove", "--force", wt])
                 continue
-            result = sel.select(wt, f"{sha}~1", sha, db, REGISTRY)
+            # Historical commits legitimately predate some journeys; that is not
+            # registry rot, so do not block on it -- but do report it.
+            result = sel.select(wt, f"{sha}~1", sha, db, REGISTRY,
+                                strict_registry=False)
             if result["status"] != "OK":
                 rows.append((sha, "BLOCKED", "; ".join(result.get("blocking", []))[:60]))
                 run(["git", "-C", BARE, "worktree", "remove", "--force", wt])
                 continue
             selected = [j["id"] for j in result["journeys"]]
+            # A journey absent from this commit's index cannot be selected, so it
+            # must not count against precision or recall either.
+            absent = set(result.get("unresolved_journeys", []))
+            if absent:
+                oracle = [j for j in oracle if j not in absent]
             recall, precision, fp = score(selected, oracle)
             min_recall = min(min_recall, recall)
             if oracle:
