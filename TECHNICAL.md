@@ -460,6 +460,55 @@ and costs:
   not building an environment; if the ledger turns out to need denser data, this
   decision is the thing to revisit first.
 
+## Second registry: signedintake (issue #11)
+
+`journeys/signedintake.json` + `maps/signedintake.md` — 8 journeys over a Next.js /
+TypeScript app with **zero Python**: claimant submits a signed form, staff issues a
+link, YAML onboarding, submission review, payment-update request, Stripe webhook
+settlement, status polling, form detail.
+
+**What this proves — the machinery is not honeyslate-shaped.** Entry resolution by
+name+file suffix, the reverse closure, `build_map`, the integrity guard with its
+caller-edge floors, and the schema pin all work unchanged against a `.ts`/`.tsx`
+index: 169 symbols across 38 files, `unresolved()` empty, guard passing. Two features
+built this week fired on real data the first time they met a second target:
+
+- **The #23 warning block.** The map carries "81 source file(s) newer than the index"
+  at the top, because signedintake's index is from 2026-07-17 and the repo moved on.
+  A reader of that file cannot miss that it under-reports.
+- **The #7 unchecked-entries footnote.** Every entry is `.ts`/`.tsx`, so the live
+  parse cannot verify any of them and the map says so once, as a limitation — not as
+  eight integrity alarms with a `codegraph index` remedy that could never clear them.
+
+**What this does NOT prove, and the honest reason.** #13 asked whether selectivity
+holds up beyond 8 honeyslate journeys. This target cannot answer that yet. Over the
+14 commits up to the index commit `0305ada`, `select` returned **all 8 journeys on 8
+of them**, every one with `recall_degraded: true` — and the cause is index coverage,
+not code coupling. `src/lib/seal-submission.ts`, `src/lib/audit.ts`,
+`src/lib/labels.ts`, `src/app/staff/[submissionId]/pdf-actions.ts` and others have
+**zero nodes** in that index, so their changed lines resolve to nothing:
+
+```
+090c286  harden: only a signed submission can be sealed
+  src/app/staff/[submissionId]/pdf-actions.ts   nodes=0   -> 8/8 journeys, degraded
+```
+
+The remaining commits behave: 4 select nothing (docs and merge commits with no
+product files) and 2 select exactly 1 journey.
+
+**The finding worth keeping:** pre-#29, all eight of those degraded commits would have
+printed `journeys to test: NONE` — a confident nothing on commits hardening payment
+sealing and PDF regeneration. The zero-seed guard turns an incomplete index from
+silent under-selection into a loud "test everything". That is the guard justifying
+itself on a target it was not designed against.
+
+**Methodology limit, stated:** these numbers come from ONE index pinned at `0305ada`,
+not a per-commit index like `harness/accuracy.py` builds for honeyslate. Selectivity
+on signedintake is not measurable until the index covers `src/lib/**` and the newer
+server actions — rebuild it, then re-run. Until then #13's bimodality question stays
+open, and claiming otherwise from these numbers would be reporting a tool artifact as
+a property of the codebase.
+
 ## The null hypothesis: what selection is worth at 8 journeys (issue #13)
 
 This section exists because the project's own premise is the thing most likely to be
