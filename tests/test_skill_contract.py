@@ -281,6 +281,19 @@ class SkillRulesAreSafe(unittest.TestCase):
             "the -dirty row does not say to strip the suffix before comparing",
         )
 
+    def test_none_rule_counts_entry_drift_as_a_third_way_to_lie(self):
+        # issue #7 added a third way `select` can say nothing while looking
+        # confident: a journey entry the index resolves but the source no longer
+        # defines. The rule named only two, so an agent could check both, see no
+        # `RECALL DEGRADED`, and believe a NONE produced off stale edges.
+        rules = squeezed(self.text.split("## Rules")[1])
+        self.assertIn("three ways it says nothing", rules)
+        self.assertRegex(rules, r"entry[- ]drift|no longer\s*defines")
+        rows = escalation_rows(self.text)
+        drift_row = [r for r in rows if "drift" in r.lower()]
+        self.assertTrue(drift_row, "no escalation row for entry drift")
+        self.assertIn("unknown", drift_row[0])
+
     def test_absence_rule_keeps_its_qualifier(self):
         # the original #18 defect was an unqualified "absent -> no journeys".
         # Matched on whitespace-collapsed text: the exact substring ended at the

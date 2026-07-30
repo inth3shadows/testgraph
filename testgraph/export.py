@@ -122,6 +122,13 @@ def commit_stamp(repo):
     # irrelevant and the tree looked clean. Caught by test, not by inspection.
     # `-- .`: scope to the target. For a subdirectory target the enclosing repo's
     # changes elsewhere are not this map's business.
+    # `git status` prints paths relative to the REPO ROOT while `ls-files` above
+    # prints them relative to the cwd — two guards on different bases. For a target
+    # like `<repo>/e2e/app` every status path gained a leading `e2e/`, `_is_test`
+    # matched that segment, and the map was stamped clean no matter what was
+    # uncommitted: the exact "clean provenance for uncommitted code" bug this
+    # function exists to prevent. `--show-prefix` gives the offset to strip.
+    prefix = git("rev-parse", "--show-prefix").stdout.strip()
     status = git("status", "--porcelain", "-uall", "--", ".")
     if status.returncode != 0:
         raise StampError(
@@ -130,7 +137,11 @@ def commit_stamp(repo):
         )
     for line in status.stdout.splitlines():
         paths = line[3:].strip().strip('"').split(" -> ")  # renames carry both
-        if any(_map_relevant(p.strip().strip('"')) for p in paths if p):
+        rel = [
+            p[len(prefix):] if prefix and p.startswith(prefix) else p
+            for p in (q.strip().strip('"') for q in paths) if p
+        ]
+        if any(_map_relevant(p) for p in rel):
             return f"{sha}-dirty"
     return sha
 
@@ -249,6 +260,19 @@ def render_markdown(rows_by_file, registry, meta):
             )
             out.append(f"| `{r['symbol']}` | {js} | {r['lines'][0]}–{r['lines'][1]} |")
     out.append("")
+    # Footnote, deliberately not the "not fully trustworthy" banner: an entry no
+    # parser covers is a permanent, unfixable-by-re-indexing gap, so it is stated
+    # once as a limitation rather than as an integrity alarm. Previously this rode
+    # in `meta` and was never rendered at all — dead data behind a claim.
+    if meta.get("unchecked_entries"):
+        out.append(
+            "_Entry symbols not verified against source (no parser for the file "
+            "type), so drift in them cannot be detected: "
+            + ", ".join(f"{jid} `{name}` ({rel})"
+                        for jid, name, rel in meta["unchecked_entries"])
+            + "._"
+        )
+        out.append("")
     out.append(
         f"_{meta['symbols']} symbols across {len(rows_by_file)} files reach at "
         f"least one journey. Symbols reaching none are omitted._"
@@ -296,6 +320,14 @@ def main(argv=None):
         registry.get("spot_checks", {}),
         schema_pin=registry.get("codegraph_schema_version"),
     )
+    # Live-drift BEFORE the print loop: appended after it, drift warnings reached
+    # neither the terminal nor — on a run that then blocked — the file, discarding
+    # the one signal that the registry is stale on exactly the runs most likely to
+    # carry it. Same live parse the selector runs (issue #7).
+    for jid, name, rel, why in reg.live_drift(args.repo, registry):
+        warnings.append(
+            f"journey {jid} entry `{name}` ({rel}): {why} — {reg.remedy_for(why)}"
+        )
     for w in warnings:
         print(f"WARN: {w}", file=sys.stderr)
     # Provenance is checked alongside index integrity, and blocks for the same
@@ -339,6 +371,9 @@ def main(argv=None):
         # carried into the artifact AND the --json sidecar, so a consumer of
         # either can tell the map was generated off a not-fully-trusted index
         "warnings": warnings,
+        # a footnote in the map, never the "not fully trustworthy" banner: no
+        # amount of re-indexing clears an unverifiable entry
+        "unchecked_entries": reg.unchecked_entries(registry),
     }
 
     md = render_markdown(rows_by_file, registry, meta)

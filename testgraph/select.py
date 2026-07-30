@@ -173,8 +173,35 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                 f"journeys absent from this index (not scored): {detail}"
             )
 
+    # Drift the index cannot see: the registry and the index can agree while both
+    # are stale against the source. A live parse is the only check in this pipeline
+    # that reads the working tree, so it is the only one that catches a handler
+    # renamed since the last `codegraph index` (issue #7). Reported as a
+    # first-class field AND a warning, never blocking — see registry.live_drift.
+    drift = reg.live_drift(repo, registry)
+    for jid, name, rel, why in drift:
+        # Remedy per reason, not one hard-coded "re-index". live_drift reads the
+        # WORKING TREE while everything else here reads committed history, so an
+        # uncommitted rename — the common case — would otherwise send an agent off
+        # to rebuild an index that cannot change this answer.
+        warnings.append(
+            f"journey {jid} entry `{name}` ({rel}): {why} — {reg.remedy_for(why)}"
+        )
+    # Entries no parser covers are NOT drift and must not ride the warning channel:
+    # re-indexing can never clear them, so a permanent warning would train the
+    # reader to ignore warnings. Reported as their own field instead.
+    unchecked = reg.unchecked_entries(registry)
+
     result = {"base": base, "head": head, "warnings": warnings,
-              "unresolved_journeys": unresolved}
+              "unresolved_journeys": unresolved,
+              "entry_drift": [
+                  {"journey": jid, "entry": name, "file": rel, "reason": why}
+                  for jid, name, rel, why in drift
+              ],
+              "entries_unchecked": [
+                  {"journey": jid, "entry": name, "file": rel}
+                  for jid, name, rel in unchecked
+              ]}
     if blocking:
         result["status"] = "BLOCKED"
         result["blocking"] = blocking
@@ -277,6 +304,13 @@ def _render(result):
     lines = [f"base..head: {result['base']}..{result['head']}"]
     for w in result.get("warnings", []):
         lines.append(f"  WARN: {w}")
+    # visible without --json: a CLI user could otherwise not tell that some entry
+    # symbols were never checked against source
+    for u in result.get("entries_unchecked", []):
+        lines.append(
+            f"  NOTE: {u['journey']} entry `{u['entry']}` ({u['file']}) not "
+            f"verified against source — no parser for that file type"
+        )
     if result["status"] == "BLOCKED":
         lines.append("STATUS: BLOCKED — index not trustworthy")
         for b in result["blocking"]:
