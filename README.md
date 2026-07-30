@@ -84,6 +84,12 @@ frontend files are both analysed, journeys are registered on backend entry point
 Next increments (the results ledger, an MCP wrapper, the `/verify` gate) are in
 the plan.
 
+**On whether this is worth it:** at 8 journeys selection avoids 57.5% of journey-runs
+on the labeled set, but bimodally — 3 of 5 commits select ≤2 journeys, 2 of 5 select
+≥6. The case for the tool at this scale is the *target* it gives an agent and the
+guards that refuse a confident wrong answer, not the runtime saved. TECHNICAL.md
+states that null hypothesis and what would falsify it.
+
 ## Related Documentation
 
 - [Technical Reference](TECHNICAL.md) — architecture, the traversal, the guard, limitations.

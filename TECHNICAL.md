@@ -460,6 +460,46 @@ and costs:
   not building an environment; if the ledger turns out to need denser data, this
   decision is the thing to revisit first.
 
+## The null hypothesis: what selection is worth at 8 journeys (issue #13)
+
+This section exists because the project's own premise is the thing most likely to be
+wrong, and no amount of recall measurement tests it.
+
+**Measured on the 5 labeled honeyslate commits** (`harness/accuracy.py`, current
+main): selection picks a mean of **3.4 of 8 journeys**, so it avoids **57.5%** of
+journey-runs. But the distribution is bimodal, not centred: **3 of 5 commits select
+≤2 journeys** and **2 of 5 select ≥6** — one of them all 8, because a `Settings`
+field change reaches everything. There is no "typical" saving to quote; a commit is
+either narrow or nearly total.
+
+**The null hypothesis:** at 8 journeys, `testgraph select` is close to
+`codegraph_impact` plus a hand-written list, and 57.5% of a suite that takes minutes
+is not worth a selector. If a full journey run is cheap, "run everything" is a
+correct engineering answer and this repo is ceremony.
+
+**What survives that hypothesis** — deliberately not the runtime saving:
+
+1. **The target, not the time.** TDAD (arXiv:2603.17973v2) measured agents given TDD
+   instructions *without* impact context regressing **worse than baseline** (9.94% vs
+   6.08%). "Test your work" with no named target is actively harmful; the map supplies
+   the target. That value does not scale with journey count — it is there at 8.
+2. **The guards, not the list.** Most of this repo is now refusal machinery: the
+   integrity spot-check that catches the corruption `codegraph sync` cannot repair,
+   provenance that fails closed, the degrade-to-all-journeys paths, entry-drift
+   against a live parse. Their value is preventing a *confident wrong answer*, which
+   a "run everything" policy also prevents — but only if someone runs everything,
+   which is exactly what does not happen under time pressure.
+3. **The ranking.** When 8 of 8 are selected, `rank` and the `!` weak-edge flag still
+   say which to check first and which not to trust. That is a different product from
+   selection.
+
+**What would falsify the whole thing:** if a second registry (#11) shows the same
+bimodal shape at 20+ journeys — narrow commits stay narrow, shared-symbol commits
+still collapse to everything — then the ceiling on selectivity is the codebase's
+coupling, not the tool, and the honest move is to stop selling selection and ship the
+map plus the guards. The results ledger (#10) is what would make that measurable
+rather than arguable.
+
 ## Known Limitations
 
 - **Scope:** honeyslate only. Other repos need their own journey registry. Frontend
