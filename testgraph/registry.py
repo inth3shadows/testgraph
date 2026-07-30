@@ -215,7 +215,29 @@ _SKIP_DIRS = frozenset({
     # `coverage/` would make a real entry under it report "no file matching that
     # path in the tree" with a remedy that cannot be right.
     ".svelte-kit", ".next", ".nuxt", ".output",
+    # A vendored dependency tree with no `pyvenv.cfg` beside it — `prune_dirs`
+    # cannot detect those by marker, so the directory name is the only signal.
+    "site-packages",
 })
+
+
+def prune_dirs(root, dirs):
+    """Prune `dirs` in place for a source walk. Shared by every walker.
+
+    A virtualenv is identified by its **`pyvenv.cfg` marker**, not by its name.
+    `_SKIP_DIRS` lists `.venv` and `venv`, and coriolis-local keeps one at
+    `backend/.uv/wsl-venv/`, which matches neither: the scan walked its
+    site-packages and reported 126 third-party functions as excluded journey
+    candidates, burying the real exclusions and taking 25s. Name-based skipping
+    cannot be made complete — every project is free to name its venv anything —
+    so the marker file is the check that actually holds.
+    """
+    dirs[:] = [
+        d
+        for d in dirs
+        if d not in _SKIP_DIRS
+        and not os.path.exists(os.path.join(root, d, "pyvenv.cfg"))
+    ]
 
 
 def python_sources(repo):
@@ -225,7 +247,7 @@ def python_sources(repo):
     about which files exist."""
     found = []
     for root, dirs, files in os.walk(repo):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        prune_dirs(root, dirs)
         for f in files:
             if f.endswith(".py"):
                 found.append(os.path.join(root, f))

@@ -321,6 +321,50 @@ class JourneyIdCollisionTests(unittest.TestCase):
         self.assertEqual(files, {"api/v1/users.py", "api/v2/users.py"})
 
 
+class VirtualenvPruningTests(unittest.TestCase):
+    """A venv is identified by `pyvenv.cfg`, not by being called `.venv`.
+
+    coriolis-local keeps one at `backend/.uv/wsl-venv/`. Name-based skipping
+    missed it, so the scan walked site-packages and drafted 126 third-party
+    functions as journey candidates — all correctly excluded as unresolvable,
+    but they buried the real exclusions and cost 25s of walk.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        layout = {
+            "app/main.py": "def real():\n    pass\n",
+            # a venv under a name no skip list would guess
+            ".uv/wsl-venv/pyvenv.cfg": "home = /usr\n",
+            ".uv/wsl-venv/lib/python3.14/site-packages/dep/mod.py": "def vendored():\n    pass\n",
+            # vendored copy with NO marker file — name is the only signal
+            "vendor/site-packages/other/mod.py": "def vendored_too():\n    pass\n",
+        }
+        for rel, body in layout.items():
+            path = os.path.join(self.tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(body)
+
+    def test_marker_file_prunes_a_nonstandard_venv(self):
+        found = [os.path.relpath(p, self.tmp) for p in reg.python_sources(self.tmp)]
+        self.assertEqual(found, [os.path.join("app", "main.py")])
+
+    def test_unmarked_site_packages_is_pruned_by_name(self):
+        found = " ".join(reg.python_sources(self.tmp))
+        self.assertNotIn("vendored_too", found)
+        self.assertNotIn("site-packages", found)
+
+    def test_prune_dirs_leaves_ordinary_directories(self):
+        dirs = ["app", "vendor", ".uv"]
+        reg.prune_dirs(self.tmp, dirs)
+        self.assertIn("app", dirs)
+        # `.uv` itself holds no marker -- only the venv INSIDE it does, so the
+        # prune must happen one level down rather than on the parent's name.
+        self.assertIn(".uv", dirs)
+
+
 class EmptyDraftTests(unittest.TestCase):
     """A registry with no journeys is valid, approvable, and answers a confident
     NONE for every change. It must never reach disk."""
