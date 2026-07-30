@@ -515,6 +515,85 @@ class IntoTargetTests(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, ".testgraph")))
 
 
+class MarkdownRenderingTests(unittest.TestCase):
+    """`render_markdown` produces the only artifact an agent actually reads, and
+    it had no test at all — the unit tests asserted `build_map`'s dicts and the
+    integration tests asserted the file merely existed.
+
+    Issue #24: rows are keyed by SYMBOL, because line numbers are frozen at the
+    generation commit and the agent's own edit has already shifted them. The table
+    used to lead with `lines`, inviting exactly the lookup the skill's rules
+    forbid."""
+
+    REG = {
+        "journeys": {
+            "J1": {"name": "one", "entries": [{"name": "handler_a",
+                                               "file": "app/svc.py"}]},
+            "JW": {"name": "weak", "entries": [{"name": "mid_a",
+                                                "file": "app/conf.py"}]},
+        },
+        "spot_checks": {},
+    }
+    META = {"repo": "/r", "schema": 8, "commit": "abc1234", "symbols": 4}
+
+    def setUp(self):
+        self.conn = build_fixture()
+        self.rows = exp.build_map(self.conn, self.REG)
+        self.md = exp.render_markdown(self.rows, self.REG, self.META)
+
+    def _header(self):
+        return next(l for l in self.md.splitlines() if l.startswith("| symbol"))
+
+    def test_symbol_is_the_first_column(self):
+        header = [c.strip() for c in self._header().strip("|").split("|")]
+        self.assertEqual(header[0], "symbol", f"lookup key is not first: {header}")
+        self.assertGreater(
+            header.index("lines (at generation — stale hint)"), 0,
+            "the stale hint must not be the column an agent reads first",
+        )
+
+    def test_every_row_renders_its_symbol_and_journeys(self):
+        for path, rows in self.rows.items():
+            section = self.md.split(f"### `{path}`")[1].split("###")[0]
+            for r in rows:
+                line = next(
+                    (l for l in section.splitlines()
+                     if l.startswith(f"| `{r['symbol']}`")), None,
+                )
+                self.assertIsNotNone(line, f"{path}:{r['symbol']} not rendered")
+                cells = [c.strip() for c in line.strip("|").split("|")]
+                self.assertEqual(
+                    set(cells[1].replace("!", "").split()), set(r["journeys"]),
+                    f"{path}:{r['symbol']} renders {cells[1]!r}",
+                )
+                self.assertEqual(
+                    cells[2], f"{r['lines'][0]}–{r['lines'][1]}",
+                    f"{path}:{r['symbol']} line hint misrendered",
+                )
+
+    def test_weak_journey_carries_the_bang(self):
+        # `!` is the map's only safety marker; rendering it on the wrong journey,
+        # or dropping it, is silent under-warning.
+        section = self.md.split("### `app/conf.py`")[1]
+        base = next(l for l in section.splitlines() if l.startswith("| `base`"))
+        self.assertIn("JW!", base)
+        own = next(l for l in section.splitlines() if l.startswith("| `mid_a`"))
+        self.assertIn("JW", own)
+        self.assertNotIn("JW!", own, "entry reached at full confidence was flagged")
+
+    def test_staleness_of_line_numbers_is_stated_not_implied(self):
+        # an agent that matches by line after an insertion reads the wrong
+        # symbol's journeys, which is the #24 failure. The artifact must say so
+        # itself — it outlives the run and carries no other warning.
+        self.assertIn("by name", self.md)
+        self.assertRegex(self.md, r"frozen at the commit above")
+        self.assertIn("hint", self._header())
+
+    def test_generation_commit_is_stamped(self):
+        # the skill's staleness escalation keys off this stamp.
+        self.assertIn("generated from commit `abc1234`", self.md)
+
+
 def _git_repo(tmp, files):
     """A real git repo with `files` = {relpath: line_count}, one commit."""
     repo = os.path.join(tmp, "repo")
