@@ -18,8 +18,9 @@ Try in order, and stop at the first that exists:
    store (e.g. editing `~/personal_projects/honeyslate/main` → `honeyslate.md`).
 
 **No map for this repo means this skill does not apply.** Say so and stop — do
-not guess, and do not report "no journeys affected". Only honeyslate has a
-journey registry today.
+not guess, and do not report "no journeys affected". Registries exist today for
+**honeyslate** and **signedintake** (`maps/signedintake.md`); every other repo is
+out of scope.
 
 ## Steps
 

@@ -1,0 +1,107 @@
+{
+  "codegraph_schema_version": 8,
+  "journeys": {
+    "J1": {
+      "name": "claimant submits a signed form",
+      "entries": [
+        {
+          "name": "submitForm",
+          "file": "f/[token]/actions.ts"
+        },
+        {
+          "name": "Page",
+          "file": "f/[token]/page.tsx"
+        }
+      ]
+    },
+    "J2": {
+      "name": "staff issues a form link",
+      "entries": [
+        {
+          "name": "issueFormLink",
+          "file": "staff/forms/actions.ts"
+        }
+      ]
+    },
+    "J3": {
+      "name": "onboarding: form created from YAML",
+      "entries": [
+        {
+          "name": "validateAndPreview",
+          "file": "onboarding/actions.ts"
+        },
+        {
+          "name": "createFormAndLink",
+          "file": "onboarding/actions.ts"
+        }
+      ]
+    },
+    "J4": {
+      "name": "staff reviews a submission",
+      "entries": [
+        {
+          "name": "SubmissionDetailPage",
+          "file": "staff/[submissionId]/page.tsx"
+        },
+        {
+          "name": "StaffIndexPage",
+          "file": "staff/page.tsx"
+        }
+      ]
+    },
+    "J5": {
+      "name": "staff requests a payment update",
+      "entries": [
+        {
+          "name": "createPaymentUpdateRequest",
+          "file": "staff/[submissionId]/payment-actions.ts"
+        },
+        {
+          "name": "simulatePaymentCompletion",
+          "file": "staff/[submissionId]/payment-actions.ts"
+        }
+      ]
+    },
+    "J6": {
+      "name": "stripe webhook settles a payment",
+      "entries": [
+        {
+          "name": "POST",
+          "file": "api/webhooks/stripe/route.ts"
+        }
+      ]
+    },
+    "J7": {
+      "name": "client polls payment status",
+      "entries": [
+        {
+          "name": "GET",
+          "file": "api/payment-requests/[requestId]/status/route.ts"
+        }
+      ]
+    },
+    "J8": {
+      "name": "staff views a form's detail",
+      "entries": [
+        {
+          "name": "FormDetailPage",
+          "file": "staff/forms/[formId]/page.tsx"
+        }
+      ]
+    }
+  },
+  "spot_checks": {
+    "submitForm": {
+      "min_caller_edges": 10,
+      "file": "f/[token]/actions.ts"
+    },
+    "POST": {
+      "min_caller_edges": 5,
+      "file": "api/webhooks/stripe/route.ts"
+    },
+    "issueFormLink": {
+      "min_caller_edges": 4,
+      "file": "staff/forms/actions.ts"
+    }
+  }
+}
