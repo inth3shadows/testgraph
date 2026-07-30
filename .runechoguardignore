@@ -1,0 +1,2 @@
+# false positives — nested local closures the checker cannot resolve
+git
