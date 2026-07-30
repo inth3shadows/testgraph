@@ -33,6 +33,7 @@ import argparse
 import ast
 import json
 import os
+import subprocess
 import sys
 
 from . import db as dbmod
@@ -222,6 +223,49 @@ def _non_python_product(repo):
     return found
 
 
+# How much history to read when measuring churn. Deep enough to distinguish a
+# hot UI component from a stable backend helper, shallow enough that the git call
+# stays well under a second on a large repo.
+CHURN_DEPTH = 500
+
+
+def file_churn(repo, depth=CHURN_DEPTH):
+    """{repo-relative path: commits touching it} over the last `depth` commits.
+
+    `{}` on any git failure — a shallow clone, a fresh repo with no commits, or a
+    plain directory. Callers must treat an empty result as "churn is unknowable"
+    and fall back rather than scoring everything as maximally stable.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo, "log", "--format=", "--name-only",
+             "-n", str(depth)],
+            capture_output=True, text=True, check=True, timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    counts = {}
+    for line in out.splitlines():
+        path = line.strip()
+        if path:
+            counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
+def _caller_churn(churn, caller_files):
+    """Mean commits-per-calling-file — the volatility of this symbol's fan-in.
+
+    Deliberately the CALLER files, not the symbol's own file. The floor breaks
+    when fan-in drops, and fan-in drops when call sites are deleted, so the
+    definition's own history says nothing useful: `button.tsx` is a stable file
+    whose 185 callers churn constantly, and scoring on the definition would rank
+    it as the safest pin in the repo (issue #43).
+    """
+    if not caller_files:
+        return 0.0
+    return sum(churn.get(f, 0) for f in caller_files) / len(caller_files)
+
+
 # Fraction of the OBSERVED inbound-edge count used as each spot-check floor. The
 # check exists to catch an index that silently lost edges (`integrity.py`: an
 # interrupted run left blast radius 85% wrong), so the floor has to sit below
@@ -230,9 +274,37 @@ def _non_python_product(repo):
 # draft as data rather than hidden in the guard.
 SPOT_CHECK_FLOOR = 0.8
 
+# The floor must leave room for at least this many call sites to disappear before
+# the guard fires. Derived, not guessed: at `SPOT_CHECK_FLOOR = 0.8` a symbol with
+# 3 inbound edges has a floor of 2, so deleting ONE caller blocks every run. Small
+# fan-in is therefore the most fragile pin of all, whatever its churn — the 20%
+# band has to be wider than the noise it is meant to ignore. `count - floor >= 2`
+# works out to a minimum fan-in of 10.
+MIN_TOLERANCE_EDGES = 2
 
-def _spot_checks(conn, exclude, limit=2):
-    """Pinned high-fan-in symbols for `integrity.check`, drawn from the index.
+
+# How many candidates to rank before taking the picks. Wide enough that a churn
+# ranking can reach past a block of volatile frontend symbols to a stable one.
+SPOT_CHECK_POOL = 40
+
+
+def _spot_checks(conn, exclude, churn, limit=2):
+    """Pinned STABLE high-fan-in symbols for `integrity.check`, and the ranked
+    candidates behind them, as `(checks, candidates)`.
+
+    **Ranked by caller-file churn first, fan-in second** (issue #43). Ranking on
+    fan-in alone picked `Button` (185 edges, `frontend/src/components/ui/button.tsx`)
+    on coriolis-local and `get` (`frontend/src/api/client.ts`) on
+    llm_history_audit. The spot-check is the *blocking* half of the guard and its
+    printed remedy is `codegraph index`, so a pin on a shared UI component turns
+    "delete a few <Button> usages" into a permanent block with a remedy that
+    cannot clear it. Fan-in says how depended-upon a symbol is; it does not say
+    how stable that number is, and the guard needs the second property.
+
+    When `churn` is empty — a shallow clone, a repo with no commits, a plain
+    directory — every candidate scores 0 and the order collapses to fan-in, i.e.
+    exactly the pre-#43 behaviour. Degraded, never broken, and the draft records
+    which mode produced the pins.
 
     Two exclusions, both load-bearing:
 
@@ -248,21 +320,42 @@ def _spot_checks(conn, exclude, limit=2):
         from them turns "delete three tests" into a BLOCK whose printed remedy
         (`codegraph index`) can never clear it. `exclude_source` drops them.
     """
-    checks = {}
     excluded_names = {n for n, _ in exclude}
     is_test = lambda p: sel._is_test(p.replace(os.sep, "/"))
-    for name, file_path, count in dbmod.top_fanin_nodes(
-        conn, limit * 8, exclude_source=is_test
+
+    candidates = []
+    for name, file_path, count, callers in dbmod.top_fanin_nodes(
+        conn, SPOT_CHECK_POOL, exclude_source=is_test
     ):
         if name in excluded_names or is_test(file_path):
             continue
         floor = int(count * SPOT_CHECK_FLOOR)
         if floor < 2:
             continue  # a floor of 0 or 1 asserts nothing
-        checks[name] = {"min_caller_edges": floor, "file": file_path}
-        if len(checks) >= limit:
-            break
-    return checks
+        if count - floor < MIN_TOLERANCE_EDGES:
+            continue  # one ordinary deletion would trip it
+        volatility = round(_caller_churn(churn, callers), 2)
+        candidates.append({
+            "name": name,
+            "file": file_path,
+            "fan_in": count,
+            "caller_churn": volatility,
+            # Sensitivity per unit of noise. Ranking on churn ASCENDING first was
+            # tried and is WRONG: fan-in becomes a pure tie-break, and since some
+            # symbol always has near-zero churn the pick collapses to the quietest
+            # — honeyslate went from `get_settings` (15 of 19 edges) to
+            # `hash_token` (2 of 3), trading a real canary for an obscure one.
+            # Quiet is not the goal; quiet AND load-bearing is.
+            "score": round(count / (1.0 + volatility), 2),
+            "min_caller_edges": floor,
+        })
+
+    candidates.sort(key=lambda c: (-c["score"], -c["fan_in"], c["name"]))
+    checks = {
+        c["name"]: {"min_caller_edges": c["min_caller_edges"], "file": c["file"]}
+        for c in candidates[:limit]
+    }
+    return checks, candidates
 
 
 def propose(repo, db_path, target):
@@ -314,6 +407,8 @@ def propose(repo, db_path, target):
             f"journeys — journey ids are not unique"
         )
     candidates.sort(key=lambda c: (c["file"], c["journey"]))
+    churn = file_churn(repo)
+    checks, check_candidates = _spot_checks(conn, resolved_entries, churn)
     draft = {
         "target": target,
         "note": (
@@ -325,7 +420,19 @@ def propose(repo, db_path, target):
         "proposed_by": "testgraph.propose",
         "journeys": journeys,
         "codegraph_schema_version": dbmod.schema_version(conn),
-        "spot_checks": _spot_checks(conn, resolved_entries),
+        "spot_checks": checks,
+        # Shipped beside the picks so the reviewer can swap one without
+        # re-deriving anything -- the same "tool discovers, agent judges" split
+        # the journeys themselves follow. Pinning nothing at all was rejected: it
+        # leaves a draft whose guard does not work until someone acts, and a
+        # draft is meant to be runnable.
+        "spot_check_candidates": check_candidates[:8],
+        "spot_check_basis": (
+            "caller-file churn over the last %d commits, then fan-in"
+            % CHURN_DEPTH
+            if churn else
+            "fan-in only — no git history available, so stability is unmeasured"
+        ),
         "blind_spots": _blind_spots(repo, unparsed, _non_python_product(repo)),
         "unresolved_candidates": unresolved,
     }
@@ -366,6 +473,13 @@ def _render(result, out_path):
             "  - no symbol had enough inbound edges to pin an integrity "
             "spot-check; add one by hand before approving"
         )
+    else:
+        lines.append(f"integrity spot-checks ({draft['spot_check_basis']}):")
+        for c in draft["spot_check_candidates"][:len(draft["spot_checks"])]:
+            lines.append(
+                f"  {c['name']}  >= {c['min_caller_edges']} of {c['fan_in']} "
+                f"edges  churn {c['caller_churn']}  ({c['file']})"
+            )
     if out_path is None:
         lines.append(
             "NO JOURNEYS, nothing written — this repo has no decorator-style HTTP "

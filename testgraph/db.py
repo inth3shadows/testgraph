@@ -142,10 +142,16 @@ def caller_edge_count(conn, node_id):
 
 
 def top_fanin_nodes(conn, limit, exclude_source=None):
-    """[(name, file_path, inbound_edge_count)] for the most depended-on symbols.
+    """[(name, file_path, inbound_edge_count, [caller file, ...])] for the most
+    depended-on symbols.
 
     Used by `propose` to pin integrity spot-checks from the index itself rather
     than from a hand-picked symbol. Same edge kinds as `caller_edge_count`.
+
+    Caller file paths come out because the count alone is the wrong signal: the
+    floor breaks when fan-in DROPS, fan-in drops when callers are deleted, and
+    how volatile the calling files are is what predicts that (issue #43). They
+    are already in this join, so returning them costs nothing.
 
     `exclude_source` is a predicate on the SOURCE node's file path. It exists
     because the floor derived here is later compared against `caller_edge_count`,
@@ -162,13 +168,19 @@ def top_fanin_nodes(conn, limit, exclude_source=None):
         "WHERE e.kind IN ('calls', 'imports', 'references', 'instantiates') "
         "AND n.kind != 'file'"
     )
-    counts = {}
+    counts, callers = {}, {}
     for name, file_path, source_path in rows:
         if exclude_source and source_path and exclude_source(source_path):
             continue
-        counts[(name, file_path)] = counts.get((name, file_path), 0) + 1
+        key = (name, file_path)
+        counts[key] = counts.get(key, 0) + 1
+        if source_path:
+            callers.setdefault(key, []).append(source_path)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0][0]))
-    return [(name, path, count) for (name, path), count in ranked[:limit]]
+    return [
+        (name, path, count, callers.get((name, path), []))
+        for (name, path), count in ranked[:limit]
+    ]
 
 
 def resolve_symbol(conn, name, file_suffix=None):

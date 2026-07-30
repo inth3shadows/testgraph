@@ -406,6 +406,49 @@ fixture, both now pinned by tests: the spot-check picked `login` out of
 the non-Python blind-spot count read 96 because `.svelte-kit/` and `build/` were
 not in `_SKIP_DIRS` — 13 is the real number.
 
+### Spot-check pins must be stable, not merely popular (issue #43)
+
+Ranking candidates by raw fan-in picked `Button` (232 edges,
+`frontend/src/components/ui/button.tsx`) on coriolis-local and `get`
+(`frontend/src/api/client.ts`) on llm_history_audit. The spot-check is the
+*blocking* half of the guard and its printed remedy is `codegraph index`, so a
+pin whose count drifts under normal work blocks every run with a fix that cannot
+clear it.
+
+Two properties matter and fan-in only supplies one:
+
+- **Sensitivity** — a high count with a tight floor detects a small edge loss.
+- **Stability** — the count must not drift through ordinary work.
+
+Stability is measured as **mean commit-count of the CALLER files** over the last
+500 commits. Not the definition's own file: the floor breaks when call sites are
+deleted, and `button.tsx` is a stable file whose callers churn constantly, so
+definition-file churn would rank it the safest pin in the repo.
+
+**Ranking on churn ascending was tried first and is wrong.** It makes fan-in a
+pure tie-break, and since some symbol always has near-zero churn the pick
+collapses to the quietest one: honeyslate went from `get_settings` (15 of 19
+edges) to `hash_token` (2 of 3) — an obscure symbol in place of a real canary.
+The score is `fan_in / (1 + caller_churn)`: quiet *and* load-bearing.
+
+**`MIN_TOLERANCE_EDGES` turned out to matter more than churn.** At
+`SPOT_CHECK_FLOOR = 0.8` a 3-edge symbol has a floor of 2, so deleting one caller
+blocks every run — small fan-in is the most fragile pin there is, whatever its
+churn. Requiring `count - floor >= 2` implies a minimum fan-in of 10 and removes
+that class outright. It also corrects the premise #43 was filed on: `Button`'s
+232 edges leave a 47-edge tolerance band, which is the *widest* in that repo, so
+the original "deleting a few `<Button>` usages blocks the guard" was wrong by an
+order of magnitude. The fragile pins were the small ones.
+
+With both rules, honeyslate's automatic pick is `now` and **`get_settings`** —
+the latter being the symbol a human independently chose for the hand-authored
+registry.
+
+No git history (shallow clone, fresh repo, plain directory) scores every
+candidate at 0 and the order collapses to fan-in, i.e. the pre-#43 behaviour.
+The draft records which mode ran in `spot_check_basis`, and ships
+`spot_check_candidates` so a reviewer can swap a pin without re-deriving one.
+
 **Fan-in does not rank entry points.** The draft records it, but a handler is
 called by the framework, not by the codebase, so its inbound-edge count is
 structurally ~0: all 17 honeyslate candidates scored 0. It is omitted from the
