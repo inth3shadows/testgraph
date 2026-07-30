@@ -49,8 +49,11 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
 1. **Pending refs** — `unresolved_refs.status = 'pending'` above threshold means
    the index is mid-resolution. (Terminal `failed` refs are external stdlib and
    ignored.) Blocking.
-2. **Freshness** — any tracked source newer than its `files.indexed_at` row.
-   Warning only (degrades precision, not recall).
+2. **Freshness** — any tracked source newer than its `files.indexed_at` row, in
+   **every** indexed language. Warning only (degrades precision, not recall). The
+   query filtered `language = 'python'` until issue #31: harmless while non-Python
+   paths could not affect selection, wrong once they could — a frontend file edited
+   after the last index gave a narrow answer with no staleness warning.
 3. **Caller-count spot-check** — for pinned symbols (e.g. `get_settings`), the
    direct inbound-edge count must meet a floor. This is the check the pending/
    freshness checks miss: it catches the sync-does-not-repair corruption class.
@@ -129,6 +132,25 @@ the repo it describes and is versioned alongside it. The central copy under
 Resolution step 3 below is therefore manually maintained. The skill resolves, in order: `$TESTGRAPH_MAP`,
 then `<repo-root>/.testgraph/journey-map.md`, then
 `~/personal_projects/testgraph/main/maps/<repo-basename>.md`.
+
+### Pinning "the map agrees with the selector" (issues #22, #32)
+
+The consistency claim above needs a test that can *fail*, and two attempts at one
+could not. Both recomputed `impacted_closure` from the row's own line range —
+which always contains the row's own node, so the closure was seeded with precisely
+the set `build_map` had used and equality held by construction. The second attempt
+added an `assertEqual` for single-node rows, which made it look stronger while
+leaving it just as vacuous.
+
+`MapAgreesWithSelectorTests` derives the seed the way the *other* tool does: a real
+git repo whose files match the fixture's node ranges, one commit per map row
+editing a line inside that row, and `sel.select` run over `HEAD~1..HEAD`. The
+comparison covers journey IDs *and* `verify_manually`, and the fixture is built so
+the comparison crosses both axes on which the two tools have actually diverged: a
+`.svelte` entry (the #21 disagreement) and a 0.5-confidence edge (a map that
+dropped weak paths would under-report). Verified by mutation: narrowing
+`_is_product` to `.py`, over-reporting a journey on every row, and dropping
+low-confidence journeys each turn it red.
 
 ### The consumer's escalation contract
 
@@ -225,12 +247,38 @@ mode the whole project exists to prevent.
 
 ## Non-Python Selection (issue #21)
 
-`PRODUCT_EXT` covers `.py/.js/.jsx/.mjs/.ts/.tsx/.svelte/.vue`. Previously only
-`.py` was seeded, so a frontend change produced zero seeds and `select` answered
-`journeys to test: NONE` — while `export`'s map, walking all indexed nodes, listed
-those same files against J8. Two tools, different answers, and the map was right.
-A path outside the set simply has no nodes, so widening cannot invent impact.
-`_is_test` gained the JS/TS conventions (`.test.`, `.spec.`, `__tests__/`).
+`PRODUCT_EXT` covers `.py/.js/.jsx/.mjs/.cjs/.ts/.tsx/.mts/.cts/.svelte/.vue`;
+`.d.ts`-family declarations are excluded (no runtime behavior, no nodes).
+Previously only `.py` was seeded, so a frontend change produced zero seeds and
+`select` answered `journeys to test: NONE` — while `export`'s map, walking all
+indexed nodes, listed those same files against J8. Two tools, different answers,
+and the map was right.
+
+Widening is not free. The original claim that it "cannot invent impact" holds only
+for extensions the indexer does not cover; where it *does* cover them, a false
+positive can arrive over a weak edge, and one did (see Known Limitations, 0.84 →
+0.68). `_is_test` gained the JS/TS conventions (`.test.`, `.spec.`, `__tests__/`)
+and now matches test directories as whole path segments, so a repo-root `tests/`
+or `__tests__/` is excluded rather than seeded as product code (issue #33).
+
+## Zero-Seed Changes Degrade, Never Answer NONE (issue #29)
+
+Widening the extension set created a second way to produce confident silence: a
+file `PRODUCT_EXT` accepts whose changed lines resolve to **no** node — a newly
+added module the index predates, or an extension the index does not actually
+cover in this repo. Seeds stayed empty and the answer was
+`journeys to test: NONE` with `recall_degraded: false` and no warning, which is
+the exact failure class #21 exists to kill.
+
+Each changed file's node set is now computed on its own; an empty one joins the
+same `unmapped` channel the whole-file path uses, so it warns and degrades to
+every journey with `verify_manually: true`. Per-file sets matter: with one running
+total, a mapped file in the same commit would mask the unmapped one.
+
+Measured effect on the labeled set: none. Recall 1.00 and mean precision 0.68 are
+byte-identical with the degrade reverted, because no labeled commit exercises the
+zero-seed path (`0b4135f` already degraded via a whole-file change). The guard is
+justified by the reproduced failure in #29, not by a metric move.
 
 ## Path Confidence (B1)
 
@@ -259,10 +307,11 @@ the heuristic cap is retained because it starts earning once TS/JSX journeys lan
 
 ## Known Limitations
 
-- **Scope:** honeyslate + Python only. Other repos need their own journey
-  registry; TS/JS frontend journeys are out (needs the frontend indexed).
+- **Scope:** honeyslate only. Other repos need their own journey registry. Frontend
+  files are now *seeded* (issue #21), but no journey has a frontend entry point, so
+  a frontend change is only visible where it reaches a backend entry.
 - **Precision on shared symbols:** a config/model edit fans out to most journeys
-  by design (recall-first). Mean precision 0.84 on the labeled set; the low case
+  by design (recall-first). Mean precision 0.68 on the labeled set; the low case
   is 0.38 (a `Settings` field change → all 8).
 - **Registry completeness is manual:** a journey's entry set must include its
   wiring/lifecycle code, not just the leaf handler (the harness caught J8 missing

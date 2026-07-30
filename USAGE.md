@@ -28,9 +28,12 @@ journeys to test (3), ranked:
   [  0] J7  gcal sync       (1 entry)
 ```
 
-Test those flows in that order. If it prints "journeys to test: NONE", the
-change didn't touch any tracked user flow (e.g. a docs, test, or health-check
-edit).
+Test those flows in that order. If it prints "journeys to test: NONE" **and no
+"RECALL DEGRADED" line**, the change didn't touch any tracked user flow (e.g. a
+docs, test, or health-check edit).
+
+`RECALL DEGRADED` means a changed file could not be located in the code map at
+all, so every journey is listed and the honest answer is *unknown*, not *none*.
 
 ## What to Do When Something Breaks
 
@@ -53,9 +56,13 @@ edit).
 **Does it run the tests for me?** No — it decides *what* to test. Running is done
 by you, CI, or a test-driver like Playwright.
 
-**Which projects does it support today?** honeyslate, Python code only.
+**Which projects does it support today?** honeyslate only. Backend Python and
+frontend `.js/.ts/.jsx/.tsx/.svelte/.vue` changes are both analysed; the journeys
+themselves are registered against backend entry points.
 
-**Can I trust "NONE"?** Yes, as long as the guard didn't block — that means no
-tracked user flow was affected.
+**Can I trust "NONE"?** Only when all three hold: the guard didn't block, the diff
+you asked about was non-empty, and no `RECALL DEGRADED` line appeared. Those are
+the two ways a run can say nothing while looking confident — an empty range, and a
+changed file the code map has no symbols for.
 
 For anything not covered here, contact Eric (eric.minish@gmail.com).

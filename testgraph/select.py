@@ -25,21 +25,41 @@ HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 # considered, so a change to any frontend file produced zero seeds and select
 # answered "journeys to test: NONE" -- while `export`'s map, which walks all
 # indexed nodes, listed those same files against J8. Two tools, different
-# answers, and the map was the correct one (issue #21). A path outside this set
-# simply has no nodes, so widening it cannot invent impact.
-PRODUCT_EXT = (".py", ".js", ".jsx", ".mjs", ".ts", ".tsx", ".svelte", ".vue")
+# answers, and the map was the correct one (issue #21).
+#
+# Widening is not free, and the earlier claim that it "cannot invent impact" was
+# only true for extensions the indexer does not cover (no nodes -> no seeds).
+# Where the indexer DOES cover the extension it can add a false positive:
+# measured mean precision fell 0.84 -> 0.68 when the frontend was seeded, via a
+# 0.5-confidence edge to J8 (TECHNICAL.md). That path is flagged
+# `verify_manually`, which is the intended trade -- recall stayed at 1.00.
+PRODUCT_EXT = (".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts",
+               ".cts", ".svelte", ".vue")
+
+# Type declarations carry no runtime behavior and have no nodes, so seeding them
+# cannot help; after #29 an extension-accepted file with no nodes degrades the
+# whole answer to "test everything", so admitting them would be actively worse.
+DECLARATION_EXT = (".d.ts", ".d.mts", ".d.cts")
+
+# Directory names that mean "this is test code", matched as whole path segments.
+# Substring matching on "/tests/" missed a repo-root `tests/` or `__tests__/`
+# directory entirely, so root-level test files were seeded as product code.
+TEST_DIRS = frozenset({"tests", "e2e", "__tests__"})
 
 
 def _is_product(path):
-    return path.endswith(PRODUCT_EXT) and not _is_test(path)
+    return (
+        path.endswith(PRODUCT_EXT)
+        and not path.endswith(DECLARATION_EXT)
+        and not _is_test(path)
+    )
 
 
 def _is_test(path):
-    base = path.rsplit("/", 1)[-1]
+    parts = path.split("/")
+    base = parts[-1]
     return (
-        "/tests/" in path
-        or "/e2e/" in path
-        or "/__tests__/" in path
+        bool(TEST_DIRS.intersection(parts[:-1]))
         or base.startswith("test_")
         or base.endswith("_test.py")
         # JS/TS conventions, now that non-Python paths are seeded
@@ -161,10 +181,24 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         return result
 
     ranges, whole_files = changed_ranges(repo, base, head)
+
+    # A changed file whose hunks resolve to NO node is the same failure as an
+    # unmappable whole-file change, and it used to pass silently: seeds stayed
+    # empty, no warning was raised, and the answer was a confident
+    # "journeys to test: NONE" (issue #29). It happens whenever the index
+    # predates the file (a newly added module) or covers the extension in
+    # PRODUCT_EXT but not in this repo's graph. Per-file node sets, not one
+    # running total, so one mapped file cannot mask an unmapped one.
+    unmapped = []
     seeds = set()
-    for f, rs in ranges.items():
+    for f, rs in sorted(ranges.items()):
+        in_file = set()
         for lo, hi in rs:
-            seeds.update(dbmod.nodes_for_lines(conn, f, lo, hi))
+            in_file.update(dbmod.nodes_for_lines(conn, f, lo, hi))
+        if in_file:
+            seeds.update(in_file)
+        else:
+            unmapped.append(f"{f} (changed lines map to no indexed symbol)")
 
     # Whole-file changes (deletions, renames) have no line ranges to map: seed
     # every symbol the file contains. A file deleted in `head` is usually absent
@@ -172,7 +206,6 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # predates the deletion (e.g. the per-commit harness). When it does not
     # resolve, impact is UNBOUNDED — we cannot know what depended on it — and
     # recall-first means saying so loudly rather than returning a narrow answer.
-    unmapped = []
     for path, reason in whole_files.items():
         nodes = dbmod.nodes_in_file(conn, path)
         if nodes:
@@ -208,7 +241,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # answer degrades toward "test everything" instead of toward silence.
     if unmapped:
         warnings.append(
-            f"{len(unmapped)} whole-file change(s) not in the index "
+            f"{len(unmapped)} changed file(s) with no symbols in the index "
             f"({', '.join(unmapped)}) — impact is unbounded; all journeys listed"
         )
         selected = {j["id"] for j in journeys}
@@ -222,7 +255,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                         "rank": 0,
                         "confidence": 0.0,
                         "verify_manually": True,
-                        "reason": "unmappable whole-file change",
+                        "reason": "change with no resolvable symbols",
                     }
                 )
 

@@ -58,10 +58,14 @@ def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None):
     # 2. freshness: any tracked source newer than its index row. WARN not BLOCK
     #    — a slightly stale index degrades precision, not recall, and codegraph
     #    git hooks normally keep it synced.
+    #
+    #    Every indexed language, not just python (issue #31). The python-only
+    #    filter was consistent while selection ignored non-Python paths; once
+    #    `select` seeds them (#21), a frontend file edited after the last index
+    #    would otherwise produce a confidently narrow answer with no staleness
+    #    warning at all.
     stale = []
-    for row in conn.execute(
-        "SELECT path, indexed_at FROM files WHERE language = 'python'"
-    ):
+    for row in conn.execute("SELECT path, indexed_at FROM files"):
         p = os.path.join(repo_root, row["path"])
         idx = row["indexed_at"]
         if not idx or not os.path.exists(p):

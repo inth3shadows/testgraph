@@ -13,8 +13,11 @@ a specific defect that shipped:
   * `--base HEAD --head <branch>`, which yields an empty diff and a confident
     `NONE` (shipped in #26, caught by review)
   * `git diff --name-only` without `HEAD`, which misses staged work (same)
-  * a missing non-`.py` carve-out, so an agent escalates to a tool that is blind
-    to its file and is told `NONE` (same)
+  * a non-`.py` escalation row that outlived the code it described — it told
+    agents `select` was blind to their file long after #21 taught it to seed
+    those paths, and the test asserting that row pinned the staleness in place
+    (#30). The row must now agree with the selector's behavior, and `NONE` must
+    be qualified by the `RECALL DEGRADED` signal (#29) rather than by extension.
   * the absence rule losing its qualifier, which is the original #18 defect
 """
 import contextlib
@@ -104,12 +107,38 @@ class SkillRulesAreSafe(unittest.TestCase):
         # bare form would miss anything already `git add`ed
         self.assertNotRegex(self.text, r"`git diff --name-only`")
 
-    def test_non_python_has_its_own_escalation_row(self):
-        # select drops non-.py paths (issue #21), so escalating a .js change to it
-        # returns NONE. The carve-out must live in the table an agent acts on.
+    def test_non_python_row_matches_what_select_actually_does(self):
+        # This test previously asserted "Do NOT rely on `select`" — true before
+        # #21, false after it, and asserting it *pinned* the stale instruction so
+        # the doc could not be corrected without editing the test (issue #30). It
+        # now asserts the current contract AND that the dead wording is gone: the
+        # drift-pin points at the code's behavior, not at a past snapshot of it.
         table = self.text.split("| Situation |")[1].split("###")[0]
         self.assertRegex(table, r"non-`?\.py`?", "no non-Python row in the table")
-        self.assertRegex(table, r"NOT rely on `select`|Do NOT rely")
+        self.assertNotRegex(
+            table, r"[Nn]OT rely on `select`|blind to non-Python",
+            "table still tells the agent select ignores non-Python paths (#21 fixed it)",
+        )
+        row = next(
+            r for r in table.splitlines()
+            if r.startswith("|") and re.search(r"non-`?\.py`?", r)
+        )
+        self.assertIn("select", row, "non-Python row names no tool to run")
+        self.assertIn(
+            "RECALL DEGRADED", row,
+            "non-Python row must name the signal that its answer is unknown",
+        )
+
+    def test_none_is_qualified_by_the_degrade_signal(self):
+        # An extension select accepts but the index does not cover yields zero
+        # seeds; #29 made that degrade loudly, and the trust rule must key off
+        # that signal rather than "the diff contained .py".
+        rules = self.text.split("## Rules")[1]
+        self.assertIn("RECALL DEGRADED", rules)
+        self.assertNotRegex(
+            rules, r"only trustworthy for a non-empty, all-Python diff",
+            "trust rule still keyed to an all-Python diff (#30)",
+        )
 
     def test_absence_rule_keeps_its_qualifier(self):
         # the original #18 defect was an unqualified "absent -> no journeys".

@@ -44,7 +44,7 @@ below means *unknown*, never *none*:
 |---|---|
 | You **added** a `.py` function or file | Run `select` (below). A new symbol has no row by definition. |
 | You **deleted** or **renamed** a `.py` file | Run `select`. If the file is still in the index it seeds that file's symbols precisely and returns a *narrow* list — correct, not a malfunction. Only when the file has already left the index does it report unbounded impact and list every journey. |
-| You changed **any non-`.py` file** (`.js`, `.svelte`, …) | **Do NOT rely on `select` — it is blind to non-Python paths and will answer NONE** (issue #21). Use the map's rows for that file and treat the result as *unknown*, not complete. |
+| You changed **any non-`.py` file** (`.js`, `.jsx`, `.ts`, `.tsx`, `.svelte`, `.vue`, …) | Run `select` — it seeds these paths (issue #21; it used to answer `NONE` for all of them). If your extension is not in the index it prints `RECALL DEGRADED` and lists every journey: that is *unknown*, not none. A journey reached only through frontend code often arrives on a weak edge — expect `!` and verify by hand. |
 | The file has no `###` section at all | Unknown. The indexer may not cover it. Escalate and say so. |
 | `generated from commit` is far behind HEAD | The map under-reports. Regenerate (below) or escalate. |
 
@@ -96,8 +96,10 @@ python3 -m testgraph.export --repo <repo> --out maps/<target>.md
 - **Do not narrow the set on a hunch.** The map is recall-first: a shared symbol
   fanning out to every journey is correct output, not a bug. Deciding a listed
   journey "obviously isn't affected" is the other harmful move.
-- **`NONE` from `select` is only trustworthy for a non-empty, all-Python diff.**
-  Confirm the diff was non-empty and contained `.py` paths before believing it.
+- **`NONE` from `select` is only trustworthy when the diff was non-empty and no
+  `RECALL DEGRADED` line appeared.** Those are the two ways it says nothing while
+  looking confident: an empty range (nothing to analyse) and a changed file with no
+  symbols in the index (impact unbounded). Check both, then believe it.
 - Do not edit the map by hand. It is generated, and a hand-edit that drops a
   journey is indistinguishable from a graph bug.
 
