@@ -321,6 +321,19 @@ reported as `unchecked` rather than silently passing, so the gap is visible inst
 of assumed away. If a frontend journey is ever registered, that row starts showing
 up as unchecked and asks for a real parser.
 
+**Two channels, not one.** Entries no parser covers (`.svelte`, `.vue`) are
+returned by `unchecked_entries()`, never as drift. Emitting them as drift put "the
+index was not fully trustworthy" in every exported map the moment a frontend journey
+existed — and prescribed `codegraph index`, which can never clear an unverifiable
+entry. A permanent banner with an impossible remedy is the failure
+`_map_relevant`'s own docstring warns about.
+
+**The remedy depends on the reason.** `live_drift` reads the working tree while the
+rest of `select` reads committed history, so a hard-coded "run `codegraph index`"
+sent an agent to spend minutes rebuilding an index that cannot change the answer for
+the commonest trigger — an uncommitted rename. `REMEDIES` maps each reason to what
+actually fixes it: re-index, commit first, fix the registry, or fix the syntax error.
+
 **Reported, never blocking.** The check approximates in one direction: an entry
 re-exported into its registry `file` rather than defined there would be a false
 positive, so imports count as definitions and the result is a warning. Blocking

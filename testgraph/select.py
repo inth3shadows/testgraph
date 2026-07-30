@@ -179,20 +179,28 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # renamed since the last `codegraph index` (issue #7). Reported as a
     # first-class field AND a warning, never blocking — see registry.live_drift.
     drift = reg.live_drift(repo, registry)
-    if drift:
-        detail = "; ".join(f"{jid}:{name} in {rel} — {why}"
-                           for jid, name, rel, why in drift)
+    for jid, name, rel, why in drift:
+        # Remedy per reason, not one hard-coded "re-index". live_drift reads the
+        # WORKING TREE while everything else here reads committed history, so an
+        # uncommitted rename — the common case — would otherwise send an agent off
+        # to rebuild an index that cannot change this answer.
         warnings.append(
-            f"{len(drift)} journey entr(y/ies) the index resolves but the source "
-            f"does not define: {detail} — the index predates a rename; run "
-            f"`codegraph index` before trusting this answer"
+            f"journey {jid} entry `{name}` ({rel}): {why} — {reg.remedy_for(why)}"
         )
+    # Entries no parser covers are NOT drift and must not ride the warning channel:
+    # re-indexing can never clear them, so a permanent warning would train the
+    # reader to ignore warnings. Reported as their own field instead.
+    unchecked = reg.unchecked_entries(registry)
 
     result = {"base": base, "head": head, "warnings": warnings,
               "unresolved_journeys": unresolved,
               "entry_drift": [
                   {"journey": jid, "entry": name, "file": rel, "reason": why}
                   for jid, name, rel, why in drift
+              ],
+              "entries_unchecked": [
+                  {"journey": jid, "entry": name, "file": rel}
+                  for jid, name, rel in unchecked
               ]}
     if blocking:
         result["status"] = "BLOCKED"

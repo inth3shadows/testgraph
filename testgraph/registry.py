@@ -49,6 +49,49 @@ def unresolved(conn, registry):
     return out
 
 
+# Remedy per reason. One hard-coded "run `codegraph index`" was wrong for most of
+# these: `live_drift` reads the WORKING TREE while the rest of `select` reads
+# committed history, so an in-progress uncommitted rename — the common case — would
+# send an agent off to spend minutes re-indexing something that cannot change the
+# answer. A registry typo or a syntax error is not an index problem at all.
+REMEDIES = {
+    "no definition of that name in the file":
+        "the source and the index disagree — if the rename is committed, run "
+        "`codegraph index`; if it is still uncommitted, commit first (select reads "
+        "committed history); if the registry is simply wrong, fix the entry",
+    "no file matching that path in the tree":
+        "fix the registry entry's `file`, or restore the file",
+    "cannot parse":
+        "the file does not parse, so its symbols cannot be confirmed — fix the "
+        "syntax error",
+}
+
+
+def remedy_for(reason):
+    for key, text in REMEDIES.items():
+        if reason.startswith(key):
+            return text
+    return "verify the registry entry against the source by hand"
+
+
+def unchecked_entries(registry):
+    """[(journey_id, entry_name, file)] for entries `live_drift` cannot verify.
+
+    Kept OFF the integrity-warning channel deliberately. Emitting these as drift
+    put "The index was not fully trustworthy" in every exported map the moment a
+    non-Python entry existed, and told the reader to fix it by re-indexing — which
+    can never clear an `unchecked` row. A banner that is always on, with a remedy
+    that cannot work, is the exact failure `_map_relevant`'s docstring warns about.
+    """
+    out = []
+    for jid, journey in registry["journeys"].items():
+        for entry in journey["entries"]:
+            rel = entry.get("file")
+            if rel and not rel.endswith(".py"):
+                out.append((jid, entry["name"], rel))
+    return out
+
+
 def live_drift(repo, registry):
     """[(journey_id, entry_name, file, reason)] for entries the INDEX resolves but
     the source on disk does not define.
@@ -80,8 +123,7 @@ def live_drift(repo, registry):
             if not rel:
                 continue
             if not rel.endswith(".py"):
-                drift.append((jid, name, rel, "unchecked (no parser for this file type)"))
-                continue
+                continue  # reported by unchecked_entries(), a separate channel
             # Registry `file` values are SUFFIXES — `resolve_symbol` matches them
             # with a LIKE, so `routers/tasks.py` means `backend/app/routers/tasks.py`
             # here. Joining them onto the repo root instead reported all 16 of
@@ -93,9 +135,19 @@ def live_drift(repo, registry):
             failures = []
             for path in candidates:
                 try:
-                    with open(path, encoding="utf-8") as fh:
+                    # bytes, not text: a PEP-263 `# -*- coding: latin-1 -*-` file
+                    # raised UnicodeDecodeError, which is a ValueError and was
+                    # caught by neither clause — turning "reported, never
+                    # blocking" into a traceback in both select and export.
+                    # `ast.parse` honours the coding cookie itself.
+                    with open(path, "rb") as fh:
                         tree = ast.parse(fh.read(), filename=path)
-                except (OSError, SyntaxError) as exc:
+                # ValueError is deliberate but NOT exercised on this
+                # interpreter: CPython <= 3.11 raises it for NUL bytes in source
+                # where 3.14 raises SyntaxError. A mutation removing it survives
+                # the suite here, and that is reported rather than papered over
+                # with a test that cannot fail on any version.
+                except (OSError, SyntaxError, ValueError) as exc:
                     failures.append(f"cannot parse ({exc.__class__.__name__})")
                     continue
                 if _defines(tree, name):
@@ -126,30 +178,44 @@ def _python_sources(repo):
 
 
 def _defines(tree, name):
-    """Does this module define `name` anywhere — including as a method, a
-    decorated function, or a module-level binding?
+    """Does this module define `name` at module or class scope?
 
-    Walks the whole tree rather than the top level: honeyslate's entries include
-    methods, and a top-level-only check would report every one of them as drift.
+    Walks statements rather than `ast.walk`ing everything, because a
+    function-LOCAL binding must not count: `def f(): create_task = build()` made
+    `_defines(tree, "create_task")` true, so renaming the real module-level handler
+    reported no drift — a false negative in the one direction this check exists to
+    cover. Function and class *names* still match at any depth: honeyslate anchors
+    J8 on the method `sweep`, and a top-level-only check would call it drift.
     """
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if node.name == name:
+    return _scan(tree, name, in_function=False)
+
+
+def _scan(node, name, in_function):
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if child.name == name or _scan(child, name, True):
                 return True
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    return True
-        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
-            target = getattr(node, "target", None)
-            if isinstance(target, ast.Name) and target.id == name:
+        elif isinstance(child, ast.ClassDef):
+            if child.name == name or _scan(child, name, in_function):
                 return True
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+        elif isinstance(child, (ast.Import, ast.ImportFrom)):
             # a re-export IS how the symbol becomes available under this path
-            for alias in node.names:
+            for alias in child.names:
                 if (alias.asname or alias.name.split(".")[-1]) == name:
                     return True
+        elif isinstance(child, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            if not in_function and _binds(child, name):
+                return True
+        elif _scan(child, name, in_function):
+            # `if TYPE_CHECKING:` / `try: import ... except ImportError:` blocks
+            # define real module-level names; descending keeps them visible.
+            return True
     return False
+
+
+def _binds(node, name):
+    targets = getattr(node, "targets", None) or [getattr(node, "target", None)]
+    return any(isinstance(t, ast.Name) and t.id == name for t in targets if t)
 
 
 def journey_name(registry, jid):

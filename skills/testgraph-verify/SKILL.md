@@ -55,6 +55,7 @@ below means *unknown*, never *none*:
 | The file has no `###` section at all | Unknown. The indexer may not cover it. Escalate and say so. |
 | `generated from commit` is far behind HEAD | The map under-reports. Regenerate (below) or escalate. |
 | The header carries a **warnings blockquote** | The index was not fully trusted when the map was generated (unpinned schema, sources newer than the index). The map **under-reports**: a symbol missing from it may still reach journeys. Treat absences as *unknown* and regenerate after `codegraph index`. |
+| `select` printed a **journey entry ... no definition** warning | Entry drift: the index still resolves a handler the source no longer defines, so selection ran on stale edges and the journey set may be wrong in either direction — including a confident `NONE`. Follow the remedy on the warning line (it differs per cause: re-index, commit first, or fix the registry entry), then re-run. Until then the answer is *unknown*. |
 | The stamp ends in **`-dirty`** | It was generated from a tree with uncommitted changes, so rows may describe code in no commit and the line hints are shifted further than usual. Regenerate after committing; until then treat a missing symbol as *unknown*. **Strip the `-dirty` suffix before comparing the stamp to a revision** — `<sha>-dirty` is not a valid git rev, and `git log <stamp>..HEAD` fails with `bad revision` rather than reporting no staleness. |
 
 ### Running select
@@ -105,10 +106,13 @@ python3 -m testgraph.export --repo <repo> --out maps/<target>.md
 - **Do not narrow the set on a hunch.** The map is recall-first: a shared symbol
   fanning out to every journey is correct output, not a bug. Deciding a listed
   journey "obviously isn't affected" is the other harmful move.
-- **`NONE` from `select` is only trustworthy when the diff was non-empty and no
-  `RECALL DEGRADED` line appeared.** Those are the two ways it says nothing while
-  looking confident: an empty range (nothing to analyse) and a changed file with no
-  symbols in the index (impact unbounded). Check both, then believe it.
+- **`NONE` from `select` is only trustworthy when the diff was non-empty, no
+  `RECALL DEGRADED` line appeared, and no entry-drift `WARN:` line appeared.** Those
+  are the three ways it says nothing while looking confident: an empty range
+  (nothing to analyse), a changed file with no symbols in the index (impact
+  unbounded), and a journey entry the index still resolves but the source no longer
+  defines (selection ran on stale edges, so the journey set may be wrong in either
+  direction). Check all three, then believe it.
 - Do not edit the map by hand. It is generated, and a hand-edit that drops a
   journey is indistinguishable from a graph bug.
 

@@ -553,6 +553,39 @@ class IntoTargetTests(unittest.TestCase):
             payload["meta"],
         )
 
+    def test_drift_warnings_reach_stderr_and_survive_a_blocked_run(self):
+        # appended AFTER the print loop, drift warnings reached neither the terminal
+        # nor — on a run that then blocked — the file, discarding the one signal that
+        # the registry is stale on exactly the runs most likely to carry it.
+        with open(self.reg) as fh:
+            registry = json.load(fh)
+        # handler_a is in the fixture index; nothing in this repo defines it
+        registry["journeys"]["J1"]["entries"] = [
+            {"name": "handler_a", "file": "app/svc.py"}
+        ]
+        with open(os.path.join(self.tmp, "app_svc_placeholder.py"), "w") as fh:
+            fh.write("x = 1\n")
+        os.makedirs(os.path.join(self.tmp, "app"), exist_ok=True)
+        with open(os.path.join(self.tmp, "app", "svc.py"), "w") as fh:
+            fh.write("y = 2\n")  # exists, does not define handler_a
+        with open(self.reg, "w") as fh:
+            json.dump(registry, fh)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            exp.main(["--repo", self.tmp, "--registry", self.reg, "--into-target"])
+        self.assertIn("no definition", err.getvalue())
+
+        # and again on a run that blocks: the warning must still be printed
+        registry["codegraph_schema_version"] = 99
+        with open(self.reg, "w") as fh:
+            json.dump(registry, fh)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = exp.main(["--repo", self.tmp, "--registry", self.reg,
+                           "--into-target"])
+        self.assertEqual(rc, 2)
+        self.assertIn("no definition", err.getvalue())
+
     def test_out_and_into_target_are_exclusive(self):
         rc = exp.main(["--repo", self.tmp, "--registry", self.reg, "--into-target",
                        "--out", os.path.join(self.tmp, "x.md")])
@@ -885,6 +918,21 @@ class CommitStampTests(unittest.TestCase):
             exp.commit_stamp(os.path.join(self.repo, "app")).endswith("-dirty")
         )
 
+    def test_target_nested_under_a_test_named_directory_still_goes_dirty(self):
+        # `git status` prints repo-root-relative paths while `ls-files` prints
+        # cwd-relative ones. For `--repo <repo>/e2e/app` every status path gained a
+        # leading `e2e/`, `_is_test` matched that segment, and the map was stamped
+        # clean whatever was uncommitted — the bug commit_stamp exists to prevent,
+        # reintroduced by the path base mismatch.
+        self._write("e2e/app/svc.py", "x = 1\n")
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "add nested target")
+        self._write("e2e/app/svc.py", "x = 2\n")
+        self.assertTrue(
+            exp.commit_stamp(os.path.join(self.repo, "e2e", "app")).endswith("-dirty"),
+            "uncommitted change under a test-named parent stamped clean",
+        )
+
     def test_uncommitted_test_file_is_not_dirty(self):
         # `impacted_closure` walks callers, so a test symbol reaches no journey
         # entry and no test file has ever produced a row. An edit that cannot
@@ -1027,10 +1075,63 @@ _settings = object()
         self.assertEqual(len(drift), 1)
         self.assertIn("cannot parse", drift[0][3])
 
-    def test_non_python_entry_is_reported_unchecked_not_passed(self):
-        drift = reg.live_drift(self.tmp, self._reg("mount", "web/App.svelte"))
+    def test_non_python_entry_is_unchecked_on_its_own_channel(self):
+        # NOT drift: emitting it as one put "the index was not fully trustworthy"
+        # in every exported map the moment a frontend journey existed, prescribing
+        # a `codegraph index` that can never clear an unverifiable entry.
+        registry = self._reg("mount", "web/App.svelte")
+        self.assertEqual(reg.live_drift(self.tmp, registry), [])
+        self.assertEqual(
+            reg.unchecked_entries(registry), [("J1", "mount", "web/App.svelte")]
+        )
+
+    def test_remedy_depends_on_the_reason(self):
+        # one hard-coded "run `codegraph index`" was wrong for most reasons:
+        # live_drift reads the working tree, the rest of select reads committed
+        # history, and a registry typo is not an index problem at all.
+        self.assertIn("commit first",
+                      reg.remedy_for("no definition of that name in the file"))
+        self.assertIn("registry entry",
+                      reg.remedy_for("no file matching that path in the tree"))
+        self.assertIn("syntax error", reg.remedy_for("cannot parse (SyntaxError)"))
+        self.assertNotIn("codegraph index",
+                         reg.remedy_for("cannot parse (SyntaxError)"))
+
+    def test_non_utf8_source_is_reported_not_raised(self):
+        # a PEP-263 latin-1 file raised UnicodeDecodeError — a ValueError, caught by
+        # neither clause — turning "reported, never blocking" into a traceback in
+        # both select and export.
+        path = os.path.join(self.tmp, "backend", "app", "routers", "legacy.py")
+        with open(path, "wb") as fh:
+            fh.write(b"# -*- coding: latin-1 -*-\ndef caf\xe9():\n    pass\n")
+        drift = reg.live_drift(self.tmp, self._reg("cafe", "routers/legacy.py"))
         self.assertEqual(len(drift), 1)
-        self.assertIn("unchecked", drift[0][3])
+        self.assertIn("no definition", drift[0][3])
+
+    def test_null_byte_source_is_reported_not_raised(self):
+        # ast.parse raises ValueError (not SyntaxError) for a NUL byte, so the
+        # widened except clause is load-bearing beyond the decode case.
+        path = os.path.join(self.tmp, "backend", "app", "routers", "nul.py")
+        with open(path, "wb") as fh:
+            fh.write(b"def ok():\n    pass\n\x00")
+        drift = reg.live_drift(self.tmp, self._reg("ok", "routers/nul.py"))
+        self.assertEqual(len(drift), 1)
+        self.assertIn("cannot parse", drift[0][3])
+
+    def test_function_local_binding_does_not_mask_drift(self):
+        self._write("backend/app/routers/local.py",
+                    "def f():\n    create_task = object()\n    return create_task\n")
+        drift = reg.live_drift(self.tmp, self._reg("create_task", "routers/local.py"))
+        self.assertEqual(len(drift), 1, "a function-local binding satisfied a "
+                                       "module-level entry")
+
+    def test_conditional_module_level_import_still_counts(self):
+        self._write("backend/app/routers/cond.py",
+                    "try:\n    from .x import handler\nexcept ImportError:\n"
+                    "    handler = None\n")
+        self.assertEqual(
+            reg.live_drift(self.tmp, self._reg("handler", "routers/cond.py")), []
+        )
 
     def test_select_surfaces_drift_as_a_warning_and_a_field(self):
         repo, run = _git_repo(self.tmp2(), {"app/svc.py": 22})
@@ -1049,8 +1150,9 @@ _settings = object()
             res["entry_drift"],
         )
         self.assertTrue(
-            any("does not define" in w for w in res["warnings"]), res["warnings"]
+            any("no definition" in w for w in res["warnings"]), res["warnings"]
         )
+        self.assertEqual(res["entries_unchecked"], [])
 
     def tmp2(self):
         d = tempfile.mkdtemp()
