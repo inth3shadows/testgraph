@@ -69,6 +69,9 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
   node to its journey.
 - `testgraph/select.py` — diff parsing (test/e2e files excluded as seeds),
   orchestration, ranking, human + `--json` output, the CLI.
+- `testgraph/propose.py` — drafts a registry for a repo that has none: ast scan
+  for route-decorated handlers, index resolution, spot-check derivation, declared
+  blind spots. Writes `approved: false`.
 - `journeys/honeyslate.json` — 8 journeys (submit, browse, edit, reschedule,
   comments, auth, gcal sync, scheduler) + `spot_checks` floors for the guard.
 - `harness/accuracy.py` — checks each labeled commit out in an isolated worktree
@@ -348,6 +351,68 @@ gone" — caught by running it against the real registry rather than only the fi
 and pinned by `test_registry_file_is_a_suffix_not_a_repo_relative_path`. Cost on
 honeyslate: 87 ms, zero drift rows.
 
+## Proposed Registries (issue #6)
+
+Hand-authoring `journeys/<target>.json` is the reason testgraph covers one repo,
+and "registry completeness is manual" is the documented silent-under-selection
+risk. `testgraph.propose` converts authoring cost into review cost.
+
+**The split: this module does discovery, an agent does judgment.** Discovery —
+which symbols are HTTP entry points, and do they resolve in the index — is
+deterministic and belongs in `ast` plus the graph. Grouping and naming are
+judgment a human has to approve anyway, so they live in
+`skills/testgraph-propose/`. No API key and no runtime dependency were added: the
+same reasoning that made `live_drift` parse with `ast` instead of calling RunEcho
+("testgraph is a CLI with no MCP client") applies unchanged here. The draft is a
+complete, valid registry on its own, so the tool degrades rather than fails when
+no agent is involved.
+
+**Discovery** matches decorators by *attribute* (`.get`, `.post`, `.route`,
+`.websocket`, …) rather than by receiver name, which makes it work for FastAPI,
+APIRouter, Flask, Blueprint, Starlette, Sanic and AIOHTTP without naming any of
+them. Module-level `def`s only: a function-local handler is not importable, so it
+can never be an entry symbol the registry could resolve.
+
+**Split, never merge.** The draft is one journey per handler. Splitting is the
+safe direction — more journeys, each narrower, recall unaffected — while merging
+two flows behind one id hides which of them broke. So the mechanical pass never
+guesses a boundary.
+
+**Unresolvable candidates are excluded, not shipped.** `registry.unresolved`
+treats a journey with no resolvable entry as **blocking**, so one bad drafted
+entry would take the whole registry down instead of degrading. They are reported
+in `unresolved_candidates` with the reason.
+
+**Blind spots are declared, not guessed.** Schedulers, CLI entry points,
+callback-registered consumers and middleware carry no decorator. honeyslate's J8
+(`scheduler.sweep`, `scheduler.start`) is this class — a human knew to add it. A
+heuristic that tried to infer them would invent journeys, so the draft names the
+gap and the skill sends the agent to close it.
+
+**Approval is a first-class field.** Drafts carry `"approved": false`;
+`select` and `export` emit `UNAPPROVED REGISTRY` on the shared warning channel and
+still run, the same posture as `RECALL DEGRADED`. Blocking was rejected — it would
+make the proposer useless until a human edits JSON. A **missing** `approved` key
+warns too: an unmarked registry is unknown provenance, not an approved one. That is
+safe from the always-on-warning failure `unchecked_entries` documents, because the
+named remedy always clears it.
+
+**Measured against honeyslate:** 17 handlers found, covering all 14 route-handler
+entries the hand registry has, and surfacing three it misses — `delete_task`,
+`google_status`, `google_selftest`. J8's two scheduler methods are the declared
+blind spot. Two defects were caught by running it on the real repo rather than the
+fixture, both now pinned by tests: the spot-check picked `login` out of
+`backend/tests/conftest.py` (a test fixture anchoring the product-graph guard), and
+the non-Python blind-spot count read 96 because `.svelte-kit/` and `build/` were
+not in `_SKIP_DIRS` — 13 is the real number.
+
+**Fan-in does not rank entry points.** The draft records it, but a handler is
+called by the framework, not by the codebase, so its inbound-edge count is
+structurally ~0: all 17 honeyslate candidates scored 0. It is omitted from the
+human output rather than printed as a column of zeros. This is also why
+`_spot_checks` excludes entry symbols — pinning one sets a floor of 0 and the
+guard would pass on a wrecked index.
+
 ## Schema Pin (R1)
 
 `integrity.check()` reads the index's `schema_versions` row and compares it to
@@ -572,9 +637,15 @@ rather than arguable.
 
 ## Known Limitations
 
-- **Scope:** honeyslate only. Other repos need their own journey registry. Frontend
-  files are now *seeded* (issue #21), but no journey has a frontend entry point, so
-  a frontend change is only visible where it reaches a backend entry.
+- **Scope:** honeyslate is the only *approved* registry. `testgraph.propose`
+  (issue #6) drafts one for any Python repo with decorator-style routes, but a
+  draft is unreviewed by construction and says so on every run. Frontend files are
+  *seeded* (issue #21), but no journey has a frontend entry point, so a frontend
+  change is only visible where it reaches a backend entry.
+- **The proposer is Python-and-decorators only.** A Django `urls.py`, a
+  class-based view, or any non-Python framework yields no candidates. The run
+  reports its blind spots, writes **nothing**, and exits 1 — an empty registry
+  would be valid, approvable, and answer `NONE` for every change.
 - **Precision on shared symbols:** a config/model edit fans out to most journeys
   by design (recall-first). Mean precision 0.68 on the labeled set; the low case
   is 0.38 (a `Settings` field change → all 8).

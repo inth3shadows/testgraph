@@ -12,7 +12,10 @@ that). Its job is the layer no driver has — deciding *what is worth testing*.
 ## How It Works
 
 A **journey registry** names each user journey and its entry symbols (route
-handlers, the scheduler sweep, etc.). For a diff, testgraph:
+handlers, the scheduler sweep, etc.). `testgraph.propose` drafts one for a new
+repo by scanning route decorators and the index, marking it `approved: false`
+until a human reads it — an unapproved registry runs, loudly, but never silently.
+For a diff, testgraph:
 
 1. maps changed line ranges to the symbols that own them (the *seeds*);
 2. walks the CodeGraph edge graph in reverse — transitively — to every symbol
@@ -54,8 +57,11 @@ python3 -m testgraph.select --repo <path> --json
 # Export the static journey map an agent reads pre-commit:
 python3 -m testgraph.export --repo <path> --out maps/honeyslate.md
 
+# Draft a registry for a repo that has none (then review it — see the skill):
+python3 -m testgraph.propose --repo <path>
+
 # Run the tests and the accuracy harness:
-python3 -m unittest tests.test_core
+python3 -m unittest tests.test_core tests.test_propose tests.test_skill_contract
 python3 harness/accuracy.py            # 5 hand-labeled real commits
 python3 harness/seed_regressions.py    # ~20 seeded mutation sites
 ```
@@ -71,6 +77,8 @@ python3 harness/seed_regressions.py    # ~20 seeded mutation sites
   independent oracle), `adjudications.json` (hand-ruled disagreements).
 - `maps/` — generated journey maps (symbol -> journeys, grouped by file).
 - `skills/testgraph-verify/` — the agent skill that reads a map pre-commit.
+- `skills/testgraph-propose/` — the agent skill that reviews a drafted registry:
+  groups handlers into journeys, closes the declared blind spots, approves.
 - `tests/` — unit tests over a synthetic fixture (no CodeGraph needed).
 
 ## Status

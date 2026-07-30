@@ -1,6 +1,7 @@
 {
   "target": "honeyslate",
   "note": "Hand-authored journey registry. Entries are route handlers + the scheduler sweep. name+file resolves node ids at run time.",
+  "approved": true,
   "journeys": {
     "J1": {"name": "submit task",   "entries": [{"name": "create_task", "file": "routers/tasks.py"}]},
     "J2": {"name": "browse tasks",  "entries": [
