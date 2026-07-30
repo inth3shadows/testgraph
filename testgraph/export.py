@@ -25,11 +25,73 @@ Usage:
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from . import db as dbmod
 from . import integrity
 from . import registry as reg
+from . import select as sel
+
+
+def _map_relevant(path):
+    """Could an uncommitted change to `path` make the map describe uncommitted code?
+
+    Only for a file the indexer covers. Marking the tree dirty over an untracked
+    `NOTES.md`, testgraph's own `.testgraph/journey-map.md`, or codegraph's
+    `.codegraph/` would mark nearly every real export dirty — honeyslate has two
+    untracked docs right now — and a marker that is always on is one the reader
+    learns to skip past. That would defeat the purpose it was added for.
+    """
+    return path.endswith(sel.PRODUCT_EXT)
+
+
+class StampError(Exception):
+    """The target's provenance could not be established."""
+
+
+def commit_stamp(repo):
+    """`<short sha>`, or `<short sha>-dirty` when the target tree has changes.
+
+    Issue #25: this used to be a `subprocess.run` with no `check`, whose stdout
+    fell back to the string `"unknown"`. A non-git `--repo`, or any git failure,
+    therefore produced a map that *looked* stamped while the skill's staleness
+    escalation ("`generated from commit` is far behind HEAD") had nothing to
+    compare and silently never fired. Failing open on provenance is the same class
+    of defect as answering `NONE` on an unmappable diff.
+
+    The dirty marker matters because the map is built from the CodeGraph index,
+    which can be ahead of the last commit: without it, a map describing
+    uncommitted code claims clean provenance.
+    """
+    head = subprocess.run(
+        ["git", "-C", repo, "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True,
+    )
+    if head.returncode != 0 or not head.stdout.strip():
+        raise StampError(
+            f"cannot read the target's HEAD ({repo}): "
+            f"{head.stderr.strip() or 'git produced no output'} — the map's "
+            f"staleness check needs a real commit to compare against"
+        )
+    sha = head.stdout.strip()
+    status = subprocess.run(
+        # -uall: without it git collapses a wholly-untracked directory to `?? web/`,
+        # which hides the extension — a brand-new `web/App.svelte` then read as
+        # irrelevant and the tree looked clean. Caught by test, not by inspection.
+        ["git", "-C", repo, "status", "--porcelain", "-uall"],
+        capture_output=True, text=True,
+    )
+    if status.returncode != 0:
+        raise StampError(
+            f"cannot read the target's working-tree state ({repo}): "
+            f"{status.stderr.strip() or 'git failed'}"
+        )
+    for line in status.stdout.splitlines():
+        paths = line[3:].strip().strip('"').split(" -> ")  # renames carry both
+        if any(_map_relevant(p.strip().strip('"')) for p in paths if p):
+            return f"{sha}-dirty"
+    return sha
 
 
 def build_map(conn, registry):
@@ -74,6 +136,19 @@ def render_markdown(rows_by_file, registry, meta):
         f"Target: `{meta['repo']}` · index schema {meta['schema']} · "
         f"generated from commit `{meta['commit']}`",
         "",
+    ]
+    if str(meta["commit"]).endswith("-dirty"):
+        # The map is built from the CodeGraph index, which can be ahead of the
+        # last commit. Without saying so, a map describing uncommitted code claims
+        # clean provenance and the reader cannot tell (issue #25).
+        out += [
+            "> **`-dirty`: the target had uncommitted changes when this was "
+            "generated.** Rows may describe code that is not in any commit, and "
+            "the line hints are shifted by whatever is still unstaged. Treat a "
+            "missing symbol as *unknown* and regenerate after committing.",
+            "",
+        ]
+    out += [
         "Look up the symbols you changed **by name**. Every journey listed for "
         "them may have changed behavior and is worth verifying. This is "
         "**recall-first**: a shared symbol legitimately fans out to many "
@@ -164,6 +239,14 @@ def main(argv=None):
     )
     for w in warnings:
         print(f"WARN: {w}", file=sys.stderr)
+    # Provenance is checked alongside index integrity, and blocks for the same
+    # reason: a map whose stamp cannot be trusted disables the consumer's only
+    # staleness escalation, and the file outlives the run (issue #25).
+    stamp = None
+    try:
+        stamp = commit_stamp(args.repo)
+    except StampError as exc:
+        blocking.append(str(exc))
     # A journey whose entries no longer resolve vanishes from every row while the
     # legend keeps advertising it. A persisted map that lies is worse than none.
     for jid, names in reg.unresolved(conn, registry):
@@ -180,16 +263,10 @@ def main(argv=None):
         return 2
 
     rows_by_file = build_map(conn, registry)
-    import subprocess
-
-    commit = subprocess.run(
-        ["git", "-C", args.repo, "rev-parse", "--short", "HEAD"],
-        capture_output=True, text=True,
-    ).stdout.strip() or "unknown"
     meta = {
         "repo": args.repo,
         "schema": dbmod.schema_version(conn),
-        "commit": commit,
+        "commit": stamp,
         "symbols": sum(len(v) for v in rows_by_file.values()),
     }
 

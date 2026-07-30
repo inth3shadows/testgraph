@@ -152,6 +152,28 @@ dropped weak paths would under-report). Verified by mutation: narrowing
 `_is_product` to `.py`, over-reporting a journey on every row, and dropping
 low-confidence journeys each turn it red.
 
+### Provenance fails closed (issue #25)
+
+The stamp was `subprocess.run(...).stdout.strip() or "unknown"` — no `check`. A
+non-git `--repo`, or any git failure, wrote a map that *looked* stamped while the
+consumer's staleness escalation ("`generated from commit` is far behind HEAD") had
+nothing to compare and silently never fired. Provenance failing open is the same
+defect class as answering `NONE` on an unmappable diff, so it now blocks on the
+same path as a corrupt index: no stamp, no map, exit 2, nothing written.
+
+The stamp also reported `HEAD` for a dirty tree, so a map built from uncommitted
+code claimed clean provenance — the index can be ahead of the last commit. It is
+now `<sha>-dirty`, and both the artifact and the skill say what that means.
+
+**What counts as dirty:** only paths whose extension is in `select.PRODUCT_EXT`.
+An untracked `NOTES.md`, testgraph's own `.testgraph/journey-map.md`, or
+codegraph's `.codegraph/` must not trip it — honeyslate has two untracked docs
+right now, and a marker that is always on is one the reader learns to skip.
+Sharing `PRODUCT_EXT` with the selector means #21's widening widened this too,
+rather than leaving a Python-only provenance check behind. `git status` runs with
+`-uall`: without it git collapses a wholly-untracked directory to `?? web/`, which
+hides the extension, and a brand-new `web/App.svelte` read as irrelevant.
+
 ### Keyed by symbol, not by line (issue #24)
 
 `skills/testgraph-verify/SKILL.md` matches rows by **symbol name**, treating line

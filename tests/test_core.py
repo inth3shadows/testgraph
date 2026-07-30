@@ -2,6 +2,8 @@
 they run without codegraph. Covers S2 (guard blocks a corrupted index) and the
 recall-critical closure behaviors (imports edge + file-expansion; leaf stays
 tight)."""
+import contextlib
+import io
 import json
 import os
 import re
@@ -472,6 +474,19 @@ class IntoTargetTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+        # A real repo, because provenance is now required: this fixture used to be
+        # a bare temp directory and the export happily wrote a map stamped
+        # `unknown` (issue #25). The target of a real run is always a git repo.
+        for cmd in (("init", "-q"), ("config", "user.email", "t@t"),
+                    ("config", "user.name", "t")):
+            subprocess.run(("git",) + cmd, cwd=self.tmp, check=True,
+                           capture_output=True)
+        with open(os.path.join(self.tmp, "seed.txt"), "w") as fh:
+            fh.write("seed\n")
+        subprocess.run(["git", "add", "-A"], cwd=self.tmp, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=self.tmp, check=True,
+                       capture_output=True)
         os.makedirs(os.path.join(self.tmp, ".codegraph"))
         db = os.path.join(self.tmp, ".codegraph", "codegraph.db")
         src = build_fixture()
@@ -611,6 +626,18 @@ class MarkdownRenderingTests(unittest.TestCase):
         # the skill's staleness escalation keys off this stamp.
         self.assertIn("generated from commit `abc1234`", self.md)
 
+    def test_dirty_stamp_is_explained_in_the_artifact(self):
+        # issue #25: a `-dirty` stamp that the reader cannot interpret is no better
+        # than no stamp. The explanation must ship inside the file, which outlives
+        # the run and carries no other warning.
+        md = exp.render_markdown(self.rows, self.REG, {**self.META,
+                                                       "commit": "abc1234-dirty"})
+        self.assertIn("generated from commit `abc1234-dirty`", md)
+        self.assertIn("uncommitted changes", md)
+        self.assertIn("regenerate after committing", md.lower())
+        # and a clean stamp must NOT carry the warning, or it means nothing
+        self.assertNotIn("uncommitted changes", self.md)
+
     def test_artifact_and_skill_agree_on_the_unattributable_edit(self):
         """The artifact and SKILL.md are two documents stating one rule, and
         nothing pinned their agreement — so they drifted apart inside the very
@@ -680,6 +707,94 @@ def _registry_file(tmp, journeys, name="reg.json"):
             fh,
         )
     return path
+
+
+class CommitStampTests(unittest.TestCase):
+    """Issue #25: the stamp used to fall back to the literal string `"unknown"` on
+    any git failure, which disabled the consumer's staleness escalation while
+    looking stamped — provenance failing open. It also reported HEAD for a dirty
+    tree, so a map built from uncommitted code claimed clean provenance."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 4})
+
+    def _write(self, rel, text="x = 1\n"):
+        full = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as fh:
+            fh.write(text)
+
+    def test_clean_tree_stamps_the_short_sha(self):
+        stamp = exp.commit_stamp(self.repo)
+        self.assertRegex(stamp, r"^[0-9a-f]{7,}$")
+
+    def test_modified_tracked_file_is_dirty(self):
+        self._write("app/svc.py", "changed = 1\n")
+        self.assertTrue(exp.commit_stamp(self.repo).endswith("-dirty"))
+
+    def test_staged_change_is_dirty(self):
+        self._write("app/new.py")
+        self.run("git", "add", "-A")
+        self.assertTrue(exp.commit_stamp(self.repo).endswith("-dirty"))
+
+    def test_untracked_source_is_dirty(self):
+        # codegraph indexes it, so the map can describe code in no commit.
+        self._write("app/brand_new.py")
+        self.assertTrue(exp.commit_stamp(self.repo).endswith("-dirty"))
+
+    def test_changes_the_indexer_ignores_do_not_mark_the_tree_dirty(self):
+        # `--into-target` writes .testgraph/journey-map.md, codegraph keeps
+        # .codegraph/, and a repo usually has a stray doc or two (honeyslate has
+        # two untracked ones right now). A marker that is always on is one the
+        # reader learns to skip, so only indexed extensions count.
+        self._write(".testgraph/journey-map.md", "# map\n")
+        self._write(".codegraph/codegraph.db", "binary-ish\n")
+        self._write("NOTES.md", "# notes\n")
+        self.assertFalse(
+            exp.commit_stamp(self.repo).endswith("-dirty"),
+            "a change the indexer cannot see marked the target dirty",
+        )
+
+    def test_uncommitted_frontend_file_is_dirty_too(self):
+        # PRODUCT_EXT is shared with the selector, so widening it (#21) widened
+        # this automatically rather than leaving a Python-only provenance check.
+        self._write("web/App.svelte", "<script>let x = 1</script>\n")
+        self.assertTrue(exp.commit_stamp(self.repo).endswith("-dirty"))
+
+    def test_renamed_source_is_dirty(self):
+        # a rename's status line carries `old -> new`; reading only one side
+        # would miss a moved module, the case select.py already handles with -M.
+        self.run("git", "mv", "app/svc.py", "app/renamed.py")
+        self.assertTrue(exp.commit_stamp(self.repo).endswith("-dirty"))
+
+    def test_non_git_target_raises_instead_of_stamping_unknown(self):
+        with self.assertRaises(exp.StampError) as caught:
+            exp.commit_stamp(os.path.join(self.tmp, "not-a-repo"))
+        self.assertIn("HEAD", str(caught.exception))
+
+    def test_export_blocks_and_writes_nothing_without_provenance(self):
+        # the whole point: no stamp -> no map, on the same path as a corrupt index.
+        plain = os.path.join(self.tmp, "plain")
+        os.makedirs(os.path.join(plain, ".codegraph"))
+        db = os.path.join(plain, ".codegraph", "codegraph.db")
+        dst = sqlite3.connect(db)
+        build_fixture().backup(dst)
+        dst.close()
+        registry = _registry_file(
+            self.tmp,
+            {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                                "file": "app/svc.py"}]}},
+            name="reg-plain.json",
+        )
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = exp.main(["--repo", plain, "--registry", registry,
+                           "--into-target"])
+        self.assertEqual(rc, 2)
+        self.assertIn("HEAD", err.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(plain, ".testgraph")))
 
 
 class MapAgreesWithSelectorTests(unittest.TestCase):

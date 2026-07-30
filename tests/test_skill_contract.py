@@ -249,6 +249,21 @@ class SkillRulesAreSafe(unittest.TestCase):
             "the skill is back to telling the agent to match by line number (#24)",
         )
 
+    def test_dirty_stamp_has_an_escalation_row(self):
+        # issue #25: the map can now be stamped `<sha>-dirty`, meaning it may
+        # describe code in no commit. A marker the consumer's rules never mention
+        # is a marker the consumer ignores.
+        rows = escalation_rows(self.text)
+        dirty = [r for r in rows if "-dirty" in r]
+        self.assertTrue(dirty, "no escalation row for a `-dirty` stamp")
+        self.assertRegex(
+            dirty[0], r"[Rr]egenerate", "the -dirty row names no remedy"
+        )
+        self.assertIn(
+            "unknown", dirty[0],
+            "the -dirty row must not let a missing symbol read as 'no journeys'",
+        )
+
     def test_absence_rule_keeps_its_qualifier(self):
         # the original #18 defect was an unqualified "absent -> no journeys".
         # Matched on whitespace-collapsed text: the exact substring ended at the
