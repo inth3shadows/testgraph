@@ -480,34 +480,47 @@ built this week fired on real data the first time they met a second target:
   parse cannot verify any of them and the map says so once, as a limitation — not as
   eight integrity alarms with a `codegraph index` remedy that could never clear them.
 
-**What this does NOT prove, and the honest reason.** #13 asked whether selectivity
-holds up beyond 8 honeyslate journeys. This target cannot answer that yet. Over the
-14 commits up to the index commit `0305ada`, `select` returned **all 8 journeys on 8
-of them**, every one with `recall_degraded: true` — and the cause is index coverage,
-not code coupling. `src/lib/seal-submission.ts`, `src/lib/audit.ts`,
-`src/lib/labels.ts`, `src/app/staff/[submissionId]/pdf-actions.ts` and others have
-**zero nodes** in that index, so their changed lines resolve to nothing:
+**Selectivity, measured after rebuilding the index.** The first pass over the 14
+commits up to `0305ada` returned all 8 journeys on 8 of them, every one
+`recall_degraded: true` — and that was diagnosed as index coverage rather than code
+coupling, because `src/lib/seal-submission.ts`, `src/lib/audit.ts`,
+`src/lib/labels.ts` and `staff/[submissionId]/pdf-actions.ts` had zero nodes.
+`codegraph index` was then rerun: **98 files, 662 nodes** (was 78 files, 547), those
+four files now carry 14/5/2/11 symbols. Re-running the same sweep:
 
-```
-090c286  harden: only a signed submission can be sealed
-  src/app/staff/[submissionId]/pdf-actions.ts   nodes=0   -> 8/8 journeys, degraded
-```
+| | signedintake (14 commits) | honeyslate (5 labeled commits) |
+|---|---|---|
+| mean selected | **2.21 / 8 (27.7%)** | 3.4 / 8 (42.5%) |
+| journey-runs avoided | **72.3%** | 57.5% |
+| `<= 2` journeys | **12 of 14** (4 of them zero) | 3 of 5 |
+| `3-5` journeys | **0 of 14** | 0 of 5 |
+| `>= 6` journeys | **2 of 14** | 2 of 5 |
+| degraded runs | **0** | 0 |
 
-The remaining commits behave: 4 select nothing (docs and merge commits with no
-product files) and 2 select exactly 1 journey.
+**The diagnosis held:** zero degrades after the rebuild, so all eight of those 8/8
+answers were the incomplete index, not the codebase. The earlier numbers were a tool
+artifact, as flagged at the time.
 
-**The finding worth keeping:** pre-#29, all eight of those degraded commits would have
-printed `journeys to test: NONE` — a confident nothing on commits hardening payment
-sealing and PDF regeneration. The zero-seed guard turns an incomplete index from
-silent under-selection into a loud "test everything". That is the guard justifying
-itself on a target it was not designed against.
+**The bimodal shape replicated on an independent codebase.** Narrow or total, nothing
+between: 12 commits touch 0-2 journeys, 2 touch all 8 (a merge spanning 8 files, and a
+feature editing `db/schema.ts` — a shared symbol, which fans out by design). This is
+#13's falsification test, and the answer is that the shape is a property of how change
+lands in a codebase, not of honeyslate. Selectivity was *better* here than on
+honeyslate (72.3% vs 57.5% avoided).
 
-**Methodology limit, stated:** these numbers come from ONE index pinned at `0305ada`,
-not a per-commit index like `harness/accuracy.py` builds for honeyslate. Selectivity
-on signedintake is not measurable until the index covers `src/lib/**` and the newer
-server actions — rebuild it, then re-run. Until then #13's bimodality question stays
-open, and claiming otherwise from these numbers would be reporting a tool artifact as
-a property of the codebase.
+**What is still untested:** #13's criterion said 20+ journeys. This is a second
+8-journey registry, so the shape replicates at the same scale — whether the broad tail
+grows or shrinks as journey count rises is still open, and #10's ledger is what would
+answer it from real runs rather than a 14-commit sweep.
+
+**Methodology limit, stated:** these numbers come from ONE index built at `0305ada`,
+not a per-commit index like `harness/accuracy.py` builds for honeyslate. For commits
+at or before the index commit that is sound for coverage but not for line alignment —
+a hunk's line numbers are read against the indexed snapshot, so an older commit's
+ranges can map to a neighbouring symbol. There is also no hand-labeled oracle here, so
+these are selection *sizes*, not precision or recall. A per-commit harness for
+signedintake would fix both and is the honest next step if these numbers ever need to
+carry weight beyond "the shape replicates".
 
 ## The null hypothesis: what selection is worth at 8 journeys (issue #13)
 
@@ -541,6 +554,14 @@ correct engineering answer and this repo is ceremony.
 3. **The ranking.** When 8 of 8 are selected, `rank` and the `!` weak-edge flag still
    say which to check first and which not to trust. That is a different product from
    selection.
+
+**Update — the second registry ran (#11) and the shape replicated.** signedintake:
+mean 2.21 of 8 journeys, 72.3% of journey-runs avoided, **12 of 14 commits select <= 2
+and 2 select all 8, with nothing in between**. Same bimodality, an independent
+codebase, a different language, and better selectivity than honeyslate. So the shape
+is how change lands in code, not a honeyslate quirk — and the "narrow or total"
+pattern is what the guards and the ranking exist to serve. Still open: this is a
+second *8-journey* registry, so the 20+ question below is untested.
 
 **What would falsify the whole thing:** if a second registry (#11) shows the same
 bimodal shape at 20+ journeys — narrow commits stay narrow, shared-symbol commits

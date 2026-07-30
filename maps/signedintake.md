@@ -2,10 +2,6 @@
 
 Target: `/home/ericm/personal_projects/signedintake/main` · index schema 8 · generated from commit `0305ada`
 
-> **The index was not fully trustworthy when this map was generated.** These warnings were raised at generation time and are reproduced here because this file outlives the run that made it. A stale or unverified index makes the map *under-report* — a symbol missing from it may still reach journeys.
->
-> - 81 source file(s) newer than the index (e.g. drizzle.config.ts) — consider `codegraph sync`
-
 Look up the symbols you changed **by name**. Every journey listed for them may have changed behavior and is worth verifying. This is **recall-first**: a shared symbol legitimately fans out to many journeys.
 
 **Line numbers are frozen at the commit above and are a hint only** — your own edit has already shifted them, so an insertion higher up the file makes the ranges point at the wrong symbol (issue #24). Match the symbol name first, and fall back to the range when you cannot: import nodes and module-level bindings get rows too, and an edit to one of those looks like no symbol you touched. An edit you cannot attribute to any row is *unknown*, never *no journeys*.
@@ -29,50 +25,36 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `next/server` | J7 | 1–1 |
-| `@/db` | J7 | 2–2 |
-| `@/db/schema` | J7 | 3–3 |
-| `drizzle-orm` | J7 | 4–4 |
 | `GET` | J7 | 8–28 |
 
 ### `src/app/api/webhooks/stripe/route.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `next/server` | J6 | 5–5 |
-| `@/db` | J6 | 6–6 |
-| `@/db/schema` | J6 | 7–7 |
-| `drizzle-orm` | J6 | 8–8 |
-| `@/lib/payments` | J6 | 9–9 |
-| `@/lib/payments/stripe` | J6 | 10–10 |
-| `stripe` | J6 | 11–11 |
 | `POST` | J6 | 13–94 |
 
 ### `src/app/f/[token]/FillForm.tsx`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `react` | J1 | 3–3 |
-| `./actions` | J1 | 4–4 |
-| `@/components/FormRenderer` | J1 | 5–5 |
-| `@/lib/form-def` | J1 | 6–6 |
-| `FillFormProps` | J1 | 8–11 |
-| `FillForm` | J1 | 15–83 |
+| `./actions` | J1 J4 | 4–4 |
+| `FillFormProps` | J1 J4 | 8–14 |
+| `FillForm` | J1 J4 | 18–96 |
 
 ### `src/app/f/[token]/actions.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `LinkAlreadyUsedError` | J1 | 31–31 |
-| `SubmitResult` | J1 | 33–33 |
-| `submitForm` | J1 | 35–383 |
+| `LinkAlreadyUsedError` | J1 J4 | 32–32 |
+| `SubmitResult` | J1 J4 | 34–34 |
+| `submitForm` | J1 J4 | 36–397 |
 
 ### `src/app/f/[token]/page.tsx`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `./FillForm` | J1 | 7–7 |
-| `Page` | J1 | 9–106 |
+| `./FillForm` | J1 J4 | 8–8 |
+| `Page` | J1 J4 | 10–114 |
 
 ### `src/app/onboarding/actions.ts`
 
@@ -85,9 +67,6 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `react` | J4 | 3–3 |
-| `next/navigation` | J4 | 4–4 |
-| `next-auth/webauthn` | J4 | 5–5 |
 | `AddPasskeyButton` | J4 | 11–54 |
 
 ### `src/app/staff/LocalTime.tsx`
@@ -103,29 +82,41 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 |---|---|---|
 | `./payment-actions` | J4 | 4–4 |
 | `../LocalTime` | J4 | 5–5 |
-| `Props` | J4 | 15–23 |
-| `PaymentSection` | J4 | 75–141 |
+| `Props` | J4 | 16–24 |
+| `StatusBadge` | J4! | 26–38 |
+| `LiveStatusBadge` | J4! | 40–74 |
+| `PaymentSection` | J4 | 76–142 |
+
+### `src/app/staff/[submissionId]/RegeneratePdfButton.tsx`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `./pdf-actions` | J4 | 5–5 |
+| `RegeneratePdfButton` | J4 | 10–42 |
 
 ### `src/app/staff/[submissionId]/page.tsx`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `./PaymentSection` | J4 | 9–9 |
-| `../LocalTime` | J4 | 10–10 |
-| `SubmissionDetailPage` | J4 | 12–223 |
+| `./PaymentSection` | J4 | 10–10 |
+| `./RegeneratePdfButton` | J4 | 11–11 |
+| `../LocalTime` | J4 | 12–12 |
+| `SubmissionDetailPage` | J4 | 15–266 |
 
 ### `src/app/staff/[submissionId]/payment-actions.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `@/db` | J4 J5 | 3–3 |
-| `@/db/schema` | J4 J5 | 4–4 |
-| `drizzle-orm` | J4 J5 | 5–5 |
-| `@/lib/session` | J4 J5 | 6–6 |
-| `@/lib/payments` | J4 J5 | 7–7 |
-| `@/lib/base-url` | J4 J5 | 8–8 |
-| `createPaymentUpdateRequest` | J4 J5 | 10–72 |
-| `simulatePaymentCompletion` | J5 | 74–110 |
+| `createPaymentUpdateRequest` | J4 J5 | 11–84 |
+| `simulatePaymentCompletion` | J5 | 86–122 |
+
+### `src/app/staff/[submissionId]/pdf-actions.ts`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `RegenerateResult` | J4 | 16–16 |
+| `ALREADY_SEALED` | J4 | 20–20 |
+| `regenerateSubmissionPdf` | J4 | 36–138 |
 
 ### `src/app/staff/forms/CopyButton.tsx`
 
@@ -154,7 +145,7 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `issueFormLink` | J2 J8 | 15–71 |
+| `issueFormLink` | J2 J8 | 16–88 |
 
 ### `src/app/staff/page.tsx`
 
@@ -162,33 +153,27 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 |---|---|---|
 | `./AddPasskeyButton` | J4 | 7–7 |
 | `./LocalTime` | J4 | 8–8 |
-| `StaffIndexPage` | J4 | 10–107 |
+| `StaffIndexPage` | J4 | 11–108 |
 
 ### `src/components/FormRenderer.tsx`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `@/lib/form-def` | J1 | 3–3 |
-| `@/components/SignatureField` | J1 | 4–4 |
-| `FormRendererProps` | J1 | 6–9 |
-| `FormRenderer` | J1 | 11–109 |
+| `FormRendererProps` | J1 J4 | 6–12 |
+| `FormRenderer` | J1 J4 | 14–117 |
 
 ### `src/components/SignatureField.tsx`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `react` | J1 | 3–3 |
-| `signature_pad` | J1 | 4–4 |
-| `SignatureFieldProps` | J1 | 6–9 |
-| `SignatureField` | J1 | 11–171 |
-| `handleResize` | J1 | 60–70 |
+| `SignatureFieldProps` | J1 J4 | 6–9 |
+| `SignatureField` | J1 J4 | 11–171 |
+| `handleResize` | J1 J4 | 60–70 |
 
 ### `src/db/index.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `drizzle-orm/postgres-js` | J1 J2 J3 J4 J5 J6 J7 J8 | 1–1 |
-| `postgres` | J1 J2 J3 J4 J5 J6 J7 J8 | 2–2 |
 | `./schema` | J1 J2 J3 J4 J5 J6 J7 J8 | 3–3 |
 | `db` | J1 J2 J3 J4 J5 J6 J7 J8 | 17–17 |
 
@@ -196,24 +181,24 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `drizzle-orm/pg-core` | J1 J2 J3 J4 J5 J8 | 1–12 |
-| `orgMemberRoleEnum` | J1 J2 J3 J4 J5 J8 | 16–16 |
-| `submissionStatusEnum` | J1 J2 J3 J4 J5 J8 | 18–23 |
-| `scanStatusEnum` | J1 J2 J3 J4 J5 J8 | 25–29 |
-| `auditEventTypeEnum` | J1 J2 J3 J4 J5 J8 | 31–37 |
-| `paymentUpdateStatusEnum` | J1 J2 J3 J4 J5 J8 | 39–43 |
-| `emailDeliveryStatusEnum` | J1 J2 J3 J4 J5 J8 | 45–49 |
-| `orgs` | J1 | 53–58 |
-| `authenticators` | J4 | 118–133 |
-| `orgMembers` | J2 J3 J4 J5 J8 | 135–147 |
-| `contacts` | J2 J8 | 149–161 |
-| `forms` | J1 J2 J3 J4 J8 | 163–179 |
-| `formLinks` | J1 J2 J3 J8 | 181–199 |
-| `submissions` | J1 J4 | 201–224 |
-| `submissionFiles` | J1 J4 | 226–238 |
-| `auditEvents` | J1 J4 | 240–253 |
-| `paymentUpdateRequests` | J4 | 255–276 |
-| `emailDeliveries` | J1 | 278–289 |
+| `orgMemberRoleEnum` | J1 J2 J3 J4 J5 J6 J7 J8 | 16–16 |
+| `submissionStatusEnum` | J1 J2 J3 J4 J5 J6 J7 J8 | 18–23 |
+| `scanStatusEnum` | J1 J2 J3 J4 J5 J6 J7 J8 | 25–29 |
+| `auditEventTypeEnum` | J1 J2 J3 J4 J5 J6 J7 J8 | 31–45 |
+| `paymentUpdateStatusEnum` | J1 J2 J3 J4 J5 J6 J7 J8 | 47–51 |
+| `emailDeliveryStatusEnum` | J1 J2 J3 J4 J5 J6 J7 J8 | 53–57 |
+| `orgs` | J1 J4 | 61–66 |
+| `users` | J4 | 68–78 |
+| `authenticators` | J4 | 126–141 |
+| `orgMembers` | J2 J3 J4 J5 J8 | 143–155 |
+| `contacts` | J2 J8 | 157–169 |
+| `forms` | J1 J2 J3 J4 J8 | 171–187 |
+| `formLinks` | J1 J2 J3 J4 J5 J8 | 189–207 |
+| `submissions` | J1 J4 J5 | 209–232 |
+| `submissionFiles` | J1 J4 | 234–246 |
+| `auditEvents` | J1 J2 J4 J5 J8 | 248–265 |
+| `paymentUpdateRequests` | J4 J5 J6 J7 | 267–288 |
+| `emailDeliveries` | J1 J4 | 290–301 |
 
 ### `src/lib/answers.ts`
 
@@ -221,6 +206,13 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 |---|---|---|
 | `./crypto` | J1 J4 | 6–6 |
 | `resolveStoredAnswer` | J1 J4 | 27–45 |
+
+### `src/lib/audit.ts`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `StaffAuditEventType` | J2 J4 J5 J8 | 9–14 |
+| `recordStaffAuditEvent` | J2 J4 J5 J8 | 22–40 |
 
 ### `src/lib/base-url.ts`
 
@@ -232,33 +224,54 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `crypto` | J1 J4 | 1–1 |
+| `ALGORITHM` | J1 J4 | 3–3 |
+| `IV_BYTES` | J1 J4 | 4–4 |
+| `TAG_BYTES` | J1 J4 | 5–5 |
 | `getKey` | J1 J4 | 7–20 |
-| `encryptField` | J1 | 26–42 |
+| `encryptField` | J1 J4 | 26–42 |
 | `decryptField` | J1 J4 | 48–77 |
 
 ### `src/lib/email.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `DeliveryArgs` | J1 | 5–10 |
-| `DeliveryResult` | J1 | 12–16 |
-| `sendDelivery` | J1 | 18–65 |
+| `DeliveryArgs` | J1 J4 | 5–10 |
+| `DeliveryResult` | J1 J4 | 12–16 |
+| `sendDelivery` | J1 J4 | 18–65 |
+
+### `src/lib/events.ts`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `IntakeEventType` | J1 J4 | 9–12 |
+| `EventInput` | J1 J4 | 14–21 |
+| `SignedEvent` | J1 J4 | 24–32 |
+| `canonical` | J1 J4 | 38–47 |
+| `buildSignedEvent` | J1 J4 | 49–60 |
+| `emitEvent` | J1 J4 | 66–95 |
 
 ### `src/lib/form-def.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `zod` | J1 J3 J4 | 1–1 |
-| `yaml` | J1 J3 J4 | 2–2 |
+| `fieldTypeEnum` | J3 | 5–13 |
+| `fieldSchema` | J3 | 15–36 |
+| `formDefSchema` | J3 | 38–52 |
 | `FormDef` | J1 J3 J4 | 54–54 |
 | `parseFormDef` | J3 | 60–82 |
+
+### `src/lib/labels.ts`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `LABEL_OVERRIDES` | J4 | 12–15 |
+| `humanizeEnum` | J4 | 17–23 |
 
 ### `src/lib/limits.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `MAX_FILE_BYTES` | J1 | 25–25 |
+| `MAX_FILE_BYTES` | J1 J4 | 25–25 |
 
 ### `src/lib/payments/dev.ts`
 
@@ -281,7 +294,6 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `stripe` | J4 J5 J6 | 1–1 |
 | `./types` | J4 J5 J6 | 2–2 |
 | `getStripeClient` | J6 | 4–12 |
 | `stripeProvider` | J4 J5 J6 | 14–32 |
@@ -297,55 +309,70 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `./form-def` | J1 | 22–22 |
-| `./answers` | J1 | 23–23 |
-| `SignatureValue` | J1 | 27–30 |
-| `TypedSignatureValue` | J1 | 32–35 |
-| `SignatureArg` | J1 | 37–37 |
-| `PdfArgs` | J1 | 39–50 |
-| `DocProps` | J1 | 154–164 |
-| `SubmissionDocument` | J1 | 166–224 |
-| `renderSubmissionPdf` | J1 | 228–241 |
+| `./form-def` | J1 J4 | 22–22 |
+| `./answers` | J1 J4 | 23–23 |
+| `SignatureValue` | J1 J4 | 27–30 |
+| `TypedSignatureValue` | J1 J4 | 32–35 |
+| `SignatureArg` | J1 J4 | 37–37 |
+| `PdfArgs` | J1 J4 | 39–50 |
+| `DocProps` | J1 J4 | 154–164 |
+| `SubmissionDocument` | J1 J4 | 166–224 |
+| `renderSubmissionPdf` | J1 J4 | 228–241 |
+
+### `src/lib/prefill.ts`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `PREFILLABLE_TYPES` | J1 J4 | 6–6 |
+| `computePrefill` | J1 J4 | 24–40 |
 
 ### `src/lib/rate-limit.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `FIFTEEN_MIN` | J1 | 13–13 |
-| `MAX_BUCKETS` | J1 | 23–23 |
-| `MAX_KEY_LENGTH` | J1 | 28–28 |
-| `normalizeKey` | J1 | 30–33 |
-| `SWEEP_INTERVAL_MS` | J1 | 38–38 |
-| `lastSweptAt` | J1 | 39–39 |
-| `makeRoom` | J1 | 41–59 |
-| `rateLimit` | J1 | 65–87 |
-| `rateLimitAll` | J1 | 100–109 |
+| `FIFTEEN_MIN` | J1 J4 | 13–13 |
+| `MAX_BUCKETS` | J1 J4 | 23–23 |
+| `MAX_KEY_LENGTH` | J1 J4 | 28–28 |
+| `normalizeKey` | J1 J4 | 30–33 |
+| `SWEEP_INTERVAL_MS` | J1 J4 | 38–38 |
+| `lastSweptAt` | J1 J4 | 39–39 |
+| `makeRoom` | J1 J4 | 41–59 |
+| `rateLimit` | J1 J4 | 65–87 |
+| `rateLimitAll` | J1 J4 | 100–109 |
 
 ### `src/lib/request-context.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `getClientIp` | J1 | 16–22 |
-| `getRequestContext` | J1 | 29–37 |
+| `getClientIp` | J1 J4 | 16–22 |
+| `getRequestContext` | J1 J4 | 29–37 |
 
 ### `src/lib/scan.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `EICAR` | J1 | 14–15 |
-| `CHUNK_SIZE` | J1 | 17–17 |
-| `ScanUnavailableError` | J1 | 20–25 |
-| `clamdConfig` | J1 | 27–35 |
-| `scanWithClamd` | J1 | 42–93 |
-| `scanBytes` | J1 | 99–109 |
+| `EICAR` | J1 J4 | 14–15 |
+| `CHUNK_SIZE` | J1 J4 | 17–17 |
+| `ScanUnavailableError` | J1 J4 | 20–25 |
+| `clamdConfig` | J1 J4 | 27–35 |
+| `scanWithClamd` | J1 J4 | 42–93 |
+| `scanBytes` | J1 J4 | 99–109 |
+
+### `src/lib/seal-submission.ts`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `AlreadySealedError` | J1 J4 | 29–34 |
+| `SealResult` | J1 J4 | 36–45 |
+| `sealSubmissionPdf` | J1 J4 | 47–135 |
+| `signatureFromAnswers` | J4 | 147–158 |
 
 ### `src/lib/seal.ts`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `crypto` | J1 | 1–1 |
-| `contentSha256` | J1 | 19–22 |
-| `stableStringify` | J1 | 34–45 |
+| `contentSha256` | J1 J4 | 19–22 |
+| `stableStringify` | J1 J4 | 34–45 |
 
 ### `src/lib/session.ts`
 
@@ -359,23 +386,23 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `QUARANTINE_PREFIX` | J1 | 12–12 |
-| `CLEAN_PREFIX` | J1 | 13–13 |
-| `assertSafeKey` | J1 | 18–28 |
-| `r2Config` | J1 | 31–40 |
-| `usingR2` | J1 | 42–42 |
-| `r2Client` | J1 | 44–51 |
-| `r2Url` | J1 | 53–57 |
-| `r2Put` | J1 | 59–66 |
-| `r2Copy` | J1 | 76–84 |
-| `r2Delete` | J1 | 86–92 |
-| `STORAGE_ROOT` | J1 | 95–95 |
-| `QUARANTINE_DIR` | J1 | 96–96 |
-| `CLEAN_DIR` | J1 | 97–97 |
-| `ensureDirs` | J1 | 99–102 |
-| `assertWithin` | J1 | 104–108 |
-| `putQuarantine` | J1 | 116–127 |
-| `promoteToClean` | J1 | 133–148 |
+| `QUARANTINE_PREFIX` | J1 J4 | 12–12 |
+| `CLEAN_PREFIX` | J1 J4 | 13–13 |
+| `assertSafeKey` | J1 J4 | 18–28 |
+| `r2Config` | J1 J4 | 31–40 |
+| `usingR2` | J1 J4 | 42–42 |
+| `r2Client` | J1 J4 | 44–51 |
+| `r2Url` | J1 J4 | 53–57 |
+| `r2Put` | J1 J4 | 59–66 |
+| `r2Copy` | J1 J4 | 76–84 |
+| `r2Delete` | J1 J4 | 86–92 |
+| `STORAGE_ROOT` | J1 J4 | 95–95 |
+| `QUARANTINE_DIR` | J1 J4 | 96–96 |
+| `CLEAN_DIR` | J1 J4 | 97–97 |
+| `ensureDirs` | J1 J4 | 99–102 |
+| `assertWithin` | J1 J4 | 104–108 |
+| `putQuarantine` | J1 J4 | 116–127 |
+| `promoteToClean` | J1 J4 | 133–148 |
 
 ### `src/lib/tokens.ts`
 
@@ -386,4 +413,4 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 _Entry symbols not verified against source (no parser for the file type), so drift in them cannot be detected: J1 `submitForm` (f/[token]/actions.ts), J1 `Page` (f/[token]/page.tsx), J2 `issueFormLink` (staff/forms/actions.ts), J3 `validateAndPreview` (onboarding/actions.ts), J3 `createFormAndLink` (onboarding/actions.ts), J4 `SubmissionDetailPage` (staff/[submissionId]/page.tsx), J4 `StaffIndexPage` (staff/page.tsx), J5 `createPaymentUpdateRequest` (staff/[submissionId]/payment-actions.ts), J5 `simulatePaymentCompletion` (staff/[submissionId]/payment-actions.ts), J6 `POST` (api/webhooks/stripe/route.ts), J7 `GET` (api/payment-requests/[requestId]/status/route.ts), J8 `FormDetailPage` (staff/forms/[formId]/page.tsx)._
 
-_169 symbols across 38 files reach at least one journey. Symbols reaching none are omitted._
+_165 symbols across 45 files reach at least one journey. Symbols reaching none are omitted._
