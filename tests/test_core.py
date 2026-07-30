@@ -4,6 +4,7 @@ recall-critical closure behaviors (imports edge + file-expansion; leaf stays
 tight)."""
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -12,7 +13,8 @@ import tempfile
 import time
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 from testgraph import db as dbmod  # noqa: E402
 from testgraph import integrity  # noqa: E402
 from testgraph import registry as reg  # noqa: E402
@@ -513,6 +515,135 @@ class IntoTargetTests(unittest.TestCase):
         rc = exp.main(["--repo", self.tmp, "--registry", self.reg, "--into-target"])
         self.assertEqual(rc, 2)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, ".testgraph")))
+
+
+class MarkdownRenderingTests(unittest.TestCase):
+    """`render_markdown` produces the only artifact an agent actually reads, and
+    it had no test at all — the unit tests asserted `build_map`'s dicts and the
+    integration tests asserted the file merely existed.
+
+    Issue #24: rows are keyed by SYMBOL, because line numbers are frozen at the
+    generation commit and the agent's own edit has already shifted them. The table
+    used to lead with `lines`, inviting exactly the lookup the skill's rules
+    forbid."""
+
+    REG = {
+        "journeys": {
+            "J1": {"name": "one", "entries": [{"name": "handler_a",
+                                               "file": "app/svc.py"}]},
+            "JW": {"name": "weak", "entries": [{"name": "mid_a",
+                                                "file": "app/conf.py"}]},
+        },
+        "spot_checks": {},
+    }
+    META = {"repo": "/r", "schema": 8, "commit": "abc1234", "symbols": 4}
+
+    def setUp(self):
+        self.conn = build_fixture()
+        self.rows = exp.build_map(self.conn, self.REG)
+        self.md = exp.render_markdown(self.rows, self.REG, self.META)
+
+    def _header(self):
+        # `next()` with no default raised StopIteration on the very regression
+        # this class exists to catch, so the column-order failure surfaced as an
+        # ERROR with no message instead of the assertion written for it.
+        header = next(
+            (l for l in self.md.splitlines() if l.startswith("|") and "|---" not in l),
+            None,
+        )
+        self.assertIsNotNone(header, "no table header rendered at all")
+        return header
+
+    def _header_cells(self):
+        return [c.strip() for c in self._header().strip("|").split("|")]
+
+    def test_symbol_is_the_first_column(self):
+        cells = self._header_cells()
+        self.assertEqual(cells[0], "symbol", f"lookup key is not first: {cells}")
+        # matched on substance, not on the caption's exact spelling — pinning the
+        # full string meant rewording the caveat killed the test with a ValueError
+        # (the mistake test_skill_contract already learned; see its `squeezed`).
+        lines_col = [i for i, c in enumerate(cells) if c.startswith("lines")]
+        self.assertTrue(lines_col, f"no lines column: {cells}")
+        self.assertGreater(
+            lines_col[0], 0,
+            "the stale hint must not be the column an agent reads first",
+        )
+
+    def test_every_row_renders_its_symbol_and_journeys(self):
+        for path, rows in self.rows.items():
+            section = self.md.split(f"### `{path}`")[1].split("###")[0]
+            for r in rows:
+                line = next(
+                    (l for l in section.splitlines()
+                     if l.startswith(f"| `{r['symbol']}`")), None,
+                )
+                self.assertIsNotNone(line, f"{path}:{r['symbol']} not rendered")
+                cells = [c.strip() for c in line.strip("|").split("|")]
+                self.assertEqual(
+                    set(cells[1].replace("!", "").split()), set(r["journeys"]),
+                    f"{path}:{r['symbol']} renders {cells[1]!r}",
+                )
+                self.assertEqual(
+                    cells[2], f"{r['lines'][0]}–{r['lines'][1]}",
+                    f"{path}:{r['symbol']} line hint misrendered",
+                )
+
+    def test_weak_journey_carries_the_bang(self):
+        # `!` is the map's only safety marker; rendering it on the wrong journey,
+        # or dropping it, is silent under-warning.
+        section = self.md.split("### `app/conf.py`")[1]
+        base = next(l for l in section.splitlines() if l.startswith("| `base`"))
+        self.assertIn("JW!", base)
+        own = next(l for l in section.splitlines() if l.startswith("| `mid_a`"))
+        self.assertIn("JW", own)
+        self.assertNotIn("JW!", own, "entry reached at full confidence was flagged")
+
+    def test_staleness_of_line_numbers_is_stated_not_implied(self):
+        # an agent that matches by line after an insertion reads the wrong
+        # symbol's journeys, which is the #24 failure. The artifact must say so
+        # itself — it outlives the run and carries no other warning.
+        self.assertIn("by name", self.md)
+        self.assertRegex(self.md, r"frozen at the commit above")
+        self.assertIn("hint", self._header())
+
+    def test_generation_commit_is_stamped(self):
+        # the skill's staleness escalation keys off this stamp.
+        self.assertIn("generated from commit `abc1234`", self.md)
+
+    def test_artifact_and_skill_agree_on_the_unattributable_edit(self):
+        """The artifact and SKILL.md are two documents stating one rule, and
+        nothing pinned their agreement — so they drifted apart inside the very
+        commit that fixed #24. The map's preamble narrowed line ranges to
+        "disambiguate two symbols sharing one", while the skill still called them a
+        general hint. That gap is a live under-report: the honeyslate map has rows
+        named `sqlalchemy.orm` and `_settings`, so an agent editing an import block
+        or a module-level binding recognises no symbol it touched, and the absence
+        rule then licenses "no journeys affected" for a J6 (sign-in) file."""
+        with open(
+            os.path.join(ROOT_DIR, "skills", "testgraph-verify", "SKILL.md"),
+            encoding="utf-8",
+        ) as fh:
+            skill = re.sub(r"\s+", " ", fh.read())
+        for doc, name in ((self.md, "the map"), (skill, "SKILL.md")):
+            squeezed = re.sub(r"\s+", " ", doc)
+            self.assertRegex(
+                squeezed, r"import nodes and module-level bindings|"
+                r"[Ii]mport nodes \(`sqlalchemy\.orm`\) and module-level bindings",
+                f"{name} does not warn that some rows are not named for functions",
+            )
+            self.assertIn(
+                "unknown", squeezed,
+                f"{name} does not name the unattributable edit as unknown",
+            )
+        self.assertRegex(
+            skill, r"use the line range as the fallback key",
+            "SKILL.md dropped the line-range fallback the map now points agents to",
+        )
+        self.assertRegex(
+            re.sub(r"\s+", " ", self.md), r"fall back to the range when you cannot",
+            "the map dropped the line-range fallback SKILL.md relies on",
+        )
 
 
 def _git_repo(tmp, files):

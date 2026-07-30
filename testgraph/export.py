@@ -74,9 +74,18 @@ def render_markdown(rows_by_file, registry, meta):
         f"Target: `{meta['repo']}` · index schema {meta['schema']} · "
         f"generated from commit `{meta['commit']}`",
         "",
-        "Look up the symbols you changed. Every journey listed for them may have "
-        "changed behavior and is worth verifying. This is **recall-first**: a "
-        "shared symbol legitimately fans out to many journeys.",
+        "Look up the symbols you changed **by name**. Every journey listed for "
+        "them may have changed behavior and is worth verifying. This is "
+        "**recall-first**: a shared symbol legitimately fans out to many "
+        "journeys.",
+        "",
+        "**Line numbers are frozen at the commit above and are a hint only** — "
+        "your own edit has already shifted them, so an insertion higher up the "
+        "file makes the ranges point at the wrong symbol (issue #24). Match the "
+        "symbol name first, and fall back to the range when you cannot: import "
+        "nodes and module-level bindings get rows too, and an edit to one of "
+        "those looks like no symbol you touched. An edit you cannot attribute to "
+        "any row is *unknown*, never *no journeys*.",
         "",
         "`!` marks a journey reached only through weak or synthesized graph edges "
         "— treat it as *verify manually*, not as *probably fine*.",
@@ -93,13 +102,18 @@ def render_markdown(rows_by_file, registry, meta):
         out.append("")
         out.append(f"### `{path}`")
         out.append("")
-        out.append("| lines | symbol | journeys |")
+        # Symbol first, deliberately. The lookup key is the symbol name (issue
+        # #24: line numbers are stale the moment the agent edits the file), and a
+        # table that leads with `lines` invites exactly the lookup the skill's
+        # rules forbid. The column header carries the caveat too, since an agent
+        # may land on one `###` section without reading the preamble.
+        out.append("| symbol | journeys | lines (at generation — stale hint) |")
         out.append("|---|---|---|")
         for r in rows_by_file[path]:
             js = " ".join(
                 f"{j}!" if j in r["verify_manually"] else j for j in r["journeys"]
             )
-            out.append(f"| {r['lines'][0]}–{r['lines'][1]} | `{r['symbol']}` | {js} |")
+            out.append(f"| `{r['symbol']}` | {js} | {r['lines'][0]}–{r['lines'][1]} |")
     out.append("")
     out.append(
         f"_{meta['symbols']} symbols across {len(rows_by_file)} files reach at "

@@ -236,6 +236,19 @@ class SkillRulesAreSafe(unittest.TestCase):
             "trust rule still keyed to an all-Python diff (#30)",
         )
 
+    def test_rows_are_matched_by_symbol_not_by_line(self):
+        # issue #24: line ranges are frozen at the generation commit while the
+        # agent's own edit has already shifted them, so an insertion higher up the
+        # file makes a range point at the wrong symbol. An earlier draft told the
+        # agent to read "the rows whose line range overlaps your edit" — the rule
+        # is correct now, and this is what stops it regressing.
+        self.assertIn("Match rows by symbol name first", self.squeezed)
+        self.assertIn("Line ranges are a *hint only*", self.squeezed)
+        self.assertNotRegex(
+            self.squeezed, r"rows? whose line range overlaps",
+            "the skill is back to telling the agent to match by line number (#24)",
+        )
+
     def test_absence_rule_keeps_its_qualifier(self):
         # the original #18 defect was an unqualified "absent -> no journeys".
         # Matched on whitespace-collapsed text: the exact substring ended at the

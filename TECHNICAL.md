@@ -152,11 +152,25 @@ dropped weak paths would under-report). Verified by mutation: narrowing
 `_is_product` to `.py`, over-reporting a journey on every row, and dropping
 low-confidence journeys each turn it red.
 
-### The consumer's escalation contract
+### Keyed by symbol, not by line (issue #24)
 
 `skills/testgraph-verify/SKILL.md` matches rows by **symbol name**, treating line
 ranges as a hint — they are frozen at the generation commit while the agent's own
-edit has already shifted them.
+edit has already shifted them. Insert 20 lines at the top of `config.py` and
+`get_settings` moves from 84–89 to 104–109, so an agent matching by line reads
+`load_type_windows`' journeys instead.
+
+The rule was in the skill but the **artifact worked against it**: the table led
+with a `lines` column, which is the first thing an agent looks at, and said
+nothing about the ranges being stale. Columns are now
+`symbol | journeys | lines (at generation — stale hint)`, the caveat is in the
+preamble *and* the column header (an agent may jump straight to one `###`
+section), and `render_markdown` — previously the only wholly untested part of the
+pipeline, asserted nowhere beyond "the file exists" — now has `MarkdownRenderingTests`
+covering column order, per-row cell contents, the `!` safety marker, and the
+commit stamp the staleness escalation keys off.
+
+### The consumer's escalation contract
 
 Crucially, the map only lists symbols that existed when it was generated, so the
 skill escalates to `testgraph.select` rather than concluding, for: an added symbol
