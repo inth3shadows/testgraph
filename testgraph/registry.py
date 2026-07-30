@@ -105,14 +105,14 @@ def live_drift(repo, registry):
 
     A **live parse of the file**, not a RunEcho MCP call as the issue proposed:
     testgraph is a CLI with no MCP client, and Python's own `ast` gives the same
-    answer for the only language any journey has entries in today. The trade is
-    explicit — non-Python entries are returned as `unchecked` rather than silently
-    passing, so the gap is visible instead of assumed away.
+    answer for the only language any journey has entries in today. Entries this
+    cannot verify are NOT returned here — see `unchecked_entries()`, a separate
+    channel, so an unverifiable entry never reads as an integrity failure.
 
-    Reported, never blocking. The check is an approximation in one direction: an
-    entry re-exported into its registry `file` rather than defined there is a
-    false positive, and blocking on those would break real runs to report a
-    freshness problem whose real remedy is `codegraph index`.
+    Reported, never blocking, with a remedy per reason (`REMEDIES`). The check is an
+    approximation in one direction: an entry re-exported into its registry `file`
+    rather than defined there would be a false positive, so imports count as
+    definitions.
     """
     sources = _python_sources(repo)
     drift = []
@@ -128,7 +128,13 @@ def live_drift(repo, registry):
             # with a LIKE, so `routers/tasks.py` means `backend/app/routers/tasks.py`
             # here. Joining them onto the repo root instead reported all 16 of
             # honeyslate's entries as "file is gone", which is how this was caught.
-            candidates = [p for p in sources if p.endswith(rel)]
+            # anchored on a path separator: a bare endswith also matched
+            # `.../xrouters/tasks.py` for the suffix `routers/tasks.py`
+            suffix = rel.lstrip("/")
+            candidates = [
+                p for p in sources
+                if p == suffix or p.endswith(os.sep + suffix)
+            ]
             if not candidates:
                 drift.append((jid, name, rel, "no file matching that path in the tree"))
                 continue
@@ -193,10 +199,17 @@ def _defines(tree, name):
 def _scan(node, name, in_function):
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if child.name == name or _scan(child, name, True):
+            # Nothing inside a function body is importable, so a nested
+            # `def create_task()` must not satisfy a module-level entry — the same
+            # false negative as a function-local binding, one level narrower. Method
+            # names still match: their FunctionDef sits in a ClassDef body, which
+            # does not set in_function.
+            if not in_function and child.name == name:
                 return True
         elif isinstance(child, ast.ClassDef):
-            if child.name == name or _scan(child, name, in_function):
+            if not in_function and child.name == name:
+                return True
+            if _scan(child, name, in_function):
                 return True
         elif isinstance(child, (ast.Import, ast.ImportFrom)):
             # a re-export IS how the symbol becomes available under this path

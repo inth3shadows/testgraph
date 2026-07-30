@@ -693,6 +693,21 @@ class MarkdownRenderingTests(unittest.TestCase):
         self.assertRegex(self.md, r"frozen at the commit above")
         self.assertIn("hint", self._header())
 
+    def test_unchecked_entries_render_as_a_footnote_not_the_banner(self):
+        # this rode in `meta` and was never rendered at all — dead data behind a
+        # claim that the map carried it. It must appear, and it must NOT trip the
+        # "not fully trustworthy" integrity banner, which prescribes a re-index that
+        # cannot clear an unverifiable entry.
+        md = exp.render_markdown(
+            self.rows, self.REG,
+            {**self.META, "unchecked_entries": [("J9", "mount", "web/App.svelte")]},
+        )
+        self.assertIn("not verified against source", md)
+        self.assertIn("web/App.svelte", md)
+        self.assertNotIn("not fully trustworthy", md)
+        # and nothing is claimed when there is nothing to claim
+        self.assertNotIn("not verified against source", self.md)
+
     def test_generation_commit_is_stamped(self):
         # the skill's staleness escalation keys off this stamp.
         self.assertIn("generated from commit `abc1234`", self.md)
@@ -1124,6 +1139,22 @@ _settings = object()
         drift = reg.live_drift(self.tmp, self._reg("create_task", "routers/local.py"))
         self.assertEqual(len(drift), 1, "a function-local binding satisfied a "
                                        "module-level entry")
+
+    def test_nested_inner_function_does_not_satisfy_a_module_entry(self):
+        # nothing inside a function body is importable, so a nested
+        # `def create_task()` must not clear a module-level entry.
+        self._write("backend/app/routers/nested.py",
+                    "def outer():\n    def create_task():\n        pass\n"
+                    "    return create_task\n")
+        drift = reg.live_drift(self.tmp, self._reg("create_task", "routers/nested.py"))
+        self.assertEqual(len(drift), 1, "a nested inner def satisfied the entry")
+
+    def test_suffix_match_is_anchored_on_a_path_separator(self):
+        # `endswith("routers/tasks.py")` also matched `.../xrouters/tasks.py`
+        self._write("backend/app/xrouters/tasks.py", "def create_task():\n    pass\n")
+        drift = reg.live_drift(self.tmp, self._reg("create_task", "outers/tasks.py"))
+        self.assertEqual(len(drift), 1)
+        self.assertIn("no file matching", drift[0][3])
 
     def test_conditional_module_level_import_still_counts(self):
         self._write("backend/app/routers/cond.py",

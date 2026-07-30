@@ -304,6 +304,13 @@ def _render(result):
     lines = [f"base..head: {result['base']}..{result['head']}"]
     for w in result.get("warnings", []):
         lines.append(f"  WARN: {w}")
+    # visible without --json: a CLI user could otherwise not tell that some entry
+    # symbols were never checked against source
+    for u in result.get("entries_unchecked", []):
+        lines.append(
+            f"  NOTE: {u['journey']} entry `{u['entry']}` ({u['file']}) not "
+            f"verified against source — no parser for that file type"
+        )
     if result["status"] == "BLOCKED":
         lines.append("STATUS: BLOCKED — index not trustworthy")
         for b in result["blocking"]:

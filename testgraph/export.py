@@ -260,6 +260,19 @@ def render_markdown(rows_by_file, registry, meta):
             )
             out.append(f"| `{r['symbol']}` | {js} | {r['lines'][0]}–{r['lines'][1]} |")
     out.append("")
+    # Footnote, deliberately not the "not fully trustworthy" banner: an entry no
+    # parser covers is a permanent, unfixable-by-re-indexing gap, so it is stated
+    # once as a limitation rather than as an integrity alarm. Previously this rode
+    # in `meta` and was never rendered at all — dead data behind a claim.
+    if meta.get("unchecked_entries"):
+        out.append(
+            "_Entry symbols not verified against source (no parser for the file "
+            "type), so drift in them cannot be detected: "
+            + ", ".join(f"{jid} `{name}` ({rel})"
+                        for jid, name, rel in meta["unchecked_entries"])
+            + "._"
+        )
+        out.append("")
     out.append(
         f"_{meta['symbols']} symbols across {len(rows_by_file)} files reach at "
         f"least one journey. Symbols reaching none are omitted._"

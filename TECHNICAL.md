@@ -322,6 +322,7 @@ of assumed away. If a frontend journey is ever registered, that row starts showi
 up as unchecked and asks for a real parser.
 
 **Two channels, not one.** Entries no parser covers (`.svelte`, `.vue`) are
+rendered as a footnote in the map and a `NOTE:` line in `select`'s human output, and
 returned by `unchecked_entries()`, never as drift. Emitting them as drift put "the
 index was not fully trustworthy" in every exported map the moment a frontend journey
 existed — and prescribed `codegraph index`, which can never clear an unverifiable
