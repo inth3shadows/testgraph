@@ -212,7 +212,7 @@ def _blind_spots(repo, unparsed, non_python):
 def _non_python_product(repo):
     found = []
     for root, dirs, files in os.walk(repo):
-        dirs[:] = [d for d in dirs if d not in reg._SKIP_DIRS]
+        reg.prune_dirs(root, dirs)
         for f in files:
             if not f.endswith(_NON_PYTHON_EXT):
                 continue
