@@ -6,7 +6,7 @@ description: Draft a journey registry for a repo that has none, so testgraph can
 # testgraph-propose
 
 testgraph needs a registry mapping user journeys to their entry symbols. Hand-
-authoring one is why it only covers honeyslate. `testgraph.propose` does the
+authoring one is what limits how many repos it covers. `testgraph.propose` does the
 mechanical half; **this skill is the judgment half.** Do not skip it and ship the
 draft — a draft is deliberately maximally split and knowingly incomplete.
 
@@ -21,8 +21,12 @@ none, run `codegraph index <repo>` first and re-run. It writes
 `journeys/<target>.draft.json` and prints the handlers it found, the ones it
 excluded, and its blind spots.
 
+It reads two languages: Python route decorators, and Next.js conventions in
+TypeScript/JavaScript (`route.ts` handler exports, module-level `'use server'`
+actions, `page.tsx` default exports). Nothing else — see the blind spots.
+
 **Exit code 1 with zero journeys is a finding, not a failure.** It means the repo
-has no decorator-style HTTP entry points at all — its journeys start somewhere
+has neither decorator-style Python handlers nor Next.js entry points — its journeys start somewhere
 this scan cannot see. Go to step 4 and build the registry from there, or report
 that testgraph does not fit this repo.
 
@@ -38,6 +42,9 @@ you would always test them together. Read the handler bodies — route paths alo
 will mislead you.
 
 - `GET /tasks`, `GET /tasks/{id}`, `GET /task-types` → one "browse tasks" journey.
+- A `PAGE /staff/[id]` and the `ACTION /staff/[id]` beside it are usually one
+  journey: the page renders the form, the action submits it. The draft splits
+  them because it will not guess; you have the file open and can tell.
 - `POST /tasks` stays alone — creating is not browsing.
 - `GET /tasks/{id}/comments` + `POST /tasks/{id}/comments` → one "comments"
   journey, despite sharing a path prefix with browse.
@@ -65,7 +72,9 @@ real journey can exist with no entry in the registry, which makes testgraph answ
 | CLI / management commands | `argparse`/`click`/`typer` entry points, `[project.scripts]` in `pyproject.toml`. |
 | Callback-registered consumers | Queue and webhook handlers passed as arguments rather than decorated. |
 | Middleware / lifespan hooks | `add_middleware`, `@asynccontextmanager` lifespan, startup handlers. |
-| Non-Python product files | If the count is non-zero, the frontend is invisible here. Backend entries still cover a frontend change *indirectly* through the graph, so this is usually acceptable — but say so rather than assuming it. |
+| TypeScript scanned "for Next.js shapes ONLY" | Express, Fastify, Hono, tRPC, `middleware.ts`, `generateStaticParams`, and pages-router `pages/api/*` are all invisible. Grep for `app.get(`/`router.post(`/`createTRPCRouter` and register what you find. |
+| Client-side navigation | A journey reachable only through in-browser routing has no server entry point. Anchor it on the server action or route handler it eventually calls, or accept that it is uncovered and say so. |
+| Product files "no scanner here reads" | `.svelte`, `.vue` and anything else. Backend entries still cover such a change *indirectly* through the graph, so this is usually acceptable — but say so rather than assuming it. |
 | Files that do not parse | Fix the syntax error and re-run, or the whole module is missing from the draft. |
 
 Add anything you find as an ordinary entry: `{"name": "<symbol>", "file": "<repo-relative path>"}`.
@@ -85,10 +94,10 @@ python3 -m testgraph.select --repo <path> --registry journeys/<target>.draft.jso
 - Sanity-check the `spot_checks` block. Floors are set at 80% of the observed
   inbound-edge count, which is a starting point, not a measurement.
 
-  Pins are chosen by **caller-file churn first, fan-in second** — the floor
-  breaks when call sites are deleted, so a widely-used-but-volatile symbol (a
-  shared UI component) is the worst possible pin even though it has the highest
-  fan-in. `spot_check_basis` tells you whether churn data was available; if it
+  Pins are scored `fan_in / (1 + caller-file churn)` — quiet *and* load-bearing.
+  The floor breaks when call sites are deleted, so a volatile symbol is a poor
+  pin; but a *quiet* one with tiny fan-in is worse, because its tolerance band is
+  under one edge. Candidates whose band is under 2 edges are dropped outright. `spot_check_basis` tells you whether churn data was available; if it
   says `fan-in only`, the repo has no usable git history and the pins are
   unranked for stability, so check them yourself.
 

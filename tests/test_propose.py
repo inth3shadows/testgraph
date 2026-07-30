@@ -255,7 +255,8 @@ class ProposeDraftTests(unittest.TestCase):
     def test_blind_spots_name_what_the_scan_cannot_see(self):
         joined = " ".join(self.draft["blind_spots"])
         self.assertIn("schedulers", joined)
-        self.assertIn("non-Python", joined)
+        # `.svelte` has no scanner at all; TS is a different, weaker claim (#46).
+        self.assertIn("no scanner here reads", joined)
         self.assertIn("App.svelte", joined)
         self.assertNotIn("flow.spec.js", joined, "test files are not product blind spots")
         self.assertIn("do not parse", joined)
@@ -324,6 +325,89 @@ class JourneyIdCollisionTests(unittest.TestCase):
         draft = prop.propose(tmp, path, "collide")["draft"]
         files = {e["file"] for j in draft["journeys"].values() for e in j["entries"]}
         self.assertEqual(files, {"api/v1/users.py", "api/v2/users.py"})
+
+
+NEXT_APP = {
+    "src/app/api/webhooks/stripe/route.ts":
+        "import { NextRequest } from 'next/server';\n"
+        "export async function POST(req: NextRequest) {\n  return 1;\n}\n",
+    "src/app/staff/page.tsx":
+        "export default async function StaffIndexPage() {\n  return null;\n}\n",
+    "src/app/f/[token]/actions.ts":
+        "'use server';\n\nimport { db } from '@/db';\n\n"
+        "export async function submitForm(a) {\n  return a;\n}\n"
+        "export const helperConst = 1;\n",
+    # The trap: an INDENTED directive inside a component body. Next.js treats
+    # this as an inline action; the module is NOT an actions module.
+    "src/app/login/page.tsx":
+        "export default function LoginPage() {\n"
+        "  async function signOut() {\n    \"use server\";\n    return 1;\n  }\n"
+        "  return null;\n}\n"
+        "export function notAnAction() {\n  return 2;\n}\n",
+    "src/app/(marketing)/about/page.tsx":
+        "export default function AboutPage() {\n  return null;\n}\n",
+    "src/app/api/health/route.test.ts":
+        "export async function GET() {\n  return 1;\n}\n",
+}
+
+
+class TypeScriptScanTests(unittest.TestCase):
+    """Issue #46: Next.js entry points carry no decorator, so the Python scanner
+    finds nothing and signedintake's registry had to be hand-authored."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        for rel, body in NEXT_APP.items():
+            path = os.path.join(self.tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(body)
+        self.hits = prop.scan_typescript(self.tmp)
+        self.by_name = {n: (rel, routes) for rel, n, routes in self.hits}
+
+    def test_all_three_shapes_are_found(self):
+        self.assertIn("POST", self.by_name)          # route handler
+        self.assertIn("StaffIndexPage", self.by_name)  # page component
+        self.assertIn("submitForm", self.by_name)    # server action
+
+    def test_indented_use_server_does_not_make_a_module_of_actions(self):
+        # Accepting the directive anywhere in the file would register every
+        # export of a React component as a journey entry.
+        self.assertNotIn("notAnAction", self.by_name)
+        self.assertIn("LoginPage", self.by_name, "it is still a page")
+
+    def test_route_comes_from_the_file_path(self):
+        self.assertEqual(self.by_name["POST"][1], [("POST", "/api/webhooks/stripe")])
+        self.assertEqual(self.by_name["StaffIndexPage"][1], [("PAGE", "/staff")])
+
+    def test_server_action_inherits_its_directory_route(self):
+        # Not None: the action serves the page it sits beside, and that is the
+        # context a reviewer needs to group it.
+        self.assertEqual(self.by_name["submitForm"][1], [("ACTION", "/f/[token]")])
+
+    def test_route_groups_are_stripped_from_the_url(self):
+        # `(marketing)` is a Next.js organisational device; it is not in the URL.
+        self.assertEqual(self.by_name["AboutPage"][1], [("PAGE", "/about")])
+
+    def test_test_files_are_skipped(self):
+        self.assertNotIn(
+            "src/app/api/health/route.test.ts", {rel for rel, _, _ in self.hits}
+        )
+
+    def test_ids_use_the_directory_not_the_role_filename(self):
+        # Every Next.js handler lives in a `route.ts` and every page in a
+        # `page.tsx`, so stem-based ids would collide across the whole repo and
+        # widen to unreadable full paths.
+        ids = prop.assign_ids(self.hits)
+        self.assertEqual(ids[("src/app/api/webhooks/stripe/route.ts", "POST")],
+                         "J_stripe_POST")
+        self.assertEqual(ids[("src/app/staff/page.tsx", "StaffIndexPage")],
+                         "J_staff_StaffIndexPage")
+
+    def test_a_non_next_path_yields_no_route(self):
+        self.assertIsNone(prop._next_route("lib/util.ts"))
+        self.assertEqual(prop._next_route("src/app/page.tsx"), "/")
 
 
 class SpotCheckStabilityTests(unittest.TestCase):
