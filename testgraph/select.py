@@ -173,8 +173,27 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                 f"journeys absent from this index (not scored): {detail}"
             )
 
+    # Drift the index cannot see: the registry and the index can agree while both
+    # are stale against the source. A live parse is the only check in this pipeline
+    # that reads the working tree, so it is the only one that catches a handler
+    # renamed since the last `codegraph index` (issue #7). Reported as a
+    # first-class field AND a warning, never blocking — see registry.live_drift.
+    drift = reg.live_drift(repo, registry)
+    if drift:
+        detail = "; ".join(f"{jid}:{name} in {rel} — {why}"
+                           for jid, name, rel, why in drift)
+        warnings.append(
+            f"{len(drift)} journey entr(y/ies) the index resolves but the source "
+            f"does not define: {detail} — the index predates a rename; run "
+            f"`codegraph index` before trusting this answer"
+        )
+
     result = {"base": base, "head": head, "warnings": warnings,
-              "unresolved_journeys": unresolved}
+              "unresolved_journeys": unresolved,
+              "entry_drift": [
+                  {"journey": jid, "entry": name, "file": rel, "reason": why}
+                  for jid, name, rel, why in drift
+              ]}
     if blocking:
         result["status"] = "BLOCKED"
         result["blocking"] = blocking

@@ -301,6 +301,39 @@ distinction, blocking silently shrank the scored set and moved mean precision
 from 0.84 to 0.69 — a headline metric changing for a reason unrelated to
 selection quality.
 
+## Live Entry Drift (issue #7)
+
+`registry.unresolved()` compares the registry to the **index**. Both can agree and
+both be stale, because the index is a snapshot: rename a handler, run `select`
+before `codegraph index`, and the old node still resolves, the journey is still
+selected, and every answer is about a symbol that no longer exists. Nothing else in
+the pipeline reads the working tree, so nothing else can catch it.
+
+`registry.live_drift(repo, registry)` parses the source with Python's `ast` and
+reports entries the index resolves but the file does not define. It is surfaced as
+a warning plus an `entry_drift` field in `select --json`, and — via #23's warning
+block — inside the exported map, which needs it more because it persists.
+
+**Deviation from the issue, deliberate.** #7 specified RunEcho for the live parse.
+testgraph is a CLI with no MCP client, and stdlib `ast` answers the same question
+for the only language any journey has entries in today. Non-Python entries are
+reported as `unchecked` rather than silently passing, so the gap is visible instead
+of assumed away. If a frontend journey is ever registered, that row starts showing
+up as unchecked and asks for a real parser.
+
+**Reported, never blocking.** The check approximates in one direction: an entry
+re-exported into its registry `file` rather than defined there would be a false
+positive, so imports count as definitions and the result is a warning. Blocking
+would break real runs to report a freshness problem whose remedy is `codegraph
+index`.
+
+**Registry `file` values are suffixes.** `resolve_symbol` matches them with a LIKE,
+so `routers/tasks.py` means `backend/app/routers/tasks.py`. The first version joined
+them onto the repo root and reported all 16 of honeyslate's entries as "file is
+gone" — caught by running it against the real registry rather than only the fixture,
+and pinned by `test_registry_file_is_a_suffix_not_a_repo_relative_path`. Cost on
+honeyslate: 87 ms, zero drift rows.
+
 ## Schema Pin (R1)
 
 `integrity.check()` reads the index's `schema_versions` row and compares it to
@@ -383,6 +416,35 @@ column. Measured across 17 indexed repos it is binary (`NULL` / `'heuristic'`)
 and honeyslate has *zero* heuristic Python edges, so a provenance-only version
 would flag nothing. `metadata.confidence` is the mechanism that carries signal;
 the heuristic cap is retained because it starts earning once TS/JSX journeys land.
+
+## Who runs the journeys (decision, issue #8)
+
+Two holes in the parent plan reduced to one question, and it blocked the results
+ledger (#10) from having a writer: something must actually *run* the journeys, and
+something must reset the environment between runs. Three options were on the table —
+(a) testgraph stays a pure selector and requires a runnable environment as input,
+(b) testgraph owns a seeded environment for honeyslate, (c) execution happens in the
+agent loop.
+
+**Decided: (c) with a homelab reset. `/autorun` runs the journeys; Proxmox snapshots
+reset them.** Consequences worth stating, because they are what the decision buys
+and costs:
+
+- **testgraph does not own an environment.** No seeded-fixture code, no docker
+  compose, no test-data loader lands in this repo. Seeded, resettable E2E
+  environments are usually the most expensive part of E2E, and this repo stays the
+  selector rather than absorbing that cost.
+- **`/autorun` is the ledger's writer.** #10 was dead schema without one. The
+  contract testgraph owes it is already built: `select --json` says what to run.
+  What is still missing is the inbound half — a `testgraph record` that accepts
+  results — which is #10's actual scope.
+- **Reset is infrastructure, not application code.** Proxmox snapshot rollback is a
+  homelab capability that exists independently of this project, so the reset story
+  costs nothing to build here and is not testgraph's to maintain.
+- **The risk accepted:** journeys run only as often as `/autorun` runs, so the
+  ledger accumulates on that cadence rather than per-commit. That is the trade for
+  not building an environment; if the ledger turns out to need denser data, this
+  decision is the thing to revisit first.
 
 ## Known Limitations
 

@@ -310,6 +310,14 @@ def main(argv=None):
         # simply is not a git repo has nothing to do with the index, and sending
         # the reader to rebuild it wastes their time on the wrong fix.
         provenance.append(str(exc))
+    # Same live-parse drift check the selector runs (issue #7). A map is worse
+    # placed than a CLI run to survive this: it persists, so the warning must
+    # persist with it — which #23's warning block now does.
+    for jid, name, rel, why in reg.live_drift(args.repo, registry):
+        warnings.append(
+            f"journey {jid} entry `{name}` ({rel}): {why} — the index predates a "
+            f"source change; rows for it may describe a symbol that no longer exists"
+        )
     # A journey whose entries no longer resolve vanishes from every row while the
     # legend keeps advertising it. A persisted map that lies is worse than none.
     for jid, names in reg.unresolved(conn, registry):
