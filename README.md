@@ -76,10 +76,13 @@ python3 harness/seed_regressions.py    # ~20 seeded mutation sites
 ## Status
 
 Phase-1 spike plus B1 (confidence-weighted paths), working and validated on
-honeyslate: recall 1.00 across 5 hand-labeled commits (mean precision 0.84) and
-1.00 across 20 seeded mutation sites scored against an independent AST oracle;
-integrity guard tested and schema-pinned. Scoped to honeyslate and Python. Next increments (the results ledger, an
-MCP wrapper, the `/verify` gate) are in the plan.
+honeyslate: recall 1.00 across 5 hand-labeled commits (mean precision 0.68, down
+from 0.84 when frontend files began being seeded — see TECHNICAL.md) and 1.00
+across 20 seeded mutation sites scored against an independent AST oracle;
+integrity guard tested and schema-pinned. Scoped to honeyslate; backend and
+frontend files are both analysed, journeys are registered on backend entry points.
+Next increments (the results ledger, an MCP wrapper, the `/verify` gate) are in
+the plan.
 
 ## Related Documentation
 
