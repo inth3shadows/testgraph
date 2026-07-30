@@ -82,7 +82,10 @@ def render_markdown(rows_by_file, registry, meta):
         "**Line numbers are frozen at the commit above and are a hint only** — "
         "your own edit has already shifted them, so an insertion higher up the "
         "file makes the ranges point at the wrong symbol (issue #24). Match the "
-        "symbol name; use the range only to disambiguate two symbols sharing one.",
+        "symbol name first, and fall back to the range when you cannot: import "
+        "nodes and module-level bindings get rows too, and an edit to one of "
+        "those looks like no symbol you touched. An edit you cannot attribute to "
+        "any row is *unknown*, never *no journeys*.",
         "",
         "`!` marks a journey reached only through weak or synthesized graph edges "
         "— treat it as *verify manually*, not as *probably fine*.",

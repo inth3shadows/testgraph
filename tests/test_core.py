@@ -4,6 +4,7 @@ recall-critical closure behaviors (imports edge + file-expansion; leaf stays
 tight)."""
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -12,7 +13,8 @@ import tempfile
 import time
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 from testgraph import db as dbmod  # noqa: E402
 from testgraph import integrity  # noqa: E402
 from testgraph import registry as reg  # noqa: E402
@@ -542,13 +544,29 @@ class MarkdownRenderingTests(unittest.TestCase):
         self.md = exp.render_markdown(self.rows, self.REG, self.META)
 
     def _header(self):
-        return next(l for l in self.md.splitlines() if l.startswith("| symbol"))
+        # `next()` with no default raised StopIteration on the very regression
+        # this class exists to catch, so the column-order failure surfaced as an
+        # ERROR with no message instead of the assertion written for it.
+        header = next(
+            (l for l in self.md.splitlines() if l.startswith("|") and "|---" not in l),
+            None,
+        )
+        self.assertIsNotNone(header, "no table header rendered at all")
+        return header
+
+    def _header_cells(self):
+        return [c.strip() for c in self._header().strip("|").split("|")]
 
     def test_symbol_is_the_first_column(self):
-        header = [c.strip() for c in self._header().strip("|").split("|")]
-        self.assertEqual(header[0], "symbol", f"lookup key is not first: {header}")
+        cells = self._header_cells()
+        self.assertEqual(cells[0], "symbol", f"lookup key is not first: {cells}")
+        # matched on substance, not on the caption's exact spelling — pinning the
+        # full string meant rewording the caveat killed the test with a ValueError
+        # (the mistake test_skill_contract already learned; see its `squeezed`).
+        lines_col = [i for i, c in enumerate(cells) if c.startswith("lines")]
+        self.assertTrue(lines_col, f"no lines column: {cells}")
         self.assertGreater(
-            header.index("lines (at generation — stale hint)"), 0,
+            lines_col[0], 0,
             "the stale hint must not be the column an agent reads first",
         )
 
@@ -592,6 +610,40 @@ class MarkdownRenderingTests(unittest.TestCase):
     def test_generation_commit_is_stamped(self):
         # the skill's staleness escalation keys off this stamp.
         self.assertIn("generated from commit `abc1234`", self.md)
+
+    def test_artifact_and_skill_agree_on_the_unattributable_edit(self):
+        """The artifact and SKILL.md are two documents stating one rule, and
+        nothing pinned their agreement — so they drifted apart inside the very
+        commit that fixed #24. The map's preamble narrowed line ranges to
+        "disambiguate two symbols sharing one", while the skill still called them a
+        general hint. That gap is a live under-report: the honeyslate map has rows
+        named `sqlalchemy.orm` and `_settings`, so an agent editing an import block
+        or a module-level binding recognises no symbol it touched, and the absence
+        rule then licenses "no journeys affected" for a J6 (sign-in) file."""
+        with open(
+            os.path.join(ROOT_DIR, "skills", "testgraph-verify", "SKILL.md"),
+            encoding="utf-8",
+        ) as fh:
+            skill = re.sub(r"\s+", " ", fh.read())
+        for doc, name in ((self.md, "the map"), (skill, "SKILL.md")):
+            squeezed = re.sub(r"\s+", " ", doc)
+            self.assertRegex(
+                squeezed, r"import nodes and module-level bindings|"
+                r"[Ii]mport nodes \(`sqlalchemy\.orm`\) and module-level bindings",
+                f"{name} does not warn that some rows are not named for functions",
+            )
+            self.assertIn(
+                "unknown", squeezed,
+                f"{name} does not name the unattributable edit as unknown",
+            )
+        self.assertRegex(
+            skill, r"use the line range as the fallback key",
+            "SKILL.md dropped the line-range fallback the map now points agents to",
+        )
+        self.assertRegex(
+            re.sub(r"\s+", " ", self.md), r"fall back to the range when you cannot",
+            "the map dropped the line-range fallback SKILL.md relies on",
+        )
 
 
 def _git_repo(tmp, files):

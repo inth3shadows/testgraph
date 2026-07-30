@@ -4,7 +4,7 @@ Target: `/home/ericm/personal_projects/honeyslate/main` · index schema 8 · gen
 
 Look up the symbols you changed **by name**. Every journey listed for them may have changed behavior and is worth verifying. This is **recall-first**: a shared symbol legitimately fans out to many journeys.
 
-**Line numbers are frozen at the commit above and are a hint only** — your own edit has already shifted them, so an insertion higher up the file makes the ranges point at the wrong symbol (issue #24). Match the symbol name; use the range only to disambiguate two symbols sharing one.
+**Line numbers are frozen at the commit above and are a hint only** — your own edit has already shifted them, so an insertion higher up the file makes the ranges point at the wrong symbol (issue #24). Match the symbol name first, and fall back to the range when you cannot: import nodes and module-level bindings get rows too, and an edit to one of those looks like no symbol you touched. An edit you cannot attribute to any row is *unknown*, never *no journeys*.
 
 `!` marks a journey reached only through weak or synthesized graph edges — treat it as *verify manually*, not as *probably fine*.
 

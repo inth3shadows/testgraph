@@ -30,6 +30,13 @@ journey registry today.
 3. **Match rows by symbol name first.** Find the symbols you edited and read
    their journey IDs. Line ranges are a *hint only* — they are frozen at the
    map's generation commit, and your own edit has already shifted them.
+   **Not every row is named for a function.** Import nodes (`sqlalchemy.orm`) and
+   module-level bindings (`_settings`) get rows too, and you will not recognise
+   them as "a symbol I edited". If you changed an import block, a module-level
+   assignment, a decorator, or anything else you cannot attribute to a named row,
+   use the line range as the fallback key and read every row it plausibly covers.
+   An edit you cannot attribute to any row is *unknown* — the absence rule below
+   does not apply to it.
 4. Union the journey IDs. That is your verification set.
 5. A journey marked `!` was reached only through weak or synthesized graph edges.
    Do not treat it as probably-fine — verify by hand or say you did not.
