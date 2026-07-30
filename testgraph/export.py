@@ -25,11 +25,114 @@ Usage:
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from . import db as dbmod
 from . import integrity
 from . import registry as reg
+from . import select as sel
+
+
+def _map_relevant(path):
+    """Could an uncommitted change to `path` make the map describe uncommitted code?
+
+    Only for a file that can actually produce a row. Marking the tree dirty over an
+    untracked `NOTES.md`, testgraph's own `.testgraph/journey-map.md`, or
+    codegraph's `.codegraph/` would mark nearly every real export dirty —
+    honeyslate has two untracked docs right now — and a marker that is always on is
+    one the reader learns to skip past. That defeats the purpose it was added for.
+
+    `_is_product`, not a bare extension check: `impacted_closure` walks *callers*,
+    so a test symbol's closure never contains a journey entry and no test file has
+    ever appeared in the map (honeyslate's has 21 sections, none of them `tests/`).
+    A `.d.ts` has no nodes at all. An uncommitted edit to either cannot change a
+    single row, and the stamp is baked into a persisted artifact — one regeneration
+    with a stray test edit would tell every later reader to distrust it.
+    """
+    return sel._is_product(path)
+
+
+class StampError(Exception):
+    """The target's provenance could not be established."""
+
+
+def commit_stamp(repo):
+    """`<short sha>`, or `<short sha>-dirty` when the target tree has changes.
+
+    Issue #25: this used to be a `subprocess.run` with no `check`, whose stdout
+    fell back to the string `"unknown"`. A non-git `--repo`, or any git failure,
+    therefore produced a map that *looked* stamped while the skill's staleness
+    escalation ("`generated from commit` is far behind HEAD") had nothing to
+    compare and silently never fired. Failing open on provenance is the same class
+    of defect as answering `NONE` on an unmappable diff.
+
+    The dirty marker matters because the map is built from the CodeGraph index,
+    which can be ahead of the last commit: without it, a map describing
+    uncommitted code claims clean provenance.
+    """
+    def git(*args):
+        try:
+            return subprocess.run(
+                ["git", "-C", repo, *args], capture_output=True, text=True
+            )
+        except OSError as exc:
+            # git absent from PATH raises rather than returning non-zero, so
+            # without this the export dies with a traceback and exit 1 instead of
+            # the "map NOT written" / exit 2 contract this function exists to keep.
+            raise StampError(f"cannot run git for {repo}: {exc}") from exc
+
+    inside = git("rev-parse", "--is-inside-work-tree")
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        raise StampError(
+            f"{repo} is not a git working tree "
+            f"({inside.stderr.strip() or 'git reported no working tree'}) — the "
+            f"map's staleness check needs a real commit to compare against"
+        )
+    # `git -C` walks UP to an enclosing repository, so a plain directory nested
+    # inside one answers `rev-parse HEAD` with THAT repo's commit. A map stamped
+    # from a different project is worse than an unstamped one: the consumer's
+    # "far behind HEAD" comparison runs against a history that keeps moving, so
+    # the map reads fresh forever. A target with no tracked files under it is not
+    # something the enclosing repo describes.
+    tracked = git("ls-files")
+    if tracked.returncode != 0 or not tracked.stdout.strip():
+        raise StampError(
+            f"{repo} has no git-tracked files, so the enclosing repository's HEAD "
+            f"is not this target's provenance — stamping it would claim a commit "
+            f"from another project"
+        )
+    head = git("rev-parse", "--short", "HEAD")
+    if head.returncode != 0 or not head.stdout.strip():
+        if git("rev-parse", "--verify", "--quiet", "HEAD").returncode != 0:
+            # Unborn/orphan HEAD. Deliberately blocking rather than stamping
+            # something like `unborn-dirty`: every row would describe code in no
+            # commit, and the stamp's whole job is to be comparable to a history.
+            raise StampError(
+                f"the target ({repo}) has no commits yet — commit first; a map of "
+                f"an unborn branch has no provenance to record"
+            )
+        raise StampError(
+            f"cannot read the target's HEAD ({repo}): "
+            f"{head.stderr.strip() or 'git produced no output'}"
+        )
+    sha = head.stdout.strip()
+    # -uall: without it git collapses a wholly-untracked directory to `?? web/`,
+    # which hides the extension — a brand-new `web/App.svelte` then read as
+    # irrelevant and the tree looked clean. Caught by test, not by inspection.
+    # `-- .`: scope to the target. For a subdirectory target the enclosing repo's
+    # changes elsewhere are not this map's business.
+    status = git("status", "--porcelain", "-uall", "--", ".")
+    if status.returncode != 0:
+        raise StampError(
+            f"cannot read the target's working-tree state ({repo}): "
+            f"{status.stderr.strip() or 'git failed'}"
+        )
+    for line in status.stdout.splitlines():
+        paths = line[3:].strip().strip('"').split(" -> ")  # renames carry both
+        if any(_map_relevant(p.strip().strip('"')) for p in paths if p):
+            return f"{sha}-dirty"
+    return sha
 
 
 def build_map(conn, registry):
@@ -74,6 +177,19 @@ def render_markdown(rows_by_file, registry, meta):
         f"Target: `{meta['repo']}` · index schema {meta['schema']} · "
         f"generated from commit `{meta['commit']}`",
         "",
+    ]
+    if str(meta["commit"]).endswith("-dirty"):
+        # The map is built from the CodeGraph index, which can be ahead of the
+        # last commit. Without saying so, a map describing uncommitted code claims
+        # clean provenance and the reader cannot tell (issue #25).
+        out += [
+            "> **`-dirty`: the target had uncommitted changes when this was "
+            "generated.** Rows may describe code that is not in any commit, and "
+            "the line hints are shifted by whatever is still unstaged. Treat a "
+            "missing symbol as *unknown* and regenerate after committing.",
+            "",
+        ]
+    out += [
         "Look up the symbols you changed **by name**. Every journey listed for "
         "them may have changed behavior and is worth verifying. This is "
         "**recall-first**: a shared symbol legitimately fans out to many "
@@ -164,6 +280,18 @@ def main(argv=None):
     )
     for w in warnings:
         print(f"WARN: {w}", file=sys.stderr)
+    # Provenance is checked alongside index integrity, and blocks for the same
+    # reason: a map whose stamp cannot be trusted disables the consumer's only
+    # staleness escalation, and the file outlives the run (issue #25).
+    stamp, provenance = None, []
+    try:
+        stamp = commit_stamp(args.repo)
+    except StampError as exc:
+        # Kept out of `blocking`: that list prints under "index not trustworthy",
+        # whose remedy is a multi-minute `codegraph index` rebuild. A --repo that
+        # simply is not a git repo has nothing to do with the index, and sending
+        # the reader to rebuild it wastes their time on the wrong fix.
+        provenance.append(str(exc))
     # A journey whose entries no longer resolve vanishes from every row while the
     # legend keeps advertising it. A persisted map that lies is worse than none.
     for jid, names in reg.unresolved(conn, registry):
@@ -173,23 +301,22 @@ def main(argv=None):
             f"index; it would silently vanish from every row"
         )
 
+    if provenance:
+        print("BLOCKED — provenance unverifiable; map NOT written", file=sys.stderr)
+        for p in provenance:
+            print(f"  x {p}", file=sys.stderr)
     if blocking:
         print("BLOCKED — index not trustworthy; map NOT written", file=sys.stderr)
         for b in blocking:
             print(f"  x {b}", file=sys.stderr)
+    if provenance or blocking:
         return 2
 
     rows_by_file = build_map(conn, registry)
-    import subprocess
-
-    commit = subprocess.run(
-        ["git", "-C", args.repo, "rev-parse", "--short", "HEAD"],
-        capture_output=True, text=True,
-    ).stdout.strip() or "unknown"
     meta = {
         "repo": args.repo,
         "schema": dbmod.schema_version(conn),
-        "commit": commit,
+        "commit": stamp,
         "symbols": sum(len(v) for v in rows_by_file.values()),
     }
 
