@@ -26,6 +26,42 @@ def resolve_entries(conn, registry):
     return mapping
 
 
+def approval_warning(registry):
+    """A warning string when this registry has not been human-approved, else None.
+
+    `testgraph.propose` drafts a registry mechanically (issue #6). A draft is
+    valid and runnable — that is the point — but it groups one journey per route
+    handler, it has known blind spots, and nobody has read it. Running against one
+    is fine; running against one *without knowing* is the silent-confidence
+    failure this codebase keeps designing against, so it rides the same warning
+    channel as `RECALL DEGRADED`: loud, never blocking.
+
+    Blocking was rejected deliberately: it would make the proposer useless until a
+    human edits JSON, which defeats the purpose of automating authoring.
+
+    A MISSING `approved` key warns too. An unmarked registry is unknown
+    provenance, not an approved one. This is safe from the always-on-warning
+    failure `unchecked_entries` documents, because the remedy — add
+    `"approved": true` — always clears it.
+    """
+    if registry.get("approved") is True:
+        return None
+    spots = registry.get("blind_spots") or []
+    extra = f"; {len(spots)} declared blind spot(s)" if spots else ""
+    if "approved" not in registry:
+        return (
+            "registry carries no `approved` marker — provenance unknown, so "
+            "completeness is unverified; add \"approved\": true once a human has "
+            "read it" + extra
+        )
+    return (
+        "UNAPPROVED REGISTRY — this is a machine-drafted registry nobody has "
+        "reviewed. Journeys are one-per-handler and entry coverage is unverified, "
+        "so a NONE answer may mean 'not registered' rather than 'not affected'" +
+        extra + ". Set \"approved\": true after review"
+    )
+
+
 def unresolved(conn, registry):
     """[(journey_id, [unresolvable entry names])] for journeys with NO entry that
     resolves to a node in the index.
@@ -114,7 +150,7 @@ def live_drift(repo, registry):
     rather than defined there would be a false positive, so imports count as
     definitions.
     """
-    sources = _python_sources(repo)
+    sources = python_sources(repo)
     drift = []
     for jid, journey in registry["journeys"].items():
         for entry in journey["entries"]:
@@ -170,10 +206,23 @@ def live_drift(repo, registry):
 _SKIP_DIRS = frozenset({
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".codegraph",
     ".testgraph", ".mypy_cache", ".pytest_cache", "dist", "build",
+    # JS/TS build output. Added for `propose`, which counts the files it cannot
+    # parse as evidence for a blind spot: honeyslate's `.svelte-kit/` inflated
+    # that count from 53 real frontend sources to 96, so the report overstated
+    # how much of the app was invisible. Bundled output can never hold a registry
+    # entry, so skipping it costs nothing on the drift path either. All dotted:
+    # this list also feeds `live_drift`, and a plausible package name like
+    # `coverage/` would make a real entry under it report "no file matching that
+    # path in the tree" with a remedy that cannot be right.
+    ".svelte-kit", ".next", ".nuxt", ".output",
 })
 
 
-def _python_sources(repo):
+def python_sources(repo):
+    """Every Python file under `repo` that is product source. Public because
+    `propose` scans the same set — one definition of "what counts as source",
+    including `_SKIP_DIRS`, so the drafter and the drift checker cannot disagree
+    about which files exist."""
     found = []
     for root, dirs, files in os.walk(repo):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]

@@ -50,13 +50,24 @@ all, so every journey is listed and the honest answer is *unknown*, not *none*.
 - **The list looks too short / missed a flow you expected** — the flow may be
   missing an entry point in the registry (`journeys/honeyslate.json`). Add it and
   re-run.
+- **"UNAPPROVED REGISTRY"** — the registry driving this run was drafted by
+  `testgraph.propose` and nobody has reviewed it. Results are usable, but treat a
+  short list or a `NONE` as *possibly unregistered* rather than *unaffected*. Clear
+  it by reviewing the registry and setting `"approved": true`.
 
 ## FAQ
 
 **Does it run the tests for me?** No — it decides *what* to test. Running is done
 by you, CI, or a test-driver like Playwright.
 
-**Which projects does it support today?** honeyslate only. Backend Python and
+**Can I use it on another project?** It needs a journey registry for that project.
+`python3 -m testgraph.propose --repo <path>` drafts one by finding your route
+handlers, then the `testgraph-propose` skill walks an agent through grouping and
+approving it. Until someone approves it, every run prints `UNAPPROVED REGISTRY` —
+the answers are usable, but a `NONE` may mean "that flow isn't registered yet"
+rather than "nothing broke".
+
+**Which projects does it support today?** honeyslate is the only reviewed one. Backend Python and
 frontend `.js/.ts/.jsx/.tsx/.svelte/.vue` changes are both analysed; the journeys
 themselves are registered against backend entry points.
 

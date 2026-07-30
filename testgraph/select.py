@@ -152,6 +152,15 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         registry.get("spot_checks", {}),
         schema_pin=registry.get("codegraph_schema_version"),
     )
+    # Provenance of the registry itself. Everything below checks whether the
+    # registry AGREES with the code; this checks whether anyone ever read it. A
+    # machine-drafted registry (issue #6) is runnable on purpose, so this is a
+    # warning, not a block -- but a `NONE` answer computed from an unreviewed
+    # registry means "not registered", not "not affected".
+    approval = reg.approval_warning(registry)
+    if approval:
+        warnings.append(approval)
+
     # A journey whose entries do not resolve can never be selected -- silent
     # under-selection. Blocking is right for live use. But when ANALYSING HISTORY
     # (the accuracy harness checks out old commits) a journey that simply did not

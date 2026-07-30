@@ -141,6 +141,36 @@ def caller_edge_count(conn, node_id):
     ).fetchone()[0]
 
 
+def top_fanin_nodes(conn, limit, exclude_source=None):
+    """[(name, file_path, inbound_edge_count)] for the most depended-on symbols.
+
+    Used by `propose` to pin integrity spot-checks from the index itself rather
+    than from a hand-picked symbol. Same edge kinds as `caller_edge_count`.
+
+    `exclude_source` is a predicate on the SOURCE node's file path. It exists
+    because the floor derived here is later compared against `caller_edge_count`,
+    which counts edges from EVERY file including tests: counting test call sites
+    into the floor makes ordinary test deletion drop the measured count below it,
+    and the guard then blocks with `run codegraph index`, a remedy that can never
+    clear it. Excluding them here leaves the floor at or below what the guard
+    measures, so the error can only be in the safe direction.
+    """
+    rows = conn.execute(
+        "SELECT n.name, n.file_path, src.file_path FROM edges e "
+        "JOIN nodes n ON n.id = e.target "
+        "LEFT JOIN nodes src ON src.id = e.source "
+        "WHERE e.kind IN ('calls', 'imports', 'references', 'instantiates') "
+        "AND n.kind != 'file'"
+    )
+    counts = {}
+    for name, file_path, source_path in rows:
+        if exclude_source and source_path and exclude_source(source_path):
+            continue
+        counts[(name, file_path)] = counts.get((name, file_path), 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0][0]))
+    return [(name, path, count) for (name, path), count in ranked[:limit]]
+
+
 def resolve_symbol(conn, name, file_suffix=None):
     """Node ids for a symbol by name, optionally constrained to a file suffix
     (kills same-name duplicates like auth.me vs test.me)."""

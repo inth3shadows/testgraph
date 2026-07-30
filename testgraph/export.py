@@ -207,6 +207,20 @@ def render_markdown(rows_by_file, registry, meta):
         for w in meta["warnings"]:
             out.append(f"> - {w}")
         out.append("")
+    # Its own banner, deliberately not merged into the one above. The index can be
+    # perfect and this map still be incomplete, because nobody checked that the
+    # registry lists every journey the app has. Different cause, different remedy,
+    # so a reader is never sent to re-index over a review that was never done.
+    if meta.get("registry_approval"):
+        out += [
+            "> **The journey registry behind this map was not human-approved.** "
+            f"{meta['registry_approval']}. The index may be sound and the map "
+            "still incomplete: a journey nobody registered has no rows here, so "
+            "a symbol's *absence* from every journey means **unknown**, not "
+            "*unaffected*. Re-indexing does not change this — reviewing and "
+            "approving the registry does.",
+            "",
+        ]
     if str(meta["commit"]).endswith("-dirty"):
         # The map is built from the CodeGraph index, which can be ahead of the
         # last commit. Without saying so, a map describing uncommitted code claims
@@ -330,6 +344,16 @@ def main(argv=None):
         )
     for w in warnings:
         print(f"WARN: {w}", file=sys.stderr)
+    # Registry provenance is NOT an integrity warning and must not ride that
+    # channel: `render_markdown` prints every `warnings` entry under "The index
+    # was not fully trustworthy", and the consumer skill reads that banner as
+    # "regenerate after `codegraph index`". An unapproved registry has no index
+    # component, so it would assert a permanent index problem with a remedy that
+    # can never clear it — the failure `unchecked_entries` was split out to
+    # avoid. Own field, own blockquote, own remedy.
+    approval = reg.approval_warning(registry)
+    if approval:
+        print(f"WARN: {approval}", file=sys.stderr)
     # Provenance is checked alongside index integrity, and blocks for the same
     # reason: a map whose stamp cannot be trusted disables the consumer's only
     # staleness escalation, and the file outlives the run (issue #25).
@@ -374,6 +398,9 @@ def main(argv=None):
         # a footnote in the map, never the "not fully trustworthy" banner: no
         # amount of re-indexing clears an unverifiable entry
         "unchecked_entries": reg.unchecked_entries(registry),
+        # same rule, different cause: whether a human ever reviewed the registry
+        # is a provenance fact about the map's INPUT, not about the index
+        "registry_approval": approval,
     }
 
     md = render_markdown(rows_by_file, registry, meta)
