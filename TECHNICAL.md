@@ -152,6 +152,21 @@ dropped weak paths would under-report). Verified by mutation: narrowing
 `_is_product` to `.py`, over-reporting a journey on every row, and dropping
 low-confidence journeys each turn it red.
 
+### Warnings live in the artifact (issue #23)
+
+Only *blocking* problems stopped the write. Warnings — "codegraph schema version
+unpinned", "N source file(s) newer than the index" — went to the stderr of the run
+that produced the map and nowhere else, so the persisted file carried no trace of
+them. That contradicted this module's own reason for refusing to write on a corrupt
+index: the file outlives the run.
+
+The warning that matters most is freshness, because a stale index makes the map
+**under-report** — a symbol missing from it may still reach journeys, which is the
+unsafe direction. Warnings now render as a blockquote above the tables, ship in the
+`--json` sidecar's `meta`, and have an escalation row in the skill. A clean run
+renders no block at all; a warning banner that is always present is one the reader
+learns to skip.
+
 ### Provenance fails closed (issue #25)
 
 The stamp was `subprocess.run(...).stdout.strip() or "unknown"` — no `check`. A

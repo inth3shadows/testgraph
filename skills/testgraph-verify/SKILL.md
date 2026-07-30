@@ -54,6 +54,7 @@ below means *unknown*, never *none*:
 | You changed **any non-`.py` file** (`.js`, `.jsx`, `.ts`, `.tsx`, `.svelte`, `.vue`, …) | Run `select` — it seeds these paths (issue #21; it used to answer `NONE` for all of them). If your extension is not in the index it prints `RECALL DEGRADED` and lists every journey: that is *unknown*, not none. A journey reached only through frontend code often arrives on a weak edge — expect `!` and verify by hand. |
 | The file has no `###` section at all | Unknown. The indexer may not cover it. Escalate and say so. |
 | `generated from commit` is far behind HEAD | The map under-reports. Regenerate (below) or escalate. |
+| The header carries a **warnings blockquote** | The index was not fully trusted when the map was generated (unpinned schema, sources newer than the index). The map **under-reports**: a symbol missing from it may still reach journeys. Treat absences as *unknown* and regenerate after `codegraph index`. |
 | The stamp ends in **`-dirty`** | It was generated from a tree with uncommitted changes, so rows may describe code in no commit and the line hints are shifted further than usual. Regenerate after committing; until then treat a missing symbol as *unknown*. **Strip the `-dirty` suffix before comparing the stamp to a revision** — `<sha>-dirty` is not a valid git rev, and `git log <stamp>..HEAD` fails with `bad revision` rather than reporting no staleness. |
 
 ### Running select

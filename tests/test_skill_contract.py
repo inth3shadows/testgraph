@@ -249,6 +249,16 @@ class SkillRulesAreSafe(unittest.TestCase):
             "the skill is back to telling the agent to match by line number (#24)",
         )
 
+    def test_index_warning_block_has_an_escalation_row(self):
+        # issue #23: warnings are now rendered into the map itself. A signal the
+        # consumer's rules never mention is a signal the consumer ignores — and
+        # this one means the map under-reports, the unsafe direction.
+        rows = escalation_rows(self.text)
+        warned = [r for r in rows if "warning" in r.lower()]
+        self.assertTrue(warned, "no escalation row for a map carrying warnings")
+        self.assertIn("under-report", warned[0])
+        self.assertIn("unknown", warned[0])
+
     def test_dirty_stamp_has_an_escalation_row(self):
         # issue #25: the map can now be stamped `<sha>-dirty`, meaning it may
         # describe code in no commit. A marker the consumer's rules never mention

@@ -516,6 +516,43 @@ class IntoTargetTests(unittest.TestCase):
             os.path.exists(os.path.join(self.tmp, ".testgraph", "journey-map.md"))
         )
 
+    def test_unpinned_schema_warning_reaches_the_written_file(self):
+        # the reviewer's reproduction for #23, end to end: dropping the schema pin
+        # printed WARN to stderr and wrote a map containing zero occurrences of it.
+        with open(self.reg) as fh:
+            registry = json.load(fh)
+        del registry["codegraph_schema_version"]
+        with open(self.reg, "w") as fh:
+            json.dump(registry, fh)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = exp.main(["--repo", self.tmp, "--registry", self.reg,
+                           "--into-target"])
+        self.assertEqual(rc, 0)
+        self.assertIn("unpinned", err.getvalue())
+        with open(os.path.join(self.tmp, ".testgraph", "journey-map.md")) as fh:
+            written = fh.read()
+        self.assertIn("unpinned", written)
+
+    def test_warnings_reach_the_json_sidecar_too(self):
+        with open(self.reg) as fh:
+            registry = json.load(fh)
+        del registry["codegraph_schema_version"]
+        with open(self.reg, "w") as fh:
+            json.dump(registry, fh)
+        out_json = os.path.join(self.tmp, "map.json")
+        with contextlib.redirect_stderr(io.StringIO()):
+            rc = exp.main(["--repo", self.tmp, "--registry", self.reg,
+                           "--out", os.path.join(self.tmp, "m.md"),
+                           "--json", out_json])
+        self.assertEqual(rc, 0)
+        with open(out_json) as fh:
+            payload = json.load(fh)
+        self.assertTrue(
+            any("unpinned" in w for w in payload["meta"]["warnings"]),
+            payload["meta"],
+        )
+
     def test_out_and_into_target_are_exclusive(self):
         rc = exp.main(["--repo", self.tmp, "--registry", self.reg, "--into-target",
                        "--out", os.path.join(self.tmp, "x.md")])
@@ -638,6 +675,27 @@ class MarkdownRenderingTests(unittest.TestCase):
         self.assertIn("regenerate after committing", md.lower())
         # and a clean stamp must NOT carry the warning, or it means nothing
         self.assertNotIn("uncommitted changes", self.md)
+
+    def test_integrity_warnings_are_rendered_into_the_artifact(self):
+        """Issue #23: only *blocking* problems stopped the write; warnings went to
+        stderr and never reached the file. "N source files newer than the index" is
+        the exact "this map under-reports" signal, and it was visible only in the
+        terminal of the run that produced it — contradicting export.py's own stated
+        reason for blocking on a corrupt index, that the file outlives the run."""
+        warned = exp.render_markdown(
+            self.rows, self.REG,
+            {**self.META, "warnings": ["codegraph schema version unpinned",
+                                       "3 source file(s) newer than the index"]},
+        )
+        self.assertIn("codegraph schema version unpinned", warned)
+        self.assertIn("3 source file(s) newer than the index", warned)
+        self.assertIn("under-report", warned)
+        # rendered as a blockquote near the top, not buried under the tables
+        head, _, tail = warned.partition("## Symbols by file")
+        self.assertIn("schema version unpinned", head)
+        self.assertNotIn("schema version unpinned", tail)
+        # a clean run must not carry an empty warning block, or it means nothing
+        self.assertNotIn("not fully trustworthy", self.md)
 
     def test_artifact_and_skill_agree_on_the_unattributable_edit(self):
         """The artifact and SKILL.md are two documents stating one rule, and

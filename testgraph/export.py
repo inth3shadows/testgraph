@@ -178,6 +178,24 @@ def render_markdown(rows_by_file, registry, meta):
         f"generated from commit `{meta['commit']}`",
         "",
     ]
+    # Integrity warnings belong IN the artifact, not only on the stderr of the run
+    # that produced it (issue #23). Only *blocking* problems stopped the write;
+    # warnings — "index unpinned", "N source files newer than the index", i.e. the
+    # exact "this map under-reports" signal — went to a terminal nobody will ever
+    # see again. That contradicted this module's own rationale for blocking on a
+    # corrupt index: the file outlives the run and carries no warning of its own.
+    if meta.get("warnings"):
+        out.append(
+            "> **The index was not fully trustworthy when this map was "
+            "generated.** These warnings were raised at generation time and are "
+            "reproduced here because this file outlives the run that made it. A "
+            "stale or unverified index makes the map *under-report* — a symbol "
+            "missing from it may still reach journeys."
+        )
+        out.append(">")
+        for w in meta["warnings"]:
+            out.append(f"> - {w}")
+        out.append("")
     if str(meta["commit"]).endswith("-dirty"):
         # The map is built from the CodeGraph index, which can be ahead of the
         # last commit. Without saying so, a map describing uncommitted code claims
@@ -318,6 +336,9 @@ def main(argv=None):
         "schema": dbmod.schema_version(conn),
         "commit": stamp,
         "symbols": sum(len(v) for v in rows_by_file.values()),
+        # carried into the artifact AND the --json sidecar, so a consumer of
+        # either can tell the map was generated off a not-fully-trusted index
+        "warnings": warnings,
     }
 
     md = render_markdown(rows_by_file, registry, meta)
