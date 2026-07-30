@@ -83,8 +83,18 @@ python3 -m testgraph.select --repo <path> --registry journeys/<target>.draft.jso
 - **No `journey ... no definition` drift warning.** That means an entry you added
   by hand does not exist in the source at that path.
 - Sanity-check the `spot_checks` block. Floors are set at 80% of the observed
-  inbound-edge count, which is a starting point, not a measurement. If a pinned
-  symbol looks incidental, replace it with one you know is load-bearing.
+  inbound-edge count, which is a starting point, not a measurement.
+
+  Pins are chosen by **caller-file churn first, fan-in second** — the floor
+  breaks when call sites are deleted, so a widely-used-but-volatile symbol (a
+  shared UI component) is the worst possible pin even though it has the highest
+  fan-in. `spot_check_basis` tells you whether churn data was available; if it
+  says `fan-in only`, the repo has no usable git history and the pins are
+  unranked for stability, so check them yourself.
+
+  `spot_check_candidates` lists the runners-up with their fan-in and churn. To
+  swap a pin, take one from there rather than inventing a symbol — the floor has
+  already been derived against the same edge kinds the guard measures.
 
 ## 6. Approve
 

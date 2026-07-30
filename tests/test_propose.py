@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -117,7 +118,7 @@ def _db(tmp, present=("create_task", "get_task", "delete_task")):
          "app/tests/conftest.py", 1, 2),
     )
     # Source nodes, so an edge's ORIGIN has a file path to filter on.
-    for i in range(5):
+    for i in range(15):
         conn.execute(
             "INSERT INTO nodes VALUES (?,?,?,?,?,?,?)",
             (f"caller{i}", "function", f"caller{i}", f"caller{i}",
@@ -130,10 +131,10 @@ def _db(tmp, present=("create_task", "get_task", "delete_task")):
              "app/tests/test_api.py", 1, 2),
         )
     # `client` is deliberately given MORE inbound edges than `get_db`: without
-    # the test-path exclusion it would win the spot-check pick. `get_db`'s 9 edges
-    # split 5 product / 4 test, so the derived floor and the guard's measurement
-    # are distinguishable.
-    rows = [(f"caller{i}", "function:get_db", "calls", None, None) for i in range(5)]
+    # the test-path exclusion it would win the spot-check pick. `get_db`'s 19
+    # edges split 15 product / 4 test, so the derived floor and the guard's
+    # measurement are distinguishable, and the 15 clear MIN_TOLERANCE_EDGES.
+    rows = [(f"caller{i}", "function:get_db", "calls", None, None) for i in range(15)]
     rows += [(f"tcaller{i}", "function:get_db", "calls", None, None) for i in range(4)]
     rows += [(f"tcaller{i % 4}", "function:client", "calls", None, None)
              for i in range(20)]
@@ -235,17 +236,21 @@ class ProposeDraftTests(unittest.TestCase):
         self.assertNotIn("client", checks, "test fixtures must not anchor the guard")
 
     def test_floor_ignores_test_call_sites(self):
-        # `get_db` has 9 inbound edges, 4 of them from a test file. The guard
-        # later measures ALL 9 via `caller_edge_count`, so a floor derived from
-        # the 5 product edges can only err low. Counting the test edges instead
+        # `get_db` has 19 inbound edges, 4 of them from a test file. The guard
+        # later measures ALL 19 via `caller_edge_count`, so a floor derived from
+        # the 15 product edges can only err low. Counting the test edges instead
         # would make deleting those tests a BLOCK whose printed remedy
         # (`codegraph index`) can never clear it.
         floor = self.draft["spot_checks"]["get_db"]["min_caller_edges"]
-        self.assertEqual(floor, int(5 * prop.SPOT_CHECK_FLOOR))
+        self.assertEqual(floor, int(15 * prop.SPOT_CHECK_FLOOR))
         conn = dbmod.connect(self.db)
         measured = dbmod.caller_edge_count(conn, "function:get_db")
-        self.assertEqual(measured, 9)
+        self.assertEqual(measured, 19)
         self.assertLess(floor, measured, "the floor must sit below what the guard sees")
+
+    def test_basis_says_when_churn_was_unavailable(self):
+        # The fixture is a plain directory, not a git repo.
+        self.assertIn("fan-in only", self.draft["spot_check_basis"])
 
     def test_blind_spots_name_what_the_scan_cannot_see(self):
         joined = " ".join(self.draft["blind_spots"])
@@ -319,6 +324,111 @@ class JourneyIdCollisionTests(unittest.TestCase):
         draft = prop.propose(tmp, path, "collide")["draft"]
         files = {e["file"] for j in draft["journeys"].values() for e in j["entries"]}
         self.assertEqual(files, {"api/v1/users.py", "api/v2/users.py"})
+
+
+class SpotCheckStabilityTests(unittest.TestCase):
+    """Issue #43: fan-in says how depended-upon a symbol is, not how stable that
+    number is, and the blocking half of the guard needs the second property."""
+
+    def test_a_narrow_tolerance_band_is_rejected(self):
+        # SPOT_CHECK_FLOOR = 0.8 gives a 3-edge symbol a floor of 2, so deleting
+        # ONE caller blocks every run. Small fan-in is the most fragile pin there
+        # is, whatever its churn -- the failure the first cut of this fix walked
+        # straight into by ranking on churn ascending.
+        conn = _fanin_db({"tiny": 3, "solid": 20})
+        checks, candidates = prop._spot_checks(conn, set(), churn={})
+        self.assertIn("solid", checks)
+        self.assertNotIn("tiny", checks)
+        self.assertNotIn("tiny", {c["name"] for c in candidates})
+
+    def test_volatile_callers_lose_to_a_quieter_symbol(self):
+        conn = _fanin_db({"hot": 30, "calm": 20})
+        # `hot` has more fan-in but its callers churn hard.
+        churn = {"caller_hot_%d.py" % i: 40 for i in range(30)}
+        churn.update({"caller_calm_%d.py" % i: 1 for i in range(20)})
+        checks, candidates = prop._spot_checks(conn, set(), churn)
+        # Both survive into the pool (limit=2 takes two); what matters is which
+        # one is picked FIRST, since that is the one a reviewer keeps.
+        self.assertEqual(list(checks)[0], "calm")
+        self.assertGreater(candidates[0]["score"], candidates[1]["score"])
+
+    def test_quiet_but_obscure_loses_to_quiet_and_load_bearing(self):
+        # Ranking on churn alone picked the quietest symbol regardless of how
+        # little it asserted: honeyslate went from get_settings (15 of 19 edges)
+        # to hash_token (2 of 3). Both quiet here; the load-bearing one must win.
+        conn = _fanin_db({"obscure": 12, "loadbearing": 40})
+        churn = {"caller_obscure_%d.py" % i: 1 for i in range(12)}
+        churn.update({"caller_loadbearing_%d.py" % i: 1 for i in range(40)})
+        checks, _ = prop._spot_checks(conn, set(), churn)
+        self.assertEqual(list(checks)[0], "loadbearing")
+
+    def test_no_git_history_degrades_to_fan_in_order(self):
+        conn = _fanin_db({"big": 40, "small": 12})
+        checks, _ = prop._spot_checks(conn, set(), churn={})
+        self.assertEqual(list(checks), ["big", "small"])
+
+    def test_churn_is_measured_on_callers_not_the_definition(self):
+        # button.tsx is a STABLE file whose callers churn constantly. Scoring on
+        # the definition's own history would rank it the safest pin in the repo.
+        conn = _fanin_db({"Button": 30})
+        callers = {"caller_Button_%d.py" % i: 50 for i in range(30)}
+        volatile = prop._spot_checks(conn, set(), {**callers, "def_Button.py": 0})
+        quiet = prop._spot_checks(conn, set(), {"def_Button.py": 999})
+        self.assertGreater(volatile[1][0]["caller_churn"], 0)
+        self.assertEqual(quiet[1][0]["caller_churn"], 0)
+
+
+def _fanin_db(symbols):
+    """In-memory index where each `name: n` gets `n` callers, one per own file."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE nodes(id TEXT, kind TEXT, name TEXT, qualified_name TEXT,
+            file_path TEXT, start_line INT, end_line INT);
+        CREATE TABLE edges(id INTEGER PRIMARY KEY, source TEXT, target TEXT,
+            kind TEXT, metadata TEXT, provenance TEXT);
+        """
+    )
+    for name, n in symbols.items():
+        conn.execute("INSERT INTO nodes VALUES (?,?,?,?,?,?,?)",
+                     (f"function:{name}", "function", name, name,
+                      f"def_{name}.py", 1, 2))
+        for i in range(n):
+            src = f"caller_{name}_{i}"
+            conn.execute("INSERT INTO nodes VALUES (?,?,?,?,?,?,?)",
+                         (src, "function", src, src, f"{src}.py", 1, 2))
+            conn.execute(
+                "INSERT INTO edges(source, target, kind, metadata, provenance) "
+                "VALUES (?,?,?,?,?)", (src, f"function:{name}", "calls", None, None))
+    conn.commit()
+    return conn
+
+
+class FileChurnTests(unittest.TestCase):
+    def test_counts_commits_per_file_and_survives_a_non_repo(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.assertEqual(prop.file_churn(tmp), {},
+                         "a plain directory must degrade, not raise")
+
+        run = lambda *a: subprocess.run(a, cwd=tmp, check=True, capture_output=True)
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "t@t")
+        run("git", "config", "user.name", "t")
+        for i in range(3):
+            with open(os.path.join(tmp, "hot.py"), "w") as fh:
+                fh.write(f"x = {i}\n")
+            run("git", "add", "-A")
+            run("git", "commit", "-qm", f"c{i}")
+        with open(os.path.join(tmp, "cold.py"), "w") as fh:
+            fh.write("y = 1\n")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "cold")
+
+        churn = prop.file_churn(tmp)
+        self.assertEqual(churn["hot.py"], 3)
+        self.assertEqual(churn["cold.py"], 1)
 
 
 class VirtualenvPruningTests(unittest.TestCase):
