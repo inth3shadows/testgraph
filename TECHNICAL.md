@@ -165,8 +165,36 @@ The stamp also reported `HEAD` for a dirty tree, so a map built from uncommitted
 code claimed clean provenance — the index can be ahead of the last commit. It is
 now `<sha>-dirty`, and both the artifact and the skill say what that means.
 
-**What counts as dirty:** only paths whose extension is in `select.PRODUCT_EXT`.
-An untracked `NOTES.md`, testgraph's own `.testgraph/journey-map.md`, or
+**`git -C` walks up.** A plain directory nested inside a repository answers
+`rev-parse HEAD` with *that* repository's commit, so the first version stamped a
+map with an unrelated project's history — worse than `unknown`, because the
+consumer's "far behind HEAD" comparison then runs against a history that keeps
+moving and the map reads fresh forever. The target must therefore contain
+git-tracked files, and `git status` is scoped with `-- .` so a subdirectory target
+is not marked dirty by an unrelated edit elsewhere in a monorepo.
+
+**Deliberate decision — an unborn HEAD blocks.** A freshly `git init`ed target, or
+`checkout --orphan`, has no commit to record. Stamping something like
+`unborn-dirty` would put a non-comparable string in the field whose only job is to
+be comparable to a history, so the export refuses and says which case it is. This
+is stricter than issue #25 asked for; the alternative (write the map, stamp it
+dirty) is defensible and was rejected on that reasoning, not by accident of
+`rev-parse` semantics.
+
+**Failure modes that must not escape:** `git` absent from `PATH` raises
+`FileNotFoundError` rather than returning non-zero, which would kill the export
+with a traceback and exit 1 instead of the "map NOT written" / exit 2 contract —
+`OSError` is wrapped into `StampError`. And a provenance failure prints under its
+own `BLOCKED — provenance unverifiable` header, never the index one: the remedy
+for a corrupt index is a multi-minute `codegraph index` rebuild, and sending
+someone there because `--repo` is not a git repo wastes their time on the wrong fix.
+
+**What counts as dirty:** only paths `select._is_product` accepts.
+`impacted_closure` walks *callers*, so a test symbol's closure never contains a
+journey entry and no test file has ever produced a row (honeyslate's map has 21
+sections, none of them `tests/`); a `.d.ts` has no nodes at all. An uncommitted edit
+to either cannot change a single row, so it must not stamp the artifact as
+untrustworthy. An untracked `NOTES.md`, testgraph's own `.testgraph/journey-map.md`, or
 codegraph's `.codegraph/` must not trip it — honeyslate has two untracked docs
 right now, and a marker that is always on is one the reader learns to skip.
 Sharing `PRODUCT_EXT` with the selector means #21's widening widened this too,

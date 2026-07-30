@@ -263,6 +263,13 @@ class SkillRulesAreSafe(unittest.TestCase):
             "unknown", dirty[0],
             "the -dirty row must not let a missing symbol read as 'no journeys'",
         )
+        # `<sha>-dirty` is not a valid git revision, and the row above tells the
+        # agent to compare the stamp to HEAD: `git log <stamp>..HEAD` fails with
+        # `bad revision`, which an agent can read as "no staleness detected".
+        self.assertRegex(
+            dirty[0], r"[Ss]trip the `?-dirty`? suffix",
+            "the -dirty row does not say to strip the suffix before comparing",
+        )
 
     def test_absence_rule_keeps_its_qualifier(self):
         # the original #18 defect was an unqualified "absent -> no journeys".

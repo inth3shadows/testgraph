@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
@@ -769,10 +770,101 @@ class CommitStampTests(unittest.TestCase):
         self.run("git", "mv", "app/svc.py", "app/renamed.py")
         self.assertTrue(exp.commit_stamp(self.repo).endswith("-dirty"))
 
+    def test_plain_directory_inside_a_repo_does_not_borrow_its_HEAD(self):
+        # `git -C` walks up, so a non-repo directory nested inside a repo used to
+        # stamp successfully with the ENCLOSING project's commit — worse than
+        # `unknown`, because the consumer's "far behind HEAD" comparison runs
+        # against a history that keeps moving and the map reads fresh forever.
+        nested = os.path.join(self.repo, "vendor", "unrelated")
+        os.makedirs(nested)
+        with open(os.path.join(nested, "thing.py"), "w") as fh:
+            fh.write("x = 1\n")
+        with self.assertRaises(exp.StampError) as caught:
+            exp.commit_stamp(nested)
+        self.assertIn("no git-tracked files", str(caught.exception))
+
+    def test_unborn_head_blocks_with_its_own_reason(self):
+        # a repo with no commits has no provenance to record; blocking is the
+        # deliberate choice, but the message must say which case it is.
+        fresh = os.path.join(self.tmp, "fresh")
+        os.makedirs(fresh)
+        subprocess.run(["git", "init", "-q"], cwd=fresh, check=True,
+                       capture_output=True)
+        with open(os.path.join(fresh, "app.py"), "w") as fh:
+            fh.write("x = 1\n")
+        subprocess.run(["git", "add", "-A"], cwd=fresh, check=True,
+                       capture_output=True)
+        with self.assertRaises(exp.StampError) as caught:
+            exp.commit_stamp(fresh)
+        self.assertIn("no commits yet", str(caught.exception))
+
+    def test_missing_git_binary_still_fails_closed(self):
+        # git absent from PATH raises FileNotFoundError instead of returning
+        # non-zero, which escaped the fail-closed path entirely and killed the
+        # export with a traceback and exit 1.
+        with unittest.mock.patch.object(
+            exp.subprocess, "run", side_effect=FileNotFoundError("no git")
+        ):
+            with self.assertRaises(exp.StampError) as caught:
+                exp.commit_stamp(self.repo)
+        self.assertIn("cannot run git", str(caught.exception))
+
+    def test_subdirectory_target_ignores_changes_outside_itself(self):
+        # `git status` reports the whole repo even when run from a subdirectory, so
+        # a `--repo <repo>/backend` target used to be marked dirty by an unrelated
+        # edit elsewhere in the monorepo. The map only describes its own target.
+        self._write("other/unrelated.py", "changed = 1\n")
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "add other")
+        self._write("other/unrelated.py", "changed = 2\n")
+        self.assertFalse(
+            exp.commit_stamp(os.path.join(self.repo, "app")).endswith("-dirty"),
+            "a change outside the target subtree marked the target dirty",
+        )
+        # ...and a change INSIDE it still does
+        self._write("app/svc.py", "changed = 3\n")
+        self.assertTrue(
+            exp.commit_stamp(os.path.join(self.repo, "app")).endswith("-dirty")
+        )
+
+    def test_uncommitted_test_file_is_not_dirty(self):
+        # `impacted_closure` walks callers, so a test symbol reaches no journey
+        # entry and no test file has ever produced a row. An edit that cannot
+        # change a row must not stamp the persisted artifact as untrustworthy.
+        self._write("tests/test_svc.py", "def test_x():\n    assert True\n")
+        self._write("types/api.d.ts", "export declare const x: number;\n")
+        self.assertFalse(
+            exp.commit_stamp(self.repo).endswith("-dirty"),
+            "a change that cannot appear in the map marked it dirty",
+        )
+
+    def test_provenance_failure_does_not_blame_the_index(self):
+        # the remedy for a corrupt index is a multi-minute `codegraph index`
+        # rebuild; sending someone there because --repo is not a git repo wastes
+        # their time on the wrong fix.
+        plain = os.path.join(self.tmp, "plain2")
+        os.makedirs(os.path.join(plain, ".codegraph"))
+        dst = sqlite3.connect(os.path.join(plain, ".codegraph", "codegraph.db"))
+        build_fixture().backup(dst)
+        dst.close()
+        registry = _registry_file(
+            self.tmp,
+            {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                                "file": "app/svc.py"}]}},
+            name="reg-plain2.json",
+        )
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = exp.main(["--repo", plain, "--registry", registry,
+                           "--into-target"])
+        self.assertEqual(rc, 2)
+        self.assertIn("provenance unverifiable", err.getvalue())
+        self.assertNotIn("index not trustworthy", err.getvalue())
+
     def test_non_git_target_raises_instead_of_stamping_unknown(self):
         with self.assertRaises(exp.StampError) as caught:
             exp.commit_stamp(os.path.join(self.tmp, "not-a-repo"))
-        self.assertIn("HEAD", str(caught.exception))
+        self.assertIn("not a git working tree", str(caught.exception))
 
     def test_export_blocks_and_writes_nothing_without_provenance(self):
         # the whole point: no stamp -> no map, on the same path as a corrupt index.
@@ -793,7 +885,7 @@ class CommitStampTests(unittest.TestCase):
             rc = exp.main(["--repo", plain, "--registry", registry,
                            "--into-target"])
         self.assertEqual(rc, 2)
-        self.assertIn("HEAD", err.getvalue())
+        self.assertIn("not a git working tree", err.getvalue())
         self.assertFalse(os.path.exists(os.path.join(plain, ".testgraph")))
 
 
