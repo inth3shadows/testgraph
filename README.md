@@ -60,11 +60,44 @@ python3 -m testgraph.export --repo <path> --out maps/honeyslate.md
 # Draft a registry for a repo that has none (then review it — see the skill):
 python3 -m testgraph.propose --repo <path>
 
+# Wire it into every repo with an approved registry, so pushes answer by themselves:
+hooks/install.sh
+
 # Run the tests and the accuracy harness:
 python3 -m unittest tests.test_core tests.test_propose tests.test_skill_contract
 python3 harness/accuracy.py            # 5 hand-labeled real commits
 python3 harness/seed_regressions.py    # ~20 seeded mutation sites
 ```
+
+## Wiring It In
+
+A selector nobody calls cannot be wrong, and cannot be learned from. `hooks/install.sh`
+installs a `pre-push` hook into every repo with an approved registry, so each push
+prints the journeys it could have broken:
+
+```
+testgraph[signedintake]: 11 journey(s) this push could break, d9174b7e1..0305ada6f, ranked:
+  [ 23] J1  claimant submits a signed form  (conf 1.0)
+  [ 16] J10  staff regenerates and downloads the signed PDF  (conf 1.0)
+  …
+```
+
+`pre-push` is the only hook git hands a real base: it receives
+`<local ref> <local sha> <remote ref> <remote sha>` on stdin, and the remote sha is
+exactly the "what they don't have yet" boundary the question wants. A first push of a
+new branch has no such boundary, so the hook falls back to the merge-base with the
+repo's base branch — six commits' worth of change, not just the tip.
+
+**It never fails a push.** Every path exits 0 — a blocked integrity guard, a missing
+index, a missing registry, a traceback, a timeout. Advice that can stop a push stops
+being advice; it gets uninstalled. Opt out per repo with
+`git config testgraph.enabled false`, or remove it with `hooks/install.sh --uninstall`.
+
+Each run appends one line to `~/.local/share/testgraph/invocations.jsonl`
+(`{ts, repo, base, head, status, n_journeys, journey_ids, duration_ms, caller}`), which
+is how "is anything actually calling this?" gets answered with a number instead of a
+guess. That is the invocation log, not the results ledger — it records what the
+selector *said*, not what running the journeys then *found*.
 
 ## Project Structure
 
@@ -75,6 +108,8 @@ python3 harness/seed_regressions.py    # ~20 seeded mutation sites
 - `harness/` — `accuracy.py` (recall/precision on labeled commits),
   `seed_regressions.py` + `ast_oracle.py` (seeded-mutation eval against an
   independent oracle), `adjudications.json` (hand-ruled disagreements).
+- `hooks/` — `pre-push` (the git hook that runs the selector on every push) and
+  `install.sh` (installs it into each repo with an approved registry).
 - `maps/` — generated journey maps (symbol -> journeys, grouped by file).
 - `skills/testgraph-verify/` — the agent skill that reads a map pre-commit.
 - `skills/testgraph-propose/` — the agent skill that reviews a drafted registry:
@@ -89,10 +124,13 @@ from 0.84 when frontend files began being seeded — see TECHNICAL.md) and 1.00
 across 20 seeded mutation sites scored against an independent AST oracle;
 integrity guard tested and schema-pinned. Scoped to honeyslate; backend and
 frontend files are both analysed, journeys are registered on backend entry points.
-The gap is not capability, it is **consumption**: `skills/testgraph-verify` has
-never been invoked — 0 times across every session on this machine. Next increments
-in the plan (the results ledger, the `/verify` gate) all assume a caller that does
-not exist yet, so wiring one is the work that unblocks them.
+The gap was not capability, it was **consumption**: `skills/testgraph-verify` had
+never been invoked — 0 times across every session on this machine, which is what
+issue #49 measured. The `pre-push` hook above is the answer to that: it calls the
+selector whether or not anyone remembers to, and logs each call so the next
+increments (the results ledger, the `/verify` gate) have real runs to build on
+instead of an assumed caller. Whether it worked is a number, not an opinion —
+`wc -l ~/.local/share/testgraph/invocations.jsonl` a week from install.
 
 **On whether this is worth it:** at 8 journeys selection avoids 57.5% of journey-runs
 on the labeled set, but bimodally — 3 of 5 commits select ≤2 journeys, 2 of 5 select

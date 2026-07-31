@@ -355,13 +355,28 @@ def main(argv=None):
     ap.add_argument("--db", default=None, help="defaults to <repo>/.codegraph/codegraph.db")
     ap.add_argument(
         "--registry",
-        default=os.path.join(os.path.dirname(__file__), "..", "journeys", "honeyslate.json"),
+        default=None,
+        help="defaults to the journeys/*.json whose `target` matches <repo>",
     )
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
 
     db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
-    result = select(args.repo, args.base, args.head, db_path, args.registry)
+    # Resolve by the registry's own `target`, and REFUSE rather than fall back.
+    # This used to default to honeyslate's registry unconditionally, so pointing
+    # --repo at any other project loaded the wrong journeys and then reported the
+    # resulting disagreement as a stale index — a confidently wrong diagnosis.
+    registry_path = args.registry or reg.resolve_for_repo(args.repo)
+    if registry_path is None:
+        print(
+            f"no journey registry found for repo `{reg.repo_name(args.repo)}` "
+            f"({args.repo}) — add journeys/<name>.json with \"target\": "
+            f"\"{reg.repo_name(args.repo)}\", draft one with `python3 -m "
+            f"testgraph.propose --repo {args.repo}`, or pass --registry",
+            file=sys.stderr,
+        )
+        return 2
+    result = select(args.repo, args.base, args.head, db_path, registry_path)
     if args.json:
         print(json.dumps(result, indent=2))
     else:

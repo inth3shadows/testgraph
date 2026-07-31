@@ -90,13 +90,41 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
 
 - `--repo` (default honeyslate/main), `--base`/`--head` (default `HEAD~1`/`HEAD`),
   `--db` (default `<repo>/.codegraph/codegraph.db`), `--registry`, `--json`.
+- `--registry` resolves from `--repo` when omitted: the `journeys/*.json` whose
+  `target` matches the repo name, seeing through the bare-worktree layout
+  (`…/signedintake/main` → `signedintake`). It **refuses** when nothing matches.
+  This default used to be honeyslate's registry, hardcoded, so any other `--repo`
+  silently loaded the wrong journeys and then reported the resulting disagreement
+  as `registry is stale against the index` — a wrong diagnosis of a wrong input.
+  The integrity guard did block rather than answer, which is why it surfaced at
+  all; matching on `target` removes the trap instead of relying on the guard.
+- `git config testgraph.enabled false` disables the pre-push hook for one repo.
+- `TESTGRAPH_STATE_DIR` relocates the invocation log (default
+  `${XDG_DATA_HOME:-~/.local/share}/testgraph`).
 - Registry `spot_checks`: `{symbol: {min_caller_edges, file}}` — the guard floors.
 
 ## Deployment
 
-No service to deploy — a CLI run against a target repo's index. The intended
-consumer is `skills/testgraph-verify`, which reads the exported map; a CI gate
-reading `--json` is the other.
+No service to deploy — a CLI run against a target repo's index. The **live**
+consumer is `hooks/pre-push`, installed by `hooks/install.sh` into the shared
+hooks dir (`git rev-parse --git-common-dir`/hooks) of every repo with an approved
+registry, so one install covers all of that repo's worktrees. It runs
+`python3 -m testgraph.hook`, which renders a push-sized summary and appends to
+`~/.local/share/testgraph/invocations.jsonl`.
+
+Two properties are load-bearing and neither is about selection quality:
+
+- **It cannot fail a push.** Every path returns 0 — blocked guard, missing index,
+  missing registry, traceback, `timeout 20`. A hook that can block gets
+  uninstalled, and an uninstalled hook is the zero-invocation state again.
+- **It prints short.** `select._render` emits one `NOTE` per unparseable entry
+  symbol — fourteen on signedintake, identically, on every push, and no re-index
+  can ever clear them. The hook drops those, caps the journey list at 8 and the
+  warnings at 3, and says how many it hid. A reader who learns to skip the block
+  has learned to skip the answer.
+
+`skills/testgraph-verify` (reads the exported map) and a CI gate reading `--json`
+remain the other two intended consumers.
 
 **An MCP wrapper was listed here as a future consumer and has been dropped.**
 Measured 2026-07-30 across every session on this machine: 82 tool calls touched an
@@ -105,10 +133,13 @@ exported map, **none of them a whole-file `Read`** — all were `grep`/`cat`, me
 nothing worth a process. The probe that killed it, including the pre-registered
 decision rule, is `~/.claude/plans/testgraph-mcp-vs-map-probe.md`.
 
-The same probe found the thing that actually matters: those 82 calls are all
-testgraph's own development. `Skill(testgraph-verify)` has been invoked **zero
-times**. Cost arguments about a consumer with no users are premature; see the
-no-runtime-consumer issue.
+The same probe found the thing that actually matters: those 82 calls were all
+testgraph's own development, and `Skill(testgraph-verify)` had been invoked **zero
+times** (issue #49). The pre-push hook exists to end that, and it carries its own
+scoreboard: `wc -l ~/.local/share/testgraph/invocations.jsonl`. If that number is
+still near zero a week after install, the hook failed too — and the honest
+conclusion would be that nothing in this workflow wants a selector, not that the
+next consumer will be the one.
 
 ## Maintenance Commands
 

@@ -35,6 +35,31 @@ docs, test, or health-check edit).
 `RECALL DEGRADED` means a changed file could not be located in the code map at
 all, so every journey is listed and the honest answer is *unknown*, not *none*.
 
+You do not have to pass `--registry`: testgraph picks the registry whose `target`
+matches the repo. If none does, it says so and stops rather than answering from
+somebody else's journeys.
+
+### Letting it run itself, on every push
+
+Remembering to run a tool is the part that does not happen. Install the hook once:
+
+```
+hooks/install.sh                    # every repo with an approved registry
+hooks/install.sh /path/to/repo      # or just one
+```
+
+From then on, `git push` prints the journeys that push could have broken, before the
+code leaves your machine — roughly 30ms, and it **never blocks the push**. A stale
+index, a missing registry, or an outright crash prints one line and lets the push
+through; you lose the advice, not the work.
+
+Turn it off for one repo with `git config testgraph.enabled false`; remove it
+entirely with `hooks/install.sh --uninstall`. The installer shares the hook file
+with other tools rather than overwriting it, so an existing `pre-push` keeps working.
+
+Every run appends a line to `~/.local/share/testgraph/invocations.jsonl`. To check
+the tool is actually being used: `wc -l ~/.local/share/testgraph/invocations.jsonl`.
+
 ## What to Do When Something Breaks
 
 - **"STATUS: BLOCKED — index not trustworthy"** — the underlying code map is
