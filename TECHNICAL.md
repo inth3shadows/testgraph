@@ -367,6 +367,41 @@ same reasoning that made `live_drift` parse with `ast` instead of calling RunEch
 complete, valid registry on its own, so the tool degrades rather than fails when
 no agent is involved.
 
+**Two scanners, one pipeline (issue #46).** `scan` reads Python decorators;
+`scan_typescript` reads Next.js conventions. Both return the same
+`(path, symbol, routes)` tuple, so id assignment, index resolution and journey
+building are language-agnostic and neither scanner can special-case itself. The
+TypeScript side is regex over lines, not a parser: no stdlib TS parser exists and
+a dependency was rejected on the same grounds as the API key. The safety net is
+that every candidate must resolve to an index node, so a sloppy scanner degrades
+to *omission* — visible in the found count — rather than to a bad entry.
+
+Three Next.js shapes, calibrated against signedintake rather than guessed:
+route-handler exports in a `route.ts`, exported functions in a module-level
+`'use server'` file, and the default export of a `page.tsx`. The URL comes from
+the **file path** (strip through `app/`, drop the role leaf, drop `(group)`
+segments, keep `[param]`) — a better signal than the Python case, where it has to
+be read out of a decorator argument.
+
+`'use server'` must be the module's **first meaningful line**.
+`src/app/login/page.tsx:23` carries an indented one inside a component body — an
+inline action — and accepting the directive anywhere in the file would register
+every export of that component as a journey entry.
+
+Journey ids use the **parent directory**, not the file stem, when the stem is a
+Next.js role name (`route`, `page`, `actions`, `layout`, `index`). Every handler
+in the convention lives in a `route.ts`, so stem-based ids collide repo-wide and
+`assign_ids` widens all of them to paths like
+`J_src_app_api_payment_requests__requestId__status_route_GET`.
+
+**Measured against signedintake:** 19 entries drafted, recovering **all 12** the
+hand-authored registry uses (`submitForm`, `issueFormLink`, `POST`, both `GET`s,
+`validateAndPreview`, `createFormAndLink`, `createPaymentUpdateRequest`,
+`simulatePaymentCompletion`, `Page`, `StaffIndexPage`, `SubmissionDetailPage`,
+`FormDetailPage`) plus seven it does not — a registry testgraph's author did not
+write. honeyslate (17), llm_history_audit (30) and coriolis-local (207) are
+unchanged.
+
 **Discovery** matches decorators by *attribute* (`.get`, `.post`, `.route`,
 `.websocket`, …) rather than by receiver name, which makes it work for FastAPI,
 APIRouter, Flask, Blueprint, Starlette, Sanic and AIOHTTP without naming any of
@@ -685,10 +720,11 @@ rather than arguable.
   draft is unreviewed by construction and says so on every run. Frontend files are
   *seeded* (issue #21), but no journey has a frontend entry point, so a frontend
   change is only visible where it reaches a backend entry.
-- **The proposer is Python-and-decorators only.** A Django `urls.py`, a
-  class-based view, or any non-Python framework yields no candidates. The run
-  reports its blind spots, writes **nothing**, and exits 1 — an empty registry
-  would be valid, approvable, and answer `NONE` for every change.
+- **The proposer reads Python decorators and Next.js conventions only.** A
+  Django `urls.py`, a class-based view, Express/Fastify/tRPC, a pages-router
+  `pages/api/*`, or any other framework yields no candidates. The run reports its
+  blind spots, writes **nothing**, and exits 1 — an empty registry would be
+  valid, approvable, and answer `NONE` for every change.
 - **Precision on shared symbols:** a config/model edit fans out to most journeys
   by design (recall-first). Mean precision 0.68 on the labeled set; the low case
   is 0.38 (a `Settings` field change → all 8).

@@ -33,6 +33,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -139,14 +140,187 @@ def scan(repo):
     return hits, unparsed
 
 
+# --- TypeScript / Next.js (issue #46) -------------------------------------
+#
+# No parser: regex over lines. A TS parser dependency was rejected for the reason
+# #6 rejected an API key -- testgraph is stdlib-only. The safety net is already
+# there: every candidate must resolve to an index node or it is dropped and
+# reported, so a sloppy scanner degrades to OMISSION (visible in the found count)
+# rather than to a bad registry entry (not visible at all).
+
+TS_EXT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts")
+
+_HTTP_METHODS = "GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"
+_RE_HTTP_EXPORT = re.compile(
+    r"^export\s+(?:async\s+)?(?:function\s+|const\s+|let\s+|var\s+)?"
+    r"(%s)\b" % _HTTP_METHODS
+)
+_RE_DEFAULT_FN = re.compile(r"^export\s+default\s+(?:async\s+)?function\s+(\w+)")
+_RE_DEFAULT_NAME = re.compile(r"^export\s+default\s+(\w+)\s*;?\s*$")
+_RE_EXPORTED_FN = re.compile(r"^export\s+(?:async\s+)?function\s+(\w+)")
+# Next.js server actions must be async functions. Requiring `async` is what stops
+# `export const MAX = 5` becoming a journey named MAX -- it is a real symbol, so
+# it RESOLVES in the index and the resolve gate cannot catch it. The gate only
+# filters names the index does not know, never names it knows that are not entry
+# points, so the shape has to be constrained here.
+_RE_EXPORTED_CONST = re.compile(r"^export\s+(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*async\b")
+_RE_USE_SERVER = re.compile(r"""^['"]use server['"]\s*;?\s*$""")
+
+
+def _module_is_server_actions(lines):
+    """Is `'use server'` this module's FIRST meaningful line?
+
+    Position is the whole check. `src/app/login/page.tsx:23` carries an INDENTED
+    `"use server"` inside a function body — an inline action. Accepting the
+    directive anywhere in the file would export every function in that component
+    as a journey entry. Only the module-level form, which Next.js requires above
+    the imports, marks an actions module.
+    """
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*")):
+            continue
+        return bool(_RE_USE_SERVER.match(stripped))
+    return False
+
+
+def _next_route(rel):
+    """Next.js app-router URL for a file path, or None when it is not one.
+
+    The file path IS the route — a better signal than the Python case, where it
+    has to be read out of a decorator argument. Strip through the `app/` segment,
+    drop the `route.ts`/`page.tsx` leaf, drop `(group)` segments (a Next.js
+    organisational device that does not appear in the URL), keep `[param]`.
+    """
+    parts = rel.replace(os.sep, "/").split("/")
+    if "app" not in parts:
+        return None
+    # LAST `app`, not the first: a monorepo package named `app`
+    # (`packages/app/src/app/api/foo/route.ts`) otherwise yields `/src/app/api/foo`
+    # and every route in that repo is named wrong.
+    after = parts[len(parts) - 1 - parts[::-1].index("app") + 1:][:-1]
+    # `(group)` is organisational, `@modal` is a parallel route, and `(.)x`/`(..)x`
+    # are intercepting routes. None appear in the URL. The old `startswith("(") and
+    # endswith(")")` test let `(.)photo` through.
+    segments = [p for p in after if not p.startswith(("(", "@"))]
+    return "/" + "/".join(segments) if segments else "/"
+
+
+def scan_typescript(repo):
+    """[(relpath, symbol, [(label, path)])] for Next.js entry points.
+
+    Three shapes, calibrated against signedintake rather than guessed: route
+    handlers exported from a `route.ts`, exported functions in a module-level
+    `'use server'` file, and the default export of a `page.tsx`. Returns the same
+    tuple shape as `scan`, so `propose` concatenates the two without caring which
+    language a hit came from.
+    """
+    hits, unreadable = [], []
+    for path in sorted(_walk_ext(repo, TS_EXT)):
+        rel = os.path.relpath(path, repo)
+        if sel._is_test(rel.replace(os.sep, "/")):
+            continue
+        stem = os.path.basename(rel).rsplit(".", 1)[0]
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            # `scan` accumulates its skips so the count reaches `blind_spots`.
+            # Dropping these silently made a permission-denied `route.ts` invisible
+            # in both the found count and the blind spots.
+            unreadable.append(rel)
+            continue
+        route = _next_route(rel)
+
+        # `route`/`page` are Next.js conventions and mean nothing outside `app/`.
+        # Registering them anyway produced a hit with no path, rendering as
+        # `GET ?`, and contradicted TS_BLIND_SPOTS' promise that handlers outside
+        # `app/` are invisible -- some were visible, just unlabelled.
+        if route is None and stem in ("route", "page"):
+            stem = ""
+
+        if stem == "route":
+            for line in lines:
+                m = _RE_HTTP_EXPORT.match(line)
+                if m:
+                    hits.append((rel, m.group(1), [(m.group(1), route)]))
+        elif stem == "page":
+            for line in lines:
+                m = _RE_DEFAULT_FN.match(line) or _RE_DEFAULT_NAME.match(line)
+                if m:
+                    hits.append((rel, m.group(1), [("PAGE", route)]))
+                    break
+        if _module_is_server_actions(lines):
+            for line in lines:
+                m = _RE_EXPORTED_FN.match(line) or _RE_EXPORTED_CONST.match(line)
+                if m:
+                    # The action's route is its DIRECTORY: `f/[token]/actions.ts`
+                    # serves `/f/[token]`. Passing None here rendered every action
+                    # as "ACTION ?", throwing away the one piece of context that
+                    # tells a reviewer which page it belongs to.
+                    hits.append((rel, m.group(1), [("ACTION", route)]))
+    # A `route.ts` carrying a top-level 'use server' (a no-op in Next.js, but
+    # people write it) matched both the route branch and the actions branch,
+    # emitting two hits for the same (file, symbol). `assign_ids` keys on that
+    # pair, so both records took the same id and `propose`'s uniqueness assertion
+    # brought the whole command down with an AssertionError -- a crash, not a
+    # degraded draft. Merging is better than an `elif`: a `page.tsx` that is also
+    # an actions module is legitimate and both labels are true.
+    return _merge_duplicate_hits(hits), unreadable
+
+
+def _merge_duplicate_hits(hits):
+    merged, order = {}, []
+    for rel, name, routes in hits:
+        key = (rel, name)
+        if key not in merged:
+            merged[key] = []
+            order.append(key)
+        for r in routes:
+            if r not in merged[key]:
+                merged[key].append(r)
+    return [(rel, name, merged[(rel, name)]) for rel, name in order]
+
+
+def _walk_ext(repo, extensions):
+    found = []
+    for root, dirs, files in os.walk(repo):
+        reg.prune_dirs(root, dirs)
+        for f in files:
+            if f.endswith(extensions):
+                found.append(os.path.join(root, f))
+    return found
+
+
+def _drop_ext(path):
+    # `[:-3]` assumed `.py` and left "page." for a `page.tsx` once TypeScript
+    # entries existed (issue #46).
+    stem, _, ext = path.rpartition(".")
+    return stem if stem and "/" not in ext and os.sep not in ext else path
+
+
+# Next.js names files by ROLE, not by feature, so every route handler lives in a
+# `route.ts` and every page in a `page.tsx`. Using the stem would make `J_route_GET`
+# collide on every API endpoint in the repo -- `assign_ids` would then widen all of
+# them to full paths, giving ids like
+# `J_src_app_api_payment_requests__requestId__status_route_GET`. The parent
+# directory is the feature name in that convention, and reads far better.
+_ROLE_STEMS = frozenset({"route", "page", "layout", "index", "actions"})
+
+
 def _short_id(rel, handler):
-    stem = os.path.basename(rel)[:-3] or "mod"
-    return "J_%s_%s" % (_slug(stem), _slug(handler))
+    parts = _drop_ext(rel).replace(os.sep, "/").split("/")
+    stem = parts[-1] if parts else "mod"
+    # TypeScript only. Applied to Python as well, this silently re-id'd every
+    # `pkg/sub/index.py` draft from J_index_* to J_sub_* and could collide
+    # `pkg/sub/index.py` with `pkg/sub.py`.
+    if rel.endswith(TS_EXT) and stem in _ROLE_STEMS and len(parts) > 1:
+        stem = parts[-2]
+    return "J_%s_%s" % (_slug(stem or "mod"), _slug(handler))
 
 
 def _path_id(rel, handler):
-    stem = rel[:-3] if rel.endswith(".py") else rel
-    return "J_%s_%s" % (_slug(stem), _slug(handler))
+    return "J_%s_%s" % (_slug(_drop_ext(rel)), _slug(handler))
 
 
 def assign_ids(hits):
@@ -194,33 +368,69 @@ def _journey_name(handler, routes):
     return " + ".join(labelled)
 
 
-def _blind_spots(repo, unparsed, non_python):
+# Gaps the TypeScript scanner has, listed only when TS files are present. Naming
+# them is the whole point: before #46 a TS repo was told "no parser here, any
+# handler is invisible", which was true; saying nothing now that Next.js shapes
+# ARE covered would be worse, because the reader would assume full coverage.
+TS_BLIND_SPOTS = (
+    "Express, Fastify, Hono, tRPC and other non-Next.js routers — only Next.js "
+    "app-router conventions are recognised",
+    "`middleware.ts`, `generateStaticParams`, and route handlers outside the "
+    "`app/` directory (the pages router's `pages/api/*`)",
+    "client-side navigation: a journey reachable only through in-browser routing "
+    "has no server entry point to register",
+    "`export default function () {}` — an anonymous default export has no symbol "
+    "name to resolve, so those pages are omitted rather than drafted",
+)
+
+
+def _blind_spots(repo, unparsed, typescript, other):
     spots = list(STRUCTURAL_BLIND_SPOTS)
-    if non_python:
+    if typescript:
         spots.append(
-            "%d non-Python product file(s) (e.g. %s) — no parser here, so any "
-            "handler defined in them is invisible to this scan"
-            % (len(non_python), ", ".join(sorted(non_python)[:3]))
+            "%d TypeScript/JavaScript file(s) scanned for Next.js route handlers, "
+            "server actions and page components ONLY" % len(typescript)
+        )
+        spots.extend(TS_BLIND_SPOTS)
+    if other:
+        spots.append(
+            "%d product file(s) no scanner here reads (e.g. %s) — any handler "
+            "defined in them is invisible"
+            % (len(other), ", ".join(sorted(other)[:3]))
         )
     if unparsed:
         spots.append(
-            "%d Python file(s) that do not parse (%s) — skipped entirely"
+            "%d source file(s) that could not be read or parsed (%s) — skipped "
+            "entirely"
             % (len(unparsed), ", ".join(unparsed[:3]))
         )
     return spots
 
 
-def _non_python_product(repo):
-    found = []
+def _unscanned_product(repo):
+    """`(typescript, other)` — product files by whether a scanner reads them.
+
+    Split because they are different claims. TS files are now *partially*
+    covered; `.svelte`/`.vue` are not covered at all, and lumping them together
+    would understate one and overstate the other.
+    """
+    typescript, other = [], []
     for root, dirs, files in os.walk(repo):
         reg.prune_dirs(root, dirs)
         for f in files:
             if not f.endswith(_NON_PYTHON_EXT):
                 continue
             rel = os.path.relpath(os.path.join(root, f), repo)
-            if not sel._is_test(rel.replace(os.sep, "/")):
-                found.append(rel)
-    return found
+            if sel._is_test(rel.replace(os.sep, "/")):
+                continue
+            if rel.endswith(sel.DECLARATION_EXT):
+                # Type declarations have no nodes at all, which is why
+                # `select._is_product` drops them. Reporting one as "scanned for
+                # Next.js shapes" claims coverage of a file that can never
+                # contribute a journey.
+                continue
+            (typescript if f.endswith(TS_EXT) else other).append(rel)
+    return typescript, other
 
 
 # How much history to read when measuring churn. Deep enough to distinguish a
@@ -365,7 +575,13 @@ def propose(repo, db_path, target):
     `select` (with a loud unapproved warning) before any agent touches it.
     """
     conn = dbmod.connect(db_path)
+    # Python and TypeScript entries are the same tuple shape, so everything
+    # downstream -- id assignment, index resolution, journey building -- is
+    # language-agnostic and neither scanner can special-case itself (issue #46).
     hits, unparsed = scan(repo)
+    ts_hits, unreadable = scan_typescript(repo)
+    hits = hits + ts_hits
+    unparsed = unparsed + unreadable
     ids = assign_ids(hits)
 
     journeys, candidates, unresolved = {}, [], []
@@ -433,7 +649,7 @@ def propose(repo, db_path, target):
             if churn else
             "fan-in only — no git history available, so stability is unmeasured"
         ),
-        "blind_spots": _blind_spots(repo, unparsed, _non_python_product(repo)),
+        "blind_spots": _blind_spots(repo, unparsed, *_unscanned_product(repo)),
         "unresolved_candidates": unresolved,
     }
     return {
@@ -482,8 +698,9 @@ def _render(result, out_path):
             )
     if out_path is None:
         lines.append(
-            "NO JOURNEYS, nothing written — this repo has no decorator-style HTTP "
-            "entry points, so its journeys start somewhere this scan cannot see "
+            "NO JOURNEYS, nothing written — this repo has neither decorator-style "
+            "Python handlers nor Next.js entry points, so its journeys start "
+            "somewhere this scan cannot see "
             "(the blind spots above). Write a registry by hand from that list, or "
             "conclude testgraph does not fit this repo."
         )

@@ -13,7 +13,7 @@ that). Its job is the layer no driver has — deciding *what is worth testing*.
 
 A **journey registry** names each user journey and its entry symbols (route
 handlers, the scheduler sweep, etc.). `testgraph.propose` drafts one for a new
-repo by scanning route decorators and the index, marking it `approved: false`
+repo by scanning Python route decorators and Next.js conventions against the index, marking it `approved: false`
 until a human reads it — an unapproved registry runs, loudly, but never silently.
 For a diff, testgraph:
 
