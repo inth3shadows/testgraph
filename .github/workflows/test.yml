@@ -1,0 +1,23 @@
+name: tests
+
+# stdlib-only project (see README.md Prerequisites) -- no dependency install
+# step needed. This exists because PR #53 merged into main today past exactly
+# one check (GitGuardian), never running the suite that exists to catch
+# regressions; a selector nobody calls is a selector nobody can learn from
+# (testgraph/hook.py's own rationale for existing), and the same is true of a
+# test suite nobody runs automatically.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python3 -m unittest discover -s tests

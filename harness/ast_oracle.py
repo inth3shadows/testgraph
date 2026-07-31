@@ -22,16 +22,26 @@ reconciled.
 """
 import ast
 import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from testgraph.select import _is_test as _sel_is_test  # noqa: E402
 
 
 def _is_test(rel):
-    base = os.path.basename(rel)
-    return (
-        "/tests/" in rel
-        or "/e2e/" in rel
-        or base.startswith("test_")
-        or base.endswith("_test.py")
-    )
+    """Delegates to the SAME test/product split `select` uses for diff seeds,
+    rather than a second hand-rolled copy. Used to be its own substring check
+    ("/tests/" in rel) with no `__tests__` handling and no JS/TS `.test.`/
+    `.spec.` convention — gaps `select._is_test` was already fixed for
+    (whole-segment matching, a root-level `tests/` dir) before this oracle
+    existed. An independent oracle is only as independent as its OWN logic;
+    a stale, narrower copy of the thing it's meant to check is a bias risk in
+    the one experiment this project has for falsifying recall, not a safeguard."""
+    return _sel_is_test(rel.replace(os.sep, "/"))
 
 
 def _called_names(node):

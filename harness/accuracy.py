@@ -13,7 +13,6 @@ Usage: python3 harness/accuracy.py
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 
@@ -21,15 +20,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+from harness import _worktree  # noqa: E402
 from testgraph import select as sel  # noqa: E402
 
 BARE = "/home/ericm/personal_projects/honeyslate/.bare"
 REGISTRY = os.path.join(ROOT, "journeys", "honeyslate.json")
 CODEGRAPH = os.path.expanduser("~/.local/bin/codegraph")
-
-
-def run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
 def score(selected, oracle):
@@ -50,25 +46,21 @@ def main():
     try:
         for c in labels["commits"]:
             sha, oracle = c["sha"], c["oracle"]
-            wt = os.path.join(tmp, sha)
-            add = run(["git", "-C", BARE, "worktree", "add",
-                       "--detach", wt, sha])
-            if add.returncode:
-                rows.append((sha, "WORKTREE-FAIL", add.stderr.strip()[:60]))
-                continue
-            idx = run([CODEGRAPH, "init", wt])
-            db = os.path.join(wt, ".codegraph", "codegraph.db")
-            if not os.path.exists(db):
-                rows.append((sha, "INDEX-FAIL", idx.stderr.strip()[:60]))
-                run(["git", "-C", BARE, "worktree", "remove", "--force", wt])
+            wtdir = os.path.join(tmp, sha)
+            try:
+                db = _worktree.add_and_index(BARE, sha, wtdir, CODEGRAPH)
+            except _worktree.WorktreeError as e:
+                rows.append((sha, e.stage, e.detail[:60]))
+                if e.stage == "INDEX-FAIL":
+                    _worktree.remove(BARE, wtdir)
                 continue
             # Historical commits legitimately predate some journeys; that is not
             # registry rot, so do not block on it -- but do report it.
-            result = sel.select(wt, f"{sha}~1", sha, db, REGISTRY,
+            result = sel.select(wtdir, f"{sha}~1", sha, db, REGISTRY,
                                 strict_registry=False)
             if result["status"] != "OK":
                 rows.append((sha, "BLOCKED", "; ".join(result.get("blocking", []))[:60]))
-                run(["git", "-C", BARE, "worktree", "remove", "--force", wt])
+                _worktree.remove(BARE, wtdir)
                 continue
             selected = [j["id"] for j in result["journeys"]]
             # A journey absent from this commit's index cannot be selected, so it
@@ -82,7 +74,7 @@ def main():
                 precisions.append(precision)
             rows.append((sha, c["desc"][:34], oracle, sorted(selected),
                          f"R={recall:.2f} P={precision:.2f} FP={fp}"))
-            run(["git", "-C", BARE, "worktree", "remove", "--force", wt])
+            _worktree.remove(BARE, wtdir)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
