@@ -249,6 +249,26 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         else:
             unmapped.append(f"{path} ({reason})")
 
+    # A changed file that is NEWER than its index row is a third way to be
+    # unmappable, and the quietest. The other two resolve to no node and are
+    # obvious; this one resolves to the WRONG node. Seeds come from line ranges
+    # (`nodes_for_lines`), so a file that gained twenty lines above a function
+    # since it was indexed hands the diff's line numbers to whatever symbol used
+    # to live there — a neighbouring function, or nothing. The answer stays
+    # confident and can be narrower than the truth, which is the one failure
+    # this selector is built to refuse.
+    #
+    # The seeds computed above are KEPT, not discarded: whatever they resolved to
+    # is still evidence, and recall-first means adding doubt, not removing rows.
+    # Joining `unmapped` degrades the answer to "every journey, verify manually"
+    # — the same treatment issue #29 established for a file with no symbols.
+    #
+    # The `pre-push` hook runs `codegraph sync` first precisely so this stays the
+    # exceptional path rather than every push.
+    drifted = integrity.content_drift(conn, repo, set(ranges) | set(whole_files))
+    for path in sorted(drifted):
+        unmapped.append(f"{path} (bytes differ from the indexed copy — line spans are stale)")
+
     impacted = dbmod.impacted_closure(conn, seeds)
     entry_map = reg.resolve_entries(conn, registry)
 
@@ -278,7 +298,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # answer degrades toward "test everything" instead of toward silence.
     if unmapped:
         warnings.append(
-            f"{len(unmapped)} changed file(s) with no symbols in the index "
+            f"{len(unmapped)} changed file(s) the index cannot be trusted for "
             f"({', '.join(unmapped)}) — impact is unbounded; all journeys listed"
         )
         selected = {j["id"] for j in journeys}
