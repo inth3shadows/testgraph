@@ -259,7 +259,7 @@ class ProposeDraftTests(unittest.TestCase):
         self.assertIn("no scanner here reads", joined)
         self.assertIn("App.svelte", joined)
         self.assertNotIn("flow.spec.js", joined, "test files are not product blind spots")
-        self.assertIn("do not parse", joined)
+        self.assertIn("could not be read or parsed", joined)
 
 
 class JourneyIdCollisionTests(unittest.TestCase):
@@ -363,7 +363,7 @@ class TypeScriptScanTests(unittest.TestCase):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as fh:
                 fh.write(body)
-        self.hits = prop.scan_typescript(self.tmp)
+        self.hits, self.unreadable = prop.scan_typescript(self.tmp)
         self.by_name = {n: (rel, routes) for rel, n, routes in self.hits}
 
     def test_all_three_shapes_are_found(self):
@@ -408,6 +408,103 @@ class TypeScriptScanTests(unittest.TestCase):
     def test_a_non_next_path_yields_no_route(self):
         self.assertIsNone(prop._next_route("lib/util.ts"))
         self.assertEqual(prop._next_route("src/app/page.tsx"), "/")
+
+
+class TypeScriptEdgeCaseTests(unittest.TestCase):
+    """Every case here was found by review, not by the tests above."""
+
+    def _scan(self, files):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for rel, body in files.items():
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(body)
+        hits, unreadable = prop.scan_typescript(tmp)
+        return tmp, hits, unreadable
+
+    def test_use_server_in_a_route_file_does_not_crash(self):
+        # Both branches matched the same (file, symbol); `assign_ids` keys on that
+        # pair, so one record overwrote the other and propose's own uniqueness
+        # assertion took the whole command down. A top-level 'use server' in a
+        # route.ts is a no-op in Next.js, so people write it.
+        _, hits, _ = self._scan({
+            "src/app/api/x/route.ts":
+                "'use server';\nexport async function POST(r) {\n  return 1;\n}\n",
+        })
+        self.assertEqual(len(hits), 1, "one symbol must yield one hit")
+        rel, name, routes = hits[0]
+        self.assertEqual(name, "POST")
+        # Both labels are true and both are kept, rather than one branch winning.
+        self.assertIn(("POST", "/api/x"), routes)
+        self.assertIn(("ACTION", "/api/x"), routes)
+
+    def test_a_non_function_const_is_not_an_action(self):
+        # `MAX` is a real symbol, so it RESOLVES in the index -- the resolve gate
+        # cannot catch it and it would ship as a bogus journey. Requiring `async`
+        # is what keeps the module's "degrades to omission" claim true.
+        _, hits, _ = self._scan({
+            "src/app/f/actions.ts":
+                "'use server';\nexport const MAX = 5;\n"
+                "export const doThing = async (x) => x;\n",
+        })
+        names = {n for _, n, _ in hits}
+        self.assertEqual(names, {"doThing"})
+
+    def test_route_outside_the_app_directory_is_not_registered(self):
+        # TS_BLIND_SPOTS promises handlers outside `app/` are invisible. These
+        # were registered anyway, with no path, rendering as `GET ?`.
+        _, hits, _ = self._scan({
+            "api/route.ts": "export async function GET() {\n  return 1;\n}\n",
+        })
+        self.assertEqual(hits, [])
+
+    def test_monorepo_package_named_app_uses_the_last_app_segment(self):
+        self.assertEqual(
+            prop._next_route("packages/app/src/app/api/foo/route.ts"), "/api/foo")
+
+    def test_parallel_and_intercepting_routes_are_not_url_segments(self):
+        self.assertEqual(prop._next_route("src/app/@modal/(.)photo/page.tsx"), "/")
+        self.assertEqual(prop._next_route("src/app/(shop)/cart/page.tsx"), "/cart")
+
+    def test_unreadable_file_is_reported_not_dropped(self):
+        tmp, _, _ = self._scan({
+            "src/app/api/x/route.ts": "export async function GET() {}\n"})
+        target = os.path.join(tmp, "src/app/api/x/route.ts")
+        os.chmod(target, 0o000)
+        self.addCleanup(os.chmod, target, 0o644)
+        hits, unreadable = prop.scan_typescript(tmp)
+        if unreadable:  # a root-capable environment can still read mode-000
+            self.assertEqual(unreadable, [os.path.join("src", "app", "api", "x",
+                                                       "route.ts")])
+            self.assertEqual(hits, [])
+
+    def test_python_ids_are_unaffected_by_the_nextjs_role_rule(self):
+        # `_ROLE_STEMS` applied to Python too, silently re-iding every
+        # pkg/sub/index.py draft from J_index_* to J_sub_*.
+        ids = prop.assign_ids([("pkg/sub/index.py", "handler", [("GET", "/x")])])
+        self.assertEqual(ids[("pkg/sub/index.py", "handler")], "J_index_handler")
+
+    def test_mts_route_files_are_scanned(self):
+        _, hits, _ = self._scan({
+            "src/app/api/y/route.mts": "export async function GET() {\n  return 1;\n}\n",
+        })
+        self.assertEqual([n for _, n, _ in hits], ["GET"])
+
+    def test_declaration_files_are_not_claimed_as_scanned(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for rel in ("src/types.d.ts", "src/real.ts"):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write("export const x = 1;\n")
+        typescript, other = prop._unscanned_product(tmp)
+        # `.d.ts` carries no nodes at all, so claiming it was scanned for entry
+        # points overstates coverage.
+        self.assertEqual(typescript, [os.path.join("src", "real.ts")])
+        self.assertEqual(other, [])
 
 
 class SpotCheckStabilityTests(unittest.TestCase):
