@@ -3,6 +3,7 @@ they run without codegraph. Covers S2 (guard blocks a corrupted index) and the
 recall-critical closure behaviors (imports edge + file-expansion; leaf stays
 tight)."""
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -35,7 +36,7 @@ def build_fixture():
         CREATE TABLE edges(id INTEGER PRIMARY KEY, source TEXT, target TEXT,
             kind TEXT, metadata TEXT, provenance TEXT);
         CREATE TABLE unresolved_refs(id INTEGER PRIMARY KEY, status TEXT);
-        CREATE TABLE files(path TEXT, language TEXT, indexed_at INTEGER);
+        CREATE TABLE files (path TEXT, content_hash TEXT, language TEXT, indexed_at INT);
         CREATE TABLE schema_versions(version INT, applied_at INT, note TEXT);
         INSERT INTO schema_versions VALUES (8, 0, 'fixture');
         """
@@ -74,7 +75,7 @@ def build_fixture():
         edges,
     )
     conn.executemany(
-        "INSERT INTO files VALUES (?,?,?)",
+        "INSERT INTO files(path,language,indexed_at) VALUES (?,?,?)",
         [("app/config.py", "python", int(time.time() * 1000) + 60000)],
     )
     conn.commit()
@@ -193,7 +194,7 @@ class IntegrityTests(unittest.TestCase):
             fh.write("<script>let x = 1</script>\n")
         # indexed an hour before the file was written
         self.conn.execute(
-            "INSERT INTO files VALUES (?,?,?)",
+            "INSERT INTO files(path,language,indexed_at) VALUES (?,?,?)",
             ("web/App.svelte", "svelte", int((time.time() - 3600) * 1000)),
         )
         _, warnings = integrity.check(self.conn, tmp, {})
@@ -1406,7 +1407,7 @@ class ZeroSeedDegradesTests(unittest.TestCase):
         self.assertEqual({"J1", "J2"}, {j["id"] for j in res["journeys"]})
         self.assertTrue(all(j["verify_manually"] for j in res["journeys"]))
         self.assertTrue(
-            any("no symbols in the index" in w and "New.svelte" in w
+            any("cannot be trusted for" in w and "New.svelte" in w
                 for w in res["warnings"]),
             res["warnings"],
         )
@@ -1431,6 +1432,135 @@ class ZeroSeedDegradesTests(unittest.TestCase):
         j1 = next(j for j in res["journeys"] if j["id"] == "J1")
         self.assertNotIn("reason", j1)
         self.assertGreater(res["seed_symbols"], 0)
+
+
+class ChangedFileContentDriftTests(unittest.TestCase):
+    """A changed file whose bytes no longer match the indexed copy is the
+    quietest way to be unmappable. The other two resolve to no node and are
+    obvious; this one resolves to the WRONG node — seeds come from line ranges,
+    so a file that gained lines since indexing hands the diff's numbers to
+    whatever symbol used to occupy them. The answer stays confident and can be
+    NARROWER than the truth, which is the one failure this selector exists to
+    refuse.
+
+    Found when the pre-push hook started running this in anger: neither
+    installed target refreshes its index on commit, so every push after the
+    first was going to be answered off stale spans while `integrity.check`
+    downgraded it to one warning out of a capped three.
+
+    Decided on `files.content_hash`, NOT on mtime. mtime was the first
+    implementation and it is wrong in both directions: `git checkout` rewrites
+    mtimes without changing a byte (false drift on every branch switch), and
+    `codegraph sync` leaves indexed_at alone when content is unchanged — it
+    reports "Already up to date" and the mtime warning never clears. The hash is
+    what the indexer itself compares."""
+
+    REG = {
+        "J1": {"name": "one", "entries": [{"name": "handler_a",
+                                           "file": "app/svc.py"}]},
+        "J2": {"name": "two", "entries": [{"name": "leaf", "file": "app/leaf.py"}]},
+    }
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.conn = build_fixture()
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+
+    def _index_row(self, path, content_hash):
+        self.conn.execute(
+            "INSERT INTO files(path,content_hash,language,indexed_at) "
+            "VALUES (?,?,?,?)",
+            (path, content_hash, "python", int(time.time() * 1000)),
+        )
+        self.conn.commit()
+
+    def _hash_of(self, rel):
+        with open(os.path.join(self.repo, rel), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+
+    def _edit_and_commit(self, rel, line_ix):
+        full = os.path.join(self.repo, rel)
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[line_ix] = "changed = 1\n"
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", f"edit {rel}")
+
+    def _select(self):
+        db = _db_on_disk(self.tmp, self.conn)
+        return sel.select(self.repo, "HEAD~1", "HEAD", db, self.registry)
+
+    def test_changed_file_matching_its_indexed_hash_answers_normally(self):
+        # The control, and the case that must NOT regress: the index was rebuilt
+        # after the edit (what the hook's `codegraph sync` does), so the spans are
+        # trustworthy and the ordinary narrow answer has to survive.
+        self._edit_and_commit("app/svc.py", 11)  # inside handler_a (10-20)
+        self._index_row("app/svc.py", self._hash_of("app/svc.py"))
+        res = self._select()
+        self.assertEqual(res["status"], "OK")
+        self.assertFalse(res["recall_degraded"])
+        self.assertEqual({"J1"}, {j["id"] for j in res["journeys"]})
+
+    def test_changed_file_whose_bytes_drifted_degrades(self):
+        self._index_row("app/svc.py", "0" * 64)
+        self._edit_and_commit("app/svc.py", 11)
+        res = self._select()
+        self.assertEqual(res["status"], "OK")
+        self.assertTrue(res["recall_degraded"], "stale span trusted silently")
+        self.assertEqual({"J1", "J2"}, {j["id"] for j in res["journeys"]})
+        self.assertTrue(
+            any("app/svc.py" in w and "line spans are stale" in w
+                for w in res["warnings"]),
+            res["warnings"],
+        )
+
+    def test_the_seeds_it_did_find_are_kept_not_discarded(self):
+        # Recall-first means ADDING doubt, not removing rows. J1 was reached by
+        # the closure and stays a real selection; only J2 rides in as a bare
+        # degrade row. Dropping the seeds instead would turn a stale index into a
+        # LOSS of information at exactly the moment we have least to spare.
+        self._index_row("app/svc.py", "0" * 64)
+        self._edit_and_commit("app/svc.py", 11)
+        res = self._select()
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        j2 = next(j for j in res["journeys"] if j["id"] == "J2")
+        self.assertNotIn("reason", j1)
+        self.assertEqual(j1["entries_hit"], 1)  # reached by the closure, not listed
+        # Only the rows that rode in on the degrade are flagged; J1 keeps the
+        # confidence of the path that actually reached it. The global
+        # `recall_degraded` banner carries the caveat for the answer as a whole —
+        # flagging every row would erase the distinction between "reached by an
+        # edge" and "listed because we cannot rule it out".
+        self.assertFalse(j1["verify_manually"])
+        self.assertEqual(j2.get("reason"), "change with no resolvable symbols")
+        self.assertTrue(j2["verify_manually"])
+
+    def test_a_drifted_file_nobody_touched_does_not_degrade(self):
+        # Only drift INSIDE the diff is a soundness problem; elsewhere it costs
+        # precision and rides the warning channel. Degrading on every unrelated
+        # drifted file would make the loud signal mean nothing.
+        self._index_row("app/config.py", "0" * 64)
+        self._edit_and_commit("app/svc.py", 11)
+        self._index_row("app/svc.py", self._hash_of("app/svc.py"))
+        res = self._select()
+        self.assertFalse(res["recall_degraded"])
+        self.assertEqual({"J1"}, {j["id"] for j in res["journeys"]})
+
+    def test_mtime_alone_is_not_drift(self):
+        # The bug in the first implementation, pinned: `git checkout` rewrites
+        # mtimes on files it did not change, and `codegraph sync` will not clear
+        # that because the content is identical. Bumping mtime while the hash
+        # still matches must leave the narrow answer intact.
+        self._edit_and_commit("app/svc.py", 11)
+        self._index_row("app/svc.py", self._hash_of("app/svc.py"))
+        os.utime(os.path.join(self.repo, "app", "svc.py"), (time.time() + 3600,) * 2)
+        res = self._select()
+        self.assertFalse(res["recall_degraded"], "mtime bump read as content drift")
+        self.assertEqual({"J1"}, {j["id"] for j in res["journeys"]})
 
 
 if __name__ == "__main__":

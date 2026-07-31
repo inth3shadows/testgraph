@@ -93,6 +93,12 @@ index, a missing registry, a traceback, a timeout. Advice that can stop a push s
 being advice; it gets uninstalled. Opt out per repo with
 `git config testgraph.enabled false`, or remove it with `hooks/install.sh --uninstall`.
 
+It runs `codegraph sync` first. Seeds come from *line ranges*, so an index built
+before the code moved resolves the diff against stale spans, and nothing else
+refreshes these indexes on commit. If a changed file's bytes still disagree with the
+indexed copy afterwards, the answer degrades to `RECALL DEGRADED` and names the file
+instead of quietly trusting the wrong line numbers.
+
 Each run appends one line to `~/.local/share/testgraph/invocations.jsonl`
 (`{ts, repo, base, head, status, n_journeys, journey_ids, duration_ms, caller}`), which
 is how "is anything actually calling this?" gets answered with a number instead of a

@@ -1,2 +1,6 @@
 # false positives — nested local closures the checker cannot resolve
 git
+
+# SQL DDL inside a test fixture string — `CREATE TABLE files (...)` reads as a
+# bare call to the checker. Not Python, not resolvable, and not a real symbol.
+files

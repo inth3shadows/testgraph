@@ -851,6 +851,19 @@ rather than arguable.
   `scheduler.start`). Missing entries cause silent under-selection.
 - **Index integrity is the tool's soundness ceiling.** The guard mitigates but
   cannot fully verify a graph; a subtly wrong index yields wrong answers.
+- **An index older than the change it is asked about is no longer trusted.**
+  Seeds come from *line ranges*, so a changed file whose bytes differ from the
+  indexed copy hands the diff's line numbers to whatever symbol used to occupy
+  them — a neighbouring function, or nothing, and the answer stays confident
+  while being narrower than the truth. `select` compares each changed file
+  against `files.content_hash` and treats a mismatch as unmappable:
+  `recall_degraded: true`, every journey listed, the file named. Detected by
+  content hash, **not mtime** — `git checkout` rewrites mtimes without changing
+  a byte, and `codegraph sync` leaves `indexed_at` alone when content is
+  unchanged (it reports "Already up to date"), so an mtime rule fires on every
+  branch switch and then never clears. The hash is what the indexer compares.
+  The pre-push hook runs `codegraph sync` first so this stays the exceptional
+  path rather than every push.
 - **Deleted files absent from the index cannot be bounded.** A file deleted in
   `head` is normally gone from an index built at `head`, so its former
   dependents are unknowable. testgraph degrades to listing every journey with

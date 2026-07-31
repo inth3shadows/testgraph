@@ -50,6 +50,20 @@ while read -r tg_lref tg_local _remote_ref tg_remote; do
         [ -z "${tg_remote:-}" ] && continue     # root commit: no base exists
     fi
 
+    # Refresh the graph before asking it anything. `select` seeds from LINE
+    # RANGES, so an index built before the code moved resolves the diff against
+    # stale spans — and neither installed target refreshes on commit (the autosync
+    # installer rewrote honeyslate's post-commit without the codegraph sync block;
+    # signedintake never had one). Push is the last moment the answer can still be
+    # made sound, and the only one with a human watching.
+    #
+    # Bounded and fail-silent: sync is a best-effort improvement, never a
+    # precondition. Missing, slow or broken, the selector still runs — and now
+    # degrades the answer loudly instead of quietly trusting a stale span.
+    if command -v codegraph >/dev/null 2>&1; then
+        timeout 60 codegraph sync -q "$tg_repo" >/dev/null 2>&1 </dev/null || true
+    fi
+
     # </dev/null so the selector cannot eat the ref lines still on stdin.
     ( cd "$TESTGRAPH_HOME" && timeout 20 python3 -m testgraph.hook \
         --repo "$tg_repo" --base "$tg_remote" --head "$tg_local" ) </dev/null 2>/dev/null
