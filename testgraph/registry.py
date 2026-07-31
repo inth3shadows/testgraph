@@ -15,14 +15,26 @@ def load(path):
 
 
 def resolve_entries(conn, registry):
-    """entry_node_id -> journey_id. Maps ALL nodes matching an entry (name +
-    file) so no definition of a handler is missed (recall-first)."""
+    """entry_node_id -> {journey_id}. Maps ALL nodes matching an entry (name +
+    file) so no definition of a handler is missed, and ALL journeys claiming a
+    node so no *journey* is missed either — both halves of recall-first.
+
+    One symbol legitimately sits on two flows: signedintake's
+    `simulatePaymentCompletion` is the hinge between staff creating a payment
+    request (J5) and the customer completing it (J11). Keying one journey per
+    node silently kept whichever came last in registry order and dropped the
+    rest, which `unresolved()` cannot detect because it re-resolves each entry
+    instead of reading this map — a journey whose entries were all shared with
+    a later journey would disappear from every answer while the exported map's
+    legend still advertised it."""
     mapping = {}
-    for jid, journey in registry["journeys"].items():
+    for jid, journey in sorted(
+        registry["journeys"].items(), key=lambda kv: journey_sort_key(kv[0])
+    ):
         for entry in journey["entries"]:
             ids = dbmod.resolve_symbol(conn, entry["name"], entry.get("file"))
             for nid in ids:
-                mapping[nid] = jid
+                mapping.setdefault(nid, set()).add(jid)
     return mapping
 
 
@@ -74,7 +86,9 @@ def unresolved(conn, registry):
     result — this is the registry-rot half of the drift problem (issue #19).
     """
     out = []
-    for jid, journey in registry["journeys"].items():
+    for jid, journey in sorted(
+        registry["journeys"].items(), key=lambda kv: journey_sort_key(kv[0])
+    ):
         missing = [
             e["name"]
             for e in journey["entries"]
@@ -120,7 +134,9 @@ def unchecked_entries(registry):
     that cannot work, is the exact failure `_map_relevant`'s docstring warns about.
     """
     out = []
-    for jid, journey in registry["journeys"].items():
+    for jid, journey in sorted(
+        registry["journeys"].items(), key=lambda kv: journey_sort_key(kv[0])
+    ):
         for entry in journey["entries"]:
             rel = entry.get("file")
             if rel and not rel.endswith(".py"):
@@ -152,7 +168,9 @@ def live_drift(repo, registry):
     """
     sources = python_sources(repo)
     drift = []
-    for jid, journey in registry["journeys"].items():
+    for jid, journey in sorted(
+        registry["journeys"].items(), key=lambda kv: journey_sort_key(kv[0])
+    ):
         for entry in journey["entries"]:
             rel = entry.get("file")
             name = entry["name"]
@@ -304,3 +322,15 @@ def _binds(node, name):
 
 def journey_name(registry, jid):
     return registry["journeys"][jid]["name"]
+
+
+def journey_sort_key(jid):
+    """Order journey ids the way a reader expects: J2 before J10.
+
+    Plain string sort puts J10-J13 between J1 and J2, which only shows up once a
+    registry passes nine journeys — signedintake did, and the exported map read
+    as shuffled. Split the id into (non-digit prefix, number) so digits compare
+    numerically; ids with no trailing number keep their lexicographic place."""
+    head = jid.rstrip("0123456789")
+    tail = jid[len(head):]
+    return (head, int(tail) if tail else -1, jid)

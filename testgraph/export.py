@@ -158,10 +158,11 @@ def build_map(conn, registry):
     ):
         impacted = dbmod.impacted_closure(conn, {nid})
         hits = {}
-        for enid, jid in entry_map.items():
+        for enid, jids in entry_map.items():
             if enid in impacted:
-                # best (highest) confidence across this journey's entries
-                hits[jid] = max(hits.get(jid, 0.0), impacted[enid])
+                for jid in jids:
+                    # best (highest) confidence across this journey's entries
+                    hits[jid] = max(hits.get(jid, 0.0), impacted[enid])
         if not hits:
             continue
         rows_by_file.setdefault(path, []).append(
@@ -169,10 +170,14 @@ def build_map(conn, registry):
                 "symbol": name,
                 "kind": kind,
                 "lines": [lo, hi],
-                "journeys": sorted(hits),
-                "confidence": {j: round(c, 3) for j, c in sorted(hits.items())},
+                "journeys": sorted(hits, key=reg.journey_sort_key),
+                "confidence": {
+                    j: round(hits[j], 3)
+                    for j in sorted(hits, key=reg.journey_sort_key)
+                },
                 "verify_manually": sorted(
-                    j for j, c in hits.items() if c <= dbmod.LOW_CONFIDENCE
+                    (j for j, c in hits.items() if c <= dbmod.LOW_CONFIDENCE),
+                    key=reg.journey_sort_key,
                 ),
             }
         )
@@ -252,7 +257,9 @@ def render_markdown(rows_by_file, registry, meta):
         "## Journeys",
         "",
     ]
-    for jid, spec in sorted(registry["journeys"].items()):
+    for jid, spec in sorted(
+        registry["journeys"].items(), key=lambda kv: reg.journey_sort_key(kv[0])
+    ):
         entries = ", ".join(f"`{e['name']}`" for e in spec["entries"])
         out.append(f"- **{jid}** {spec['name']} — entry: {entries}")
     out.append("")

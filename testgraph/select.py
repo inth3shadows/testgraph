@@ -254,7 +254,8 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
 
     touched = {}
     for nid in impacted.keys() & set(entry_map):
-        touched.setdefault(entry_map[nid], set()).add(nid)
+        for jid in entry_map[nid]:
+            touched.setdefault(jid, set()).add(nid)
 
     journeys = []
     for jid, ents in touched.items():
@@ -281,7 +282,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             f"({', '.join(unmapped)}) — impact is unbounded; all journeys listed"
         )
         selected = {j["id"] for j in journeys}
-        for jid in registry.get("journeys", {}):
+        for jid in sorted(registry.get("journeys", {}), key=reg.journey_sort_key):
             if jid not in selected:
                 journeys.append(
                     {
@@ -295,7 +296,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                     }
                 )
 
-    journeys.sort(key=lambda j: (-j["rank"], j["id"]))
+    journeys.sort(key=lambda j: (-j["rank"], reg.journey_sort_key(j["id"])))
 
     result.update(
         status="OK",
