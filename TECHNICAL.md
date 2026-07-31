@@ -605,10 +605,12 @@ and costs:
 
 ## Second registry: signedintake (issue #11)
 
-`journeys/signedintake.json` + `maps/signedintake.md` — 8 journeys over a Next.js /
-TypeScript app with **zero Python**: claimant submits a signed form, staff issues a
-link, YAML onboarding, submission review, payment-update request, Stripe webhook
-settlement, status polling, form detail.
+`journeys/signedintake.json` + `maps/signedintake.md` — a Next.js / TypeScript app
+with **zero Python**: claimant submits a signed form, staff issues a link, YAML
+onboarding, submission review, payment-update request, Stripe webhook settlement,
+status polling, form detail. (This was 8 hand-authored journeys; it is now 13 —
+see *Re-derived from `propose`* below. The measurements in this section were taken
+against the 8.)
 
 **What this proves — the machinery is not honeyslate-shaped.** Entry resolution by
 name+file suffix, the reverse closure, `build_map`, the integrity guard with its
@@ -664,6 +666,69 @@ ranges can map to a neighbouring symbol. There is also no hand-labeled oracle he
 these are selection *sizes*, not precision or recall. A per-commit harness for
 signedintake would fix both and is the honest next step if these numbers ever need to
 carry weight beyond "the shape replicates".
+
+### Re-derived from `propose`, then reviewed (2026-07-30)
+
+The 8 journeys above were hand-authored. Once `testgraph.propose` learned Next.js
+(#46) it was run against the same repo as its first real use, and the draft was
+reviewed into the registry that now ships: **14 journeys over 23 entries**, map
+regenerated at 190 symbols across 57 files.
+
+The draft found 19 handlers: all 12 hand-authored entries, plus **7** the hand
+registry did not have. Grouping kept the original ids and merged two of the seven into
+existing journeys — `OnboardingPage` into J3, `FormsIndexPage` into J8 (renamed *staff
+browses forms*, index and detail being one flow). The other five became new journeys:
+sign-in (J9), PDF regenerate-and-download (J10), the customer's dev-provider payment
+page (J11), and the marketing home page (J12).
+
+**Two further journeys came from the blind-spot table, not from the scan** — which is
+the part of the skill that earns its keep:
+
+- **J13**, `instrumentation.register()`: a Next.js lifespan hook that fails closed on
+  production misconfiguration. A change to it can stop the app booting.
+- **J14**, `npx tsx scripts/seed-staff.ts`: a CLI entry point. The first review of this
+  repo checked `package.json` `scripts` — which hold only `next`/`eslint`/`vitest` —
+  and wrongly concluded there were none. `scripts/` is where they actually live, and
+  `src/lib/seed.ts` appeared in no row of the map until J14 registered it.
+
+`simulatePaymentCompletion` is deliberately an entry of **both** J5 and J11: staff
+create the payment request, the customer completes it, and that symbol is the hinge.
+
+**Remaining blind spots checked and empty here:** no `middleware.ts`, no `pages/`
+router, no anonymous default exports, no non-Next.js router, no schedulers. Knowingly
+uncovered: client components reached by in-browser navigation (`SimulateButton`,
+`PasskeyButton`, `RegeneratePdfButton`), each registered indirectly through the page or
+action it calls; and `scripts/pg-backup.sh`, a shell entrypoint with no symbols in the
+index to register.
+
+The registry carries `"approved": true` and a `note` recording that review, so the
+provenance warning added in #42 no longer fires for it.
+
+### Two defects fell out of shipping it
+
+**A shared entry symbol collapsed to one journey.** `resolve_entries` built
+`node_id -> journey_id`, so a symbol listed as an entry of two journeys kept only
+whichever journey came last in registry order. `simulatePaymentCompletion` is the first
+registry entry to exercise it in either target, and the regenerated map caught it: the
+row read `J11` alone while the legend still advertised the symbol under J5. The
+duplication that was supposed to protect recall for both flows had *halved* it for one.
+
+`unresolved()` cannot see this — it re-resolves each entry rather than reading the map,
+so a journey whose entries were all shared with a later journey would vanish from every
+answer while the legend still listed it. That is the #19 failure mode arriving through
+a door the #19 guard does not watch. `resolve_entries` now returns `node_id -> {jid}`
+and `build_map` and `select` fan out over the set.
+
+**Journey ids sorted as plain strings.** Passing nine journeys made the exported map
+read as shuffled — `J10`-`J14` sorted between `J1` and `J2`. `registry.journey_sort_key`
+splits an id into prefix and number so digits compare numerically; every
+journey-ordered surface uses it — the map legend, the per-symbol rows, `select`'s rank
+tie-break and its unbounded-impact fallback, and the `unresolved` / `live_drift` /
+`unchecked_entries` loops, so inserting a `J15` out of order stays readable.
+
+Both were invisible at 8 single-digit journeys with no shared entries, which is why no
+fixture caught either — the same lesson as #43 and #44: the bug arrives by *running*
+the thing on real data at a scale the fixtures never reach.
 
 ## The null hypothesis: what selection is worth at 8 journeys (issue #13)
 

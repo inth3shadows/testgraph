@@ -1,107 +1,127 @@
 {
+  "target": "signedintake",
+  "note": "Reviewed 2026-07-30 from a testgraph.propose draft (19 handlers). J1-J8 keep the ids and groupings of the earlier hand-authored registry; J9-J14 are new. J13 and J14 came from working the draft's blind-spot list, not from the scan: a Next.js lifespan hook and a tsx CLI. Knowingly uncovered: (1) client components reached only by in-browser navigation (SimulateButton, PasskeyButton, RegeneratePdfButton) have no server entry symbol of their own — each is registered indirectly through the page or action it calls; (2) scripts/pg-backup.sh, a shell entrypoint with no symbols in the index to register. Remaining drafted blind spots were checked and are empty for this repo: no middleware.ts, no pages/ router, no anonymous default exports, no non-Next.js router, no schedulers.",
+  "approved": true,
+  "proposed_by": "testgraph.propose",
   "codegraph_schema_version": 8,
   "journeys": {
     "J1": {
       "name": "claimant submits a signed form",
       "entries": [
-        {
-          "name": "submitForm",
-          "file": "f/[token]/actions.ts"
-        },
-        {
-          "name": "Page",
-          "file": "f/[token]/page.tsx"
-        }
-      ]
+        { "name": "submitForm", "file": "src/app/f/[token]/actions.ts" },
+        { "name": "Page", "file": "src/app/f/[token]/page.tsx" }
+      ],
+      "route": ["ACTION /f/[token]", "PAGE /f/[token]"]
     },
     "J2": {
       "name": "staff issues a form link",
       "entries": [
-        {
-          "name": "issueFormLink",
-          "file": "staff/forms/actions.ts"
-        }
-      ]
+        { "name": "issueFormLink", "file": "src/app/staff/forms/actions.ts" }
+      ],
+      "route": ["ACTION /staff/forms"]
     },
     "J3": {
       "name": "onboarding: form created from YAML",
       "entries": [
-        {
-          "name": "validateAndPreview",
-          "file": "onboarding/actions.ts"
-        },
-        {
-          "name": "createFormAndLink",
-          "file": "onboarding/actions.ts"
-        }
-      ]
+        { "name": "validateAndPreview", "file": "src/app/onboarding/actions.ts" },
+        { "name": "createFormAndLink", "file": "src/app/onboarding/actions.ts" },
+        { "name": "OnboardingPage", "file": "src/app/onboarding/page.tsx" }
+      ],
+      "route": ["ACTION /onboarding", "PAGE /onboarding"]
     },
     "J4": {
       "name": "staff reviews a submission",
       "entries": [
-        {
-          "name": "SubmissionDetailPage",
-          "file": "staff/[submissionId]/page.tsx"
-        },
-        {
-          "name": "StaffIndexPage",
-          "file": "staff/page.tsx"
-        }
-      ]
+        { "name": "SubmissionDetailPage", "file": "src/app/staff/[submissionId]/page.tsx" },
+        { "name": "StaffIndexPage", "file": "src/app/staff/page.tsx" }
+      ],
+      "route": ["PAGE /staff/[submissionId]", "PAGE /staff"]
     },
     "J5": {
       "name": "staff requests a payment update",
       "entries": [
-        {
-          "name": "createPaymentUpdateRequest",
-          "file": "staff/[submissionId]/payment-actions.ts"
-        },
-        {
-          "name": "simulatePaymentCompletion",
-          "file": "staff/[submissionId]/payment-actions.ts"
-        }
-      ]
+        { "name": "createPaymentUpdateRequest", "file": "src/app/staff/[submissionId]/payment-actions.ts" },
+        { "name": "simulatePaymentCompletion", "file": "src/app/staff/[submissionId]/payment-actions.ts" }
+      ],
+      "route": ["ACTION /staff/[submissionId]"]
     },
     "J6": {
       "name": "stripe webhook settles a payment",
       "entries": [
-        {
-          "name": "POST",
-          "file": "api/webhooks/stripe/route.ts"
-        }
-      ]
+        { "name": "POST", "file": "src/app/api/webhooks/stripe/route.ts" }
+      ],
+      "route": ["POST /api/webhooks/stripe"]
     },
     "J7": {
       "name": "client polls payment status",
       "entries": [
-        {
-          "name": "GET",
-          "file": "api/payment-requests/[requestId]/status/route.ts"
-        }
-      ]
+        { "name": "GET", "file": "src/app/api/payment-requests/[requestId]/status/route.ts" }
+      ],
+      "route": ["GET /api/payment-requests/[requestId]/status"]
     },
     "J8": {
-      "name": "staff views a form's detail",
+      "name": "staff browses forms",
       "entries": [
-        {
-          "name": "FormDetailPage",
-          "file": "staff/forms/[formId]/page.tsx"
-        }
-      ]
+        { "name": "FormsIndexPage", "file": "src/app/staff/forms/page.tsx" },
+        { "name": "FormDetailPage", "file": "src/app/staff/forms/[formId]/page.tsx" }
+      ],
+      "route": ["PAGE /staff/forms", "PAGE /staff/forms/[formId]"]
+    },
+    "J9": {
+      "name": "staff signs in",
+      "entries": [
+        { "name": "LoginPage", "file": "src/app/login/page.tsx" }
+      ],
+      "route": ["PAGE /login"]
+    },
+    "J10": {
+      "name": "staff regenerates and downloads the signed PDF",
+      "entries": [
+        { "name": "regenerateSubmissionPdf", "file": "src/app/staff/[submissionId]/pdf-actions.ts" },
+        { "name": "GET", "file": "src/app/staff/[submissionId]/pdf/route.ts" }
+      ],
+      "route": ["ACTION /staff/[submissionId]", "GET /staff/[submissionId]/pdf"]
+    },
+    "J11": {
+      "name": "customer completes a dev-provider payment",
+      "entries": [
+        { "name": "DevSimulatePage", "file": "src/app/pay/[requestId]/page.tsx" },
+        { "name": "simulatePaymentCompletion", "file": "src/app/staff/[submissionId]/payment-actions.ts" }
+      ],
+      "route": ["PAGE /pay/[requestId]"]
+    },
+    "J12": {
+      "name": "visitor lands on the marketing home page",
+      "entries": [
+        { "name": "Home", "file": "src/app/page.tsx" }
+      ],
+      "route": ["PAGE /"]
+    },
+    "J13": {
+      "name": "server boots with a safe production config",
+      "entries": [
+        { "name": "register", "file": "src/instrumentation.ts" }
+      ],
+      "route": ["LIFESPAN instrumentation.register"]
+    },
+    "J14": {
+      "name": "operator seeds a staff account from the CLI",
+      "entries": [
+        { "name": "main", "file": "scripts/seed-staff.ts" },
+        { "name": "ensureDemoOrg", "file": "src/lib/seed.ts" }
+      ],
+      "route": ["CLI npx tsx scripts/seed-staff.ts"]
     }
   },
   "spot_checks": {
-    "submitForm": {
-      "min_caller_edges": 10,
-      "file": "f/[token]/actions.ts"
+    "db": {
+      "min_caller_edges": 55,
+      "file": "src/db/index.ts"
     },
-    "POST": {
-      "min_caller_edges": 5,
-      "file": "api/webhooks/stripe/route.ts"
-    },
-    "issueFormLink": {
-      "min_caller_edges": 4,
-      "file": "staff/forms/actions.ts"
+    "FormDef": {
+      "min_caller_edges": 16,
+      "file": "src/lib/form-def.ts"
     }
-  }
+  },
+  "spot_check_basis": "caller-file churn over the last 500 commits, then fan-in"
 }

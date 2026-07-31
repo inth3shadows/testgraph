@@ -441,6 +441,91 @@ class ExportMapTests(unittest.TestCase):
         self.assertEqual(own["verify_manually"], [])
 
 
+class SharedEntryTests(unittest.TestCase):
+    """A symbol that is the hinge between two flows is an entry of both. Keying
+    one journey per node kept only the last and dropped the rest — silently, and
+    invisibly to `unresolved()`, which re-resolves per entry rather than reading
+    the map. signedintake's `simulatePaymentCompletion` (J5 and J11) is the real
+    case; `handler_a` stands in for it here."""
+
+    REG = {
+        "journeys": {
+            "J1": {"name": "first", "entries": [{"name": "handler_a",
+                                                 "file": "app/svc.py"}]},
+            "J2": {"name": "second", "entries": [{"name": "handler_a",
+                                                  "file": "app/svc.py"}]},
+        },
+        "spot_checks": {},
+    }
+
+    def setUp(self):
+        self.conn = build_fixture()
+
+    def test_both_journeys_claim_the_shared_node(self):
+        entry_map = reg.resolve_entries(self.conn, self.REG)
+        claims = [jids for jids in entry_map.values()]
+        self.assertEqual(len(claims), 1, "one node, shared")
+        self.assertEqual(claims[0], {"J1", "J2"})
+
+    def test_map_row_lists_both_journeys(self):
+        rows = exp.build_map(self.conn, self.REG)
+        row = next(r for rs in rows.values() for r in rs
+                   if r["symbol"] == "handler_a")
+        self.assertEqual(row["journeys"], ["J1", "J2"])
+
+    def test_selection_returns_both_journeys(self):
+        seeds = set(dbmod.resolve_symbol(self.conn, "handler_a", "app/svc.py"))
+        impacted = dbmod.impacted_closure(self.conn, seeds)
+        entry_map = reg.resolve_entries(self.conn, self.REG)
+        touched = {}
+        for nid in impacted.keys() & set(entry_map):
+            for jid in entry_map[nid]:
+                touched.setdefault(jid, set()).add(nid)
+        self.assertEqual(set(touched), {"J1", "J2"})
+
+
+class JourneySortKeyTests(unittest.TestCase):
+    """Journey ids are displayed in registry order to a human reader. Plain
+    string sort only misorders once a registry passes nine journeys, so this is
+    a defect no small fixture would surface."""
+
+    def test_double_digit_ids_sort_after_single_digit(self):
+        ids = ["J10", "J2", "J1", "J13", "J9"]
+        self.assertEqual(
+            sorted(ids, key=reg.journey_sort_key),
+            ["J1", "J2", "J9", "J10", "J13"],
+        )
+
+    def test_ids_without_a_number_keep_a_stable_place(self):
+        ids = ["J2", "checkout", "J10", "J1"]
+        self.assertEqual(
+            sorted(ids, key=reg.journey_sort_key),
+            ["J1", "J2", "J10", "checkout"],
+        )
+
+    def test_prefix_groups_do_not_interleave(self):
+        ids = ["B2", "A10", "A2", "B1"]
+        self.assertEqual(
+            sorted(ids, key=reg.journey_sort_key),
+            ["A2", "A10", "B1", "B2"],
+        )
+
+    def test_rendered_map_lists_journeys_in_numeric_order(self):
+        registry = {
+            "journeys": {
+                jid: {"name": jid.lower(), "entries": []}
+                for jid in ("J1", "J2", "J10", "J11")
+            },
+            "spot_checks": {},
+        }
+        md = exp.render_markdown({}, registry, {"repo": "r", "schema": 8,
+                                                "commit": "abc1234",
+                                                "symbols": 0})
+        listed = [ln.split()[1].strip("*") for ln in md.splitlines()
+                  if ln.startswith("- **J")]
+        self.assertEqual(listed, ["J1", "J2", "J10", "J11"])
+
+
 class UnresolvedJourneyTests(unittest.TestCase):
     """A journey whose entries do not resolve can never be selected. It must fail
     loud, not vanish while the registry still advertises it (issue #19)."""
