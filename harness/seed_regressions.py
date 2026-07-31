@@ -33,7 +33,6 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 
@@ -41,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+from harness import _worktree as wtlib  # noqa: E402
 from harness import ast_oracle  # noqa: E402
 from testgraph import select as sel  # noqa: E402
 
@@ -48,10 +48,6 @@ BARE = "/home/ericm/personal_projects/honeyslate/.bare"
 REGISTRY = os.path.join(ROOT, "journeys", "honeyslate.json")
 CODEGRAPH = os.path.expanduser("~/.local/bin/codegraph")
 MARK = "  # SEEDED-MUTANT"
-
-
-def run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
 def pick_sites(sites, want):
@@ -100,19 +96,17 @@ def main(argv=None):
     wt = os.path.join(tmp, "wt")
     rows, misses, blocked, stale = [], [], [], []
     try:
-        add = run(["git", "-C", BARE, "worktree", "add", "--detach", wt, args.base])
-        if add.returncode:
-            print("worktree add failed:", add.stderr.strip())
+        try:
+            db = wtlib.add_and_index(BARE, args.base, wt, CODEGRAPH)
+        except wtlib.WorktreeError as e:
+            if e.stage == "WORKTREE-FAIL":
+                print("worktree add failed:", e.detail)
+            else:
+                print("index failed:", e.detail[:200])
             return 2
-        run(["git", "-C", wt, "config", "user.email", "seed@harness"])
-        run(["git", "-C", wt, "config", "user.name", "seed harness"])
-        base_sha = run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
-
-        idx = run([CODEGRAPH, "init", wt])
-        db = os.path.join(wt, ".codegraph", "codegraph.db")
-        if not os.path.exists(db):
-            print("index failed:", idx.stderr.strip()[:200])
-            return 2
+        wtlib.run(["git", "-C", wt, "config", "user.email", "seed@harness"])
+        wtlib.run(["git", "-C", wt, "config", "user.name", "seed harness"])
+        base_sha = wtlib.run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
 
         oracle, sites = ast_oracle.journey_oracle(wt, registry)
         chosen = pick_sites(sites, args.sites)
@@ -123,15 +117,15 @@ def main(argv=None):
             touched = mutate(full, start, end)
             if touched is None:
                 rows.append((rel, fname, "SKIP", "no mutable body line", None, None))
-                run(["git", "-C", wt, "checkout", "--", "."])
+                wtlib.run(["git", "-C", wt, "checkout", "--", "."])
                 continue
-            run(["git", "-C", wt, "commit", "-qam", f"seed {rel}:{fname}"])
+            wtlib.run(["git", "-C", wt, "commit", "-qam", f"seed {rel}:{fname}"])
 
             expected = sorted(j for j, names in oracle.items() if fname in names)
             result = sel.select(wt, base_sha, "HEAD", db, REGISTRY)
             if result["status"] != "OK":
                 blocked.append((rel, fname, "; ".join(result.get("blocking", []))))
-                run(["git", "-C", wt, "reset", "-q", "--hard", base_sha])
+                wtlib.run(["git", "-C", wt, "reset", "-q", "--hard", base_sha])
                 continue
 
             ranked = [j["id"] for j in result["journeys"]]
@@ -165,9 +159,9 @@ def main(argv=None):
             # worst rank among expected journeys: how deep must you read?
             worst = max((ranked.index(j) + 1 for j in hit), default=0)
             rows.append((rel, fname, f"{recall:.2f}", expected, ranked, worst))
-            run(["git", "-C", wt, "reset", "-q", "--hard", base_sha])
+            wtlib.run(["git", "-C", wt, "reset", "-q", "--hard", base_sha])
     finally:
-        run(["git", "-C", BARE, "worktree", "remove", "--force", wt])
+        wtlib.remove(BARE, wt)
         shutil.rmtree(tmp, ignore_errors=True)
 
     scored = [r for r in rows if r[2] not in ("SKIP",)]

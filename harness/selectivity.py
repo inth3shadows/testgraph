@@ -40,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+from harness import _worktree as wtlib  # noqa: E402
 from testgraph import select as sel  # noqa: E402
 
 # Defaults name the target this harness was built for; --bare/--registry
@@ -50,16 +51,12 @@ CODEGRAPH = os.path.expanduser("~/.local/bin/codegraph")
 DEFAULT_N = 14  # the cadence of the original 8-journey sweep (#41)
 
 
-def run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-
-
 def last_n_commits(bare, n, branch):
     """The last N commits reachable from `branch`, newest first — merges
     included. #41's sweep counted a merge as one of its 14 rows (the 8-file
     merge that selected all 8 journeys), so excluding merges here would
     silently change what is being measured."""
-    out = run(["git", "-C", bare, "log", "--format=%H", "-n", str(n), branch])
+    out = wtlib.run(["git", "-C", bare, "log", "--format=%H", "-n", str(n), branch])
     return out.stdout.split()
 
 
@@ -80,16 +77,12 @@ def main():
     try:
         for sha in shas:
             wt = os.path.join(tmp, sha)
-            add = run(["git", "-C", args.bare, "worktree", "add",
-                       "--detach", wt, sha])
-            if add.returncode:
-                rows.append((sha, "WORKTREE-FAIL", add.stderr.strip()[:80]))
-                continue
-            idx = run([CODEGRAPH, "init", wt])
-            db = os.path.join(wt, ".codegraph", "codegraph.db")
-            if not os.path.exists(db):
-                rows.append((sha, "INDEX-FAIL", idx.stderr.strip()[:80]))
-                run(["git", "-C", args.bare, "worktree", "remove", "--force", wt])
+            try:
+                db = wtlib.add_and_index(args.bare, sha, wt, CODEGRAPH)
+            except wtlib.WorktreeError as e:
+                rows.append((sha, e.stage, e.detail[:80]))
+                if e.stage == "INDEX-FAIL":
+                    wtlib.remove(args.bare, wt)
                 continue
             try:
                 # strict_registry=False: analysing history, not live use — a
@@ -101,19 +94,20 @@ def main():
                 # `{sha}~1` has no parent — only reachable if -n walks past
                 # the repo's root commit.
                 rows.append((sha, "NO-PARENT", str(e)[:80]))
-                run(["git", "-C", args.bare, "worktree", "remove", "--force", wt])
+                wtlib.remove(args.bare, wt)
                 continue
             if result["status"] != "OK":
                 rows.append((sha, "BLOCKED",
                              "; ".join(result.get("blocking", []))[:80]))
-                run(["git", "-C", args.bare, "worktree", "remove", "--force", wt])
+                wtlib.remove(args.bare, wt)
                 continue
             selected = sorted(j["id"] for j in result["journeys"])
-            desc = run(["git", "-C", args.bare, "log", "-1", "--format=%s", sha]).stdout.strip()
+            desc = wtlib.run(["git", "-C", args.bare, "log", "-1", "--format=%s",
+                              sha]).stdout.strip()
             rows.append((sha, desc[:50], len(selected), total,
                          result["recall_degraded"],
                          len(result["unresolved_journeys"]), selected))
-            run(["git", "-C", args.bare, "worktree", "remove", "--force", wt])
+            wtlib.remove(args.bare, wt)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
