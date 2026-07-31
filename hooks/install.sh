@@ -9,9 +9,12 @@
 #
 # Idempotent. Writes a marker-delimited block into the repo's SHARED hooks dir
 # (`git rev-parse --git-common-dir`/hooks), so one install covers every worktree
-# of that repo, and re-running replaces only our block — these repos already run
-# other managers' hooks (runecho-guard, autosync-hook-v2) and clobbering them
-# would break tools that have nothing to do with testgraph.
+# of that repo, and re-running replaces our block rather than stacking copies.
+#
+# It REFUSES a repo whose pre-push already belongs to someone else instead of
+# appending to it — see the refusal below for why appending is worse than useless.
+# Other hook types here (runecho-guard on pre-commit, autosync-hook-v2 on
+# post-commit) are untouched; only pre-push is ours.
 #
 # Usage:
 #   hooks/install.sh                       # every repo with an approved registry
@@ -84,33 +87,47 @@ for repo in "${targets[@]}"; do
     mkdir -p "$hooks_dir"
     hook="$hooks_dir/pre-push"
 
-    # Strip any previous block of ours, keeping every other line intact.
+    # Everything in the existing hook that is not our own block. Non-empty means
+    # somebody else owns this file — see the refusal below.
     if [ -f "$hook" ]; then
         kept="$(awk -v o="$OPEN" -v c="$CLOSE" '
             $0 == o {skip=1; next} $0 == c {skip=0; next} !skip' "$hook")"
     else
         kept=""
     fi
+    foreign="$(printf '%s\n' "$kept" | grep -v '^#!' | grep -v '^[[:space:]]*$' || true)"
 
     if [ "$UNINSTALL" -eq 1 ]; then
-        # Anything left besides a shebang and blank lines belongs to another
-        # manager — rewrite, don't delete.
-        rest="$(printf '%s\n' "$kept" | grep -v '^#!' | grep -v '^[[:space:]]*$' || true)"
-        if [ -z "$rest" ]; then
+        if [ ! -f "$hook" ]; then
+            continue
+        elif [ -z "$foreign" ]; then
             rm -f "$hook"; echo "removed  $hook"
         else
-            printf '%s\n' "$kept" > "$hook"; echo "unhooked $hook (other blocks kept)"
+            # Never delete a file we did not solely author.
+            printf '%s\n' "$kept" > "$hook"; echo "unhooked $hook (other content kept)"
         fi
         continue
     fi
 
+    # A foreign pre-push is REFUSED, not appended to. Appending looked free and is
+    # not: a hook ending in `exit`/`exec` — the most ordinary way to write one, and
+    # what this very template does — leaves our block after the exit, dead forever,
+    # while the installer prints "installed". And a hook that ran `set -e` leaves it
+    # set for our block, where one unset `git config wt.base` would fail the push
+    # outright. Both were caught in review of this file's first version. Refusing is
+    # loud and costs nothing today: no repo here has a pre-push hook at all. Solving
+    # cohabitation properly means replaying stdin between blocks, which is real
+    # complexity to buy a case that does not exist yet.
+    if [ -n "$foreign" ]; then
+        echo "skip $hook — a pre-push hook already exists here and is not ours." >&2
+        echo "     Appending would leave testgraph's block after another manager's" >&2
+        echo "     exit (silently dead) or under its \`set -e\` (a failed push)." >&2
+        echo "     Merge it by hand, or move the existing hook aside first." >&2
+        continue
+    fi
+
     {
-        if printf '%s' "$kept" | head -1 | grep -q '^#!'; then
-            printf '%s\n' "$kept"
-        else
-            echo "#!/usr/bin/env bash"
-            [ -n "$kept" ] && printf '%s\n' "$kept"
-        fi
+        echo "#!/usr/bin/env bash"
         echo ""
         echo "$OPEN"
         sed "s|__TESTGRAPH_HOME__|$TESTGRAPH_HOME|g" "$HERE/pre-push"

@@ -23,14 +23,19 @@ def repo_name(repo):
     `~/personal_projects/signedintake/main` and `.../signedintake/claude-2026…`
     are both worktrees of *signedintake*; their basenames are `main` and
     `claude-2026…`. Taking the basename blind is how a caller ends up asking for
-    a registry named `main`."""
-    parts = [p for p in os.path.abspath(repo).split(os.sep) if p]
-    if not parts:
-        return ""
-    leaf = parts[-1]
-    if len(parts) > 1 and (leaf == "main" or leaf.startswith(("claude-", "codex-"))):
-        return parts[-2]
-    return leaf
+    a registry named `main`.
+
+    Decided on the `.bare/` MARKER next to the worktree, not on what the leaf
+    directory is called. Name-matching `main|claude-*|codex-*` reads
+    `~/personal_projects/claude-code` — an ordinary checkout that merely starts
+    with `claude-` — as a worktree and answers `personal_projects`. Same mistake
+    as identifying a virtualenv by its directory name (7db2145): the layout has
+    a marker, so ask the marker."""
+    path = os.path.abspath(repo)
+    parent = os.path.dirname(path)
+    if parent and parent != path and os.path.isdir(os.path.join(parent, ".bare")):
+        return os.path.basename(parent)
+    return os.path.basename(path)
 
 
 def resolve_for_repo(repo, journeys_dir=None):

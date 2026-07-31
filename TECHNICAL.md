@@ -123,6 +123,16 @@ Two properties are load-bearing and neither is about selection quality:
   warnings at 3, and says how many it hid. A reader who learns to skip the block
   has learned to skip the answer.
 
+The installer **refuses** a repo whose `pre-push` already belongs to another tool
+instead of appending to it. Appending was the first design and review killed it
+twice over: a hook ending in `exit`/`exec` — the ordinary way to write one — leaves
+the appended block dead forever while the installer reports success; and a hook that
+ran `set -e` leaves it set for the appended block, where one unset `git config
+wt.base` exits non-zero and *fails the push*. Cohabiting properly means replaying
+stdin between blocks, which is real complexity for a case that does not exist here:
+no repo on this machine has a `pre-push` hook. The hook body still guards its
+assignments with `|| true` in case someone merges it by hand.
+
 `skills/testgraph-verify` (reads the exported map) and a CI gate reading `--json`
 remain the other two intended consumers.
 

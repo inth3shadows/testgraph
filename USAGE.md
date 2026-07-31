@@ -54,8 +54,13 @@ index, a missing registry, or an outright crash prints one line and lets the pus
 through; you lose the advice, not the work.
 
 Turn it off for one repo with `git config testgraph.enabled false`; remove it
-entirely with `hooks/install.sh --uninstall`. The installer shares the hook file
-with other tools rather than overwriting it, so an existing `pre-push` keeps working.
+entirely with `hooks/install.sh --uninstall`.
+
+If a repo already has a `pre-push` hook belonging to something else, the installer
+**refuses that repo and says so** rather than editing the file. Merging two pre-push
+hooks means deciding who reads the ref lines on stdin and whose `exit` runs first —
+a decision only you can make. Other hook types are untouched; only `pre-push` is
+testgraph's.
 
 Every run appends a line to `~/.local/share/testgraph/invocations.jsonl`. To check
 the tool is actually being used: `wc -l ~/.local/share/testgraph/invocations.jsonl`.

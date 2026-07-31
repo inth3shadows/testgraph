@@ -14,25 +14,49 @@ from testgraph import hook
 from testgraph import registry as reg
 
 
-class RepoNameTest(unittest.TestCase):
-    def test_sees_through_the_bare_worktree_layout(self):
-        for path, want in [
-            ("/home/e/personal_projects/signedintake/main", "signedintake"),
-            ("/home/e/personal_projects/signedintake/claude-20260730-220007", "signedintake"),
-            ("/home/e/personal_projects/signedintake/codex-1", "signedintake"),
-            ("/home/e/personal_projects/honeyslate", "honeyslate"),
-        ]:
-            self.assertEqual(reg.repo_name(path), want, path)
+def _worktree_named(project):
+    return _bare_worktree(tempfile.mkdtemp(), project, "main")
 
-    def test_a_project_literally_named_main_is_not_swallowed(self):
-        # `/main` at the root has no parent to promote; taking parts[-2] blindly
-        # would produce "" and resolve no registry at all.
-        self.assertEqual(reg.repo_name("/main"), "main")
+
+def _bare_worktree(root, project, leaf):
+    """`<root>/<project>/{.bare,<leaf>}` — the layout repo-init produces."""
+    path = os.path.join(root, project, leaf)
+    os.makedirs(path, exist_ok=True)
+    os.makedirs(os.path.join(root, project, ".bare"), exist_ok=True)
+    return path
+
+
+class RepoNameTest(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def test_sees_through_the_bare_worktree_layout(self):
+        for leaf in ("main", "claude-20260730-220007", "codex-1"):
+            path = _bare_worktree(self.root, "signedintake", leaf)
+            self.assertEqual(reg.repo_name(path), "signedintake", path)
+
+    def test_a_plain_checkout_keeps_its_own_name(self):
+        path = os.path.join(self.root, "honeyslate")
+        os.makedirs(path, exist_ok=True)
+        self.assertEqual(reg.repo_name(path), "honeyslate")
+
+    def test_a_plain_repo_whose_name_starts_with_claude_is_not_promoted(self):
+        # Decided on the `.bare` marker, not on the leaf's name. Matching
+        # `claude-*` by name read ~/personal_projects/claude-code — an ordinary
+        # checkout — as a worktree and answered `personal_projects`, so it could
+        # never resolve its own registry and could collide with another project's.
+        path = os.path.join(self.root, "claude-code")
+        os.makedirs(path, exist_ok=True)
+        self.assertEqual(reg.repo_name(path), "claude-code")
+
+    def test_root_has_no_parent_to_promote(self):
+        self.assertEqual(reg.repo_name("/"), "")
 
 
 class ResolveForRepoTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
+        self.root = tempfile.mkdtemp()
         self._write("alpha.json", {"target": "alpha", "journeys": {}})
         # Filename and target deliberately disagree: the target is the claim.
         self._write("zzz.json", {"target": "beta", "journeys": {}})
@@ -42,21 +66,25 @@ class ResolveForRepoTest(unittest.TestCase):
             json.dump(data, f)
 
     def test_matches_on_target_not_filename(self):
-        self.assertTrue(
-            reg.resolve_for_repo("/x/beta/main", self.dir).endswith("zzz.json")
-        )
+        repo = _bare_worktree(self.root, "beta", "main")
+        self.assertTrue(reg.resolve_for_repo(repo, self.dir).endswith("zzz.json"))
 
     def test_returns_none_rather_than_guessing(self):
         # The defect this replaces: an unmatched repo silently loaded
         # honeyslate's registry and then blamed the index for disagreeing.
-        self.assertIsNone(reg.resolve_for_repo("/x/gamma/main", self.dir))
+        repo = _bare_worktree(self.root, "gamma", "main")
+        self.assertIsNone(reg.resolve_for_repo(repo, self.dir))
 
     def test_survives_an_unparseable_registry(self):
         with open(os.path.join(self.dir, "broken.json"), "w") as f:
             f.write("{not json")
-        self.assertTrue(
-            reg.resolve_for_repo("/x/alpha/main", self.dir).endswith("alpha.json")
-        )
+        repo = _bare_worktree(self.root, "alpha", "main")
+        self.assertTrue(reg.resolve_for_repo(repo, self.dir).endswith("alpha.json"))
+
+
+SIGNEDINTAKE = _worktree_named("signedintake")
+ALPHA = _worktree_named("alpha")
+GAMMA = _worktree_named("gamma")
 
 
 def _result(n_journeys, **over):
@@ -89,12 +117,12 @@ class RenderTest(unittest.TestCase):
         # 14 identical NOTE lines on every signedintake push is how a reader
         # learns to skip the block — and the answer with it. They are also
         # permanent: no re-index can clear them.
-        text = hook.render(_result(2), "/x/signedintake/main")
+        text = hook.render(_result(2), SIGNEDINTAKE)
         self.assertNotIn("NOTE", text)
         self.assertNotIn("p.tsx", text)
 
     def test_caps_the_journey_list_and_says_it_capped(self):
-        text = hook.render(_result(12), "/x/signedintake/main")
+        text = hook.render(_result(12), SIGNEDINTAKE)
         self.assertIn("12 journey(s)", text)
         listed = [ln for ln in text.splitlines() if ln.startswith("  [")]
         self.assertEqual(len(listed), hook.MAX_JOURNEYS)
@@ -103,14 +131,14 @@ class RenderTest(unittest.TestCase):
     def test_keeps_the_signals_that_mean_the_answer_may_be_understated(self):
         text = hook.render(
             _result(1, recall_degraded=True, warnings=["registry not approved"]),
-            "/x/signedintake/main",
+            SIGNEDINTAKE,
         )
         self.assertIn("RECALL DEGRADED", text)
         self.assertIn("registry not approved", text)
 
     def test_caps_warnings_without_hiding_the_count(self):
         text = hook.render(
-            _result(1, warnings=[f"w{i}" for i in range(9)]), "/x/signedintake/main"
+            _result(1, warnings=[f"w{i}" for i in range(9)]), SIGNEDINTAKE
         )
         self.assertIn(f"… {9 - hook.MAX_WARNINGS} more", text)
 
@@ -118,20 +146,20 @@ class RenderTest(unittest.TestCase):
         text = hook.render(
             {"status": "BLOCKED", "base": "a" * 40, "head": "HEAD",
              "blocking": ["schema pin 8 != 9"]},
-            "/x/signedintake/main",
+            SIGNEDINTAKE,
         )
         self.assertIn("no answer", text)
         self.assertIn("schema pin 8 != 9", text)
 
     def test_abbreviates_shas_but_leaves_symbolic_revs_alone(self):
-        text = hook.render(_result(1), "/x/signedintake/main")
+        text = hook.render(_result(1), SIGNEDINTAKE)
         self.assertIn("aaaaaaaaa..bbbbbbbbb", text)
         self.assertNotIn("a" * 40, text)
         self.assertIn("HEAD~1..HEAD", hook.render(
-            _result(1, base="HEAD~1", head="HEAD"), "/x/signedintake/main"))
+            _result(1, base="HEAD~1", head="HEAD"), SIGNEDINTAKE))
 
     def test_no_selection_is_stated_not_blank(self):
-        text = hook.render(_result(0), "/x/signedintake/main")
+        text = hook.render(_result(0), SIGNEDINTAKE)
         self.assertIn("no journeys selected", text)
 
 
@@ -156,24 +184,24 @@ class NeverBlocksTest(unittest.TestCase):
         with mock.patch.object(hook.sel, "select", side_effect=RuntimeError("boom")), \
              mock.patch.object(hook.reg, "resolve_for_repo", return_value="/r.json"), \
              mock.patch.object(hook.os.path, "exists", return_value=True):
-            self.assertEqual(hook.main(["--repo", "/x/alpha/main", "--base", "HEAD~1"]), 0)
+            self.assertEqual(hook.main(["--repo", ALPHA, "--base", "HEAD~1"]), 0)
         self.assertEqual(self._log()[0]["status"], "ERROR")
         self.assertIn("boom", self._log()[0]["error"])
 
     def test_exits_zero_with_no_registry(self):
         with mock.patch.object(hook.reg, "resolve_for_repo", return_value=None):
-            self.assertEqual(hook.main(["--repo", "/x/gamma/main", "--base", "HEAD~1"]), 0)
+            self.assertEqual(hook.main(["--repo", GAMMA, "--base", "HEAD~1"]), 0)
         self.assertEqual(self._log()[0]["status"], "NO_REGISTRY")
 
     def test_exits_zero_with_no_index(self):
         with mock.patch.object(hook.reg, "resolve_for_repo", return_value="/r.json"):
-            self.assertEqual(hook.main(["--repo", "/x/alpha/main", "--base", "HEAD~1"]), 0)
+            self.assertEqual(hook.main(["--repo", ALPHA, "--base", "HEAD~1"]), 0)
         self.assertEqual(self._log()[0]["status"], "NO_INDEX")
 
     def test_an_unwritable_log_still_does_not_fail_the_push(self):
         with mock.patch.dict(os.environ, {"TESTGRAPH_STATE_DIR": "/proc/nope/deeper"}), \
              mock.patch.object(hook.reg, "resolve_for_repo", return_value=None):
-            self.assertEqual(hook.main(["--repo", "/x/gamma/main", "--base", "HEAD~1"]), 0)
+            self.assertEqual(hook.main(["--repo", GAMMA, "--base", "HEAD~1"]), 0)
 
 
 class InvocationLogTest(unittest.TestCase):
@@ -188,7 +216,7 @@ class InvocationLogTest(unittest.TestCase):
     def test_appends_one_countable_line_per_run(self):
         with mock.patch.object(hook.reg, "resolve_for_repo", return_value=None):
             for _ in range(3):
-                hook.main(["--repo", "/x/gamma/main", "--base", "HEAD~1"])
+                hook.main(["--repo", GAMMA, "--base", "HEAD~1"])
         with open(os.path.join(self.dir, "invocations.jsonl")) as f:
             lines = [json.loads(x) for x in f if x.strip()]
         self.assertEqual(len(lines), 3)
@@ -197,7 +225,7 @@ class InvocationLogTest(unittest.TestCase):
         with mock.patch.object(hook.reg, "resolve_for_repo", return_value="/r.json"), \
              mock.patch.object(hook.os.path, "exists", return_value=True), \
              mock.patch.object(hook.sel, "select", return_value=_result(2)):
-            hook.main(["--repo", "/x/alpha/main", "--base", "HEAD~1", "--caller", "manual"])
+            hook.main(["--repo", ALPHA, "--base", "HEAD~1", "--caller", "manual"])
         rec = json.loads(open(os.path.join(self.dir, "invocations.jsonl")).read())
         self.assertEqual(rec["repo"], "alpha")
         self.assertEqual(rec["status"], "OK")
