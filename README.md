@@ -89,8 +89,10 @@ from 0.84 when frontend files began being seeded — see TECHNICAL.md) and 1.00
 across 20 seeded mutation sites scored against an independent AST oracle;
 integrity guard tested and schema-pinned. Scoped to honeyslate; backend and
 frontend files are both analysed, journeys are registered on backend entry points.
-Next increments (the results ledger, an MCP wrapper, the `/verify` gate) are in
-the plan.
+The gap is not capability, it is **consumption**: `skills/testgraph-verify` has
+never been invoked — 0 times across every session on this machine. Next increments
+in the plan (the results ledger, the `/verify` gate) all assume a caller that does
+not exist yet, so wiring one is the work that unblocks them.
 
 **On whether this is worth it:** at 8 journeys selection avoids 57.5% of journey-runs
 on the labeled set, but bimodally — 3 of 5 commits select ≤2 journeys, 2 of 5 select

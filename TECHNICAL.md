@@ -1,7 +1,7 @@
 # Technical Reference: testgraph
 
 Phase-1 spike. This documents the built selector; the broader roadmap (ledger,
-MCP wrapper, trace discovery) lives in the private plan
+trace discovery) lives in the private plan
 `~/.claude/plans/testgraph-phase1-graph-traversal-spike.md`.
 
 ## Architecture
@@ -94,9 +94,21 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
 
 ## Deployment
 
-No service to deploy — a CLI run against a target repo's index. Intended
-consumers: a CI gate reading `--json`, or (future) an MCP wrapper feeding the
-`/verify` step of autonomous merge loops.
+No service to deploy — a CLI run against a target repo's index. The intended
+consumer is `skills/testgraph-verify`, which reads the exported map; a CI gate
+reading `--json` is the other.
+
+**An MCP wrapper was listed here as a future consumer and has been dropped.**
+Measured 2026-07-30 across every session on this machine: 82 tool calls touched an
+exported map, **none of them a whole-file `Read`** — all were `grep`/`cat`, median
+275 B (~68 tokens), p90 ~410 tokens. A server returning the same rows would save
+nothing worth a process. The probe that killed it, including the pre-registered
+decision rule, is `~/.claude/plans/testgraph-mcp-vs-map-probe.md`.
+
+The same probe found the thing that actually matters: those 82 calls are all
+testgraph's own development. `Skill(testgraph-verify)` has been invoked **zero
+times**. Cost arguments about a consumer with no users are premature; see the
+no-runtime-consumer issue.
 
 ## Maintenance Commands
 
