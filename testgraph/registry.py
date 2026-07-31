@@ -14,6 +14,57 @@ def load(path):
         return json.load(f)
 
 
+JOURNEYS_DIR = os.path.join(os.path.dirname(__file__), "..", "journeys")
+
+
+def repo_name(repo):
+    """The project name for a repo path, seeing through the bare-worktree layout.
+
+    `~/personal_projects/signedintake/main` and `.../signedintake/claude-2026…`
+    are both worktrees of *signedintake*; their basenames are `main` and
+    `claude-2026…`. Taking the basename blind is how a caller ends up asking for
+    a registry named `main`.
+
+    Decided on the `.bare/` MARKER next to the worktree, not on what the leaf
+    directory is called. Name-matching `main|claude-*|codex-*` reads
+    `~/personal_projects/claude-code` — an ordinary checkout that merely starts
+    with `claude-` — as a worktree and answers `personal_projects`. Same mistake
+    as identifying a virtualenv by its directory name (7db2145): the layout has
+    a marker, so ask the marker."""
+    path = os.path.abspath(repo)
+    parent = os.path.dirname(path)
+    if parent and parent != path and os.path.isdir(os.path.join(parent, ".bare")):
+        return os.path.basename(parent)
+    return os.path.basename(path)
+
+
+def resolve_for_repo(repo, journeys_dir=None):
+    """Path to the registry whose `target` is this repo, or None.
+
+    Matched on the registry's self-declared `target`, not on filename: the file
+    is an implementation detail, the target is the claim. Returns None rather
+    than guessing — a WRONG registry is worse than no registry, because every
+    downstream check then reports disagreement with the code as staleness. That
+    was the real behaviour before this existed: `select --repo <signedintake>`
+    silently loaded honeyslate's registry and blamed the index."""
+    directory = journeys_dir or JOURNEYS_DIR
+    name = repo_name(repo)
+    if not name or not os.path.isdir(directory):
+        return None
+    for fname in sorted(os.listdir(directory)):
+        if not fname.endswith(".json"):
+            continue
+        path = os.path.join(directory, fname)
+        try:
+            with open(path) as f:
+                target = json.load(f).get("target")
+        except (OSError, ValueError):
+            continue
+        if target == name:
+            return path
+    return None
+
+
 def resolve_entries(conn, registry):
     """entry_node_id -> {journey_id}. Maps ALL nodes matching an entry (name +
     file) so no definition of a handler is missed, and ALL journeys claiming a

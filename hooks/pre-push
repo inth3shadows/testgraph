@@ -1,0 +1,58 @@
+# testgraph-hook-v1 — name the user journeys a push could break, before it lands.
+# Managed by testgraph's hooks/install.sh — edit there, then re-run, not here.
+# Opt out per repo: git config testgraph.enabled false
+#
+# NEVER blocks the push. Every path exits 0: no index, no registry, a blocked
+# integrity guard, a python traceback, a timeout. Advice that can stop a push
+# stops being advice — it gets uninstalled, which is exactly the state issue #49
+# exists to end.
+#
+# git feeds this hook one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# `remote sha` is the boundary of what the remote does not have yet, which is
+# the base a "what did this change break" question actually wants. No other hook
+# is handed that.
+[ "$(git config --bool testgraph.enabled 2>/dev/null)" = "false" ] && exit 0
+TESTGRAPH_HOME="__TESTGRAPH_HOME__"
+[ -d "$TESTGRAPH_HOME" ] || exit 0
+tg_repo=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+# All-zeros sha, whatever the hash length: a ref being created or deleted.
+tg_is_zero() { case "$1" in *[!0]*) return 1 ;; *) return 0 ;; esac; }
+
+while read -r tg_lref tg_local _remote_ref tg_remote; do
+    [ -z "$tg_local" ] && continue
+    tg_is_zero "$tg_local" && continue          # branch deletion: nothing to test
+    # Branches only. `git push --tags` and `git push origin main --tags` put tag
+    # refs on the same stdin, and the `break` below answers about whichever ref
+    # comes FIRST — a tag would spend the one answer on a ref whose "diff" is
+    # meaningless here.
+    case "$tg_lref" in refs/heads/*) ;; *) continue ;; esac
+
+    if tg_is_zero "$tg_remote"; then
+        # New branch — the remote has no boundary to offer. Diff against where
+        # this branch left the base branch, so a first push of a 6-commit
+        # worktree branch reports all six, not just the tip.
+        #
+        # `|| true` on every assignment: `git config wt.base` exits 1 whenever
+        # wt.base is unset, which is most repos. This block is appended into a
+        # hook file that may already have run `set -e`, and under `-e` a bare
+        # failing assignment ends the shell — which for a pre-push hook means
+        # FAILING THE PUSH. The one thing this hook must never do, reached
+        # through a non-zero exit we did not even want.
+        tg_base=$(git config wt.base 2>/dev/null) || true
+        [ -z "${tg_base:-}" ] && tg_base=main
+        tg_remote=$(git merge-base "$tg_local" "$tg_base" 2>/dev/null) || true
+        # Pushing the base branch itself merge-bases to its own tip: fall back to
+        # the parent commit rather than reporting an empty diff.
+        [ "${tg_remote:-}" = "$tg_local" ] && tg_remote=""
+        [ -z "${tg_remote:-}" ] && { tg_remote=$(git rev-parse "${tg_local}^" 2>/dev/null) || true; }
+        [ -z "${tg_remote:-}" ] && continue     # root commit: no base exists
+    fi
+
+    # </dev/null so the selector cannot eat the ref lines still on stdin.
+    ( cd "$TESTGRAPH_HOME" && timeout 20 python3 -m testgraph.hook \
+        --repo "$tg_repo" --base "$tg_remote" --head "$tg_local" ) </dev/null 2>/dev/null
+    break                                        # one answer per push, not one per ref
+done
+exit 0
