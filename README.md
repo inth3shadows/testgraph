@@ -112,6 +112,7 @@ selector *said*, not what running the journeys then *found*.
 - `journeys/honeyslate.json` — the hand-authored journey registry for the first
   dogfood target.
 - `harness/` — `accuracy.py` (recall/precision on labeled commits),
+  `selectivity.py` (selection sizes per commit for a target with no labels),
   `seed_regressions.py` + `ast_oracle.py` (seeded-mutation eval against an
   independent oracle), `adjudications.json` (hand-ruled disagreements).
 - `hooks/` — `pre-push` (the git hook that runs the selector on every push) and

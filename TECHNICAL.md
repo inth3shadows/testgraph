@@ -717,8 +717,45 @@ at or before the index commit that is sound for coverage but not for line alignm
 a hunk's line numbers are read against the indexed snapshot, so an older commit's
 ranges can map to a neighbouring symbol. There is also no hand-labeled oracle here, so
 these are selection *sizes*, not precision or recall. A per-commit harness for
-signedintake would fix both and is the honest next step if these numbers ever need to
-carry weight beyond "the shape replicates".
+signedintake would fix the first and is the honest next step if these numbers ever
+need to carry weight beyond "the shape replicates".
+
+### Re-measured at 14 journeys, per-commit (`harness/selectivity.py`, 2026-07-31)
+
+Everything above was measured against the **8-journey** registry that `17da9e1`
+retired. The pre-push hook queries the 14-journey one, so the published numbers
+described a registry nothing was using. `python3 harness/selectivity.py` re-runs the
+sweep — same 14 commits through `0305ada` — with the methodology limit above closed:
+each commit is checked out into its own worktree and indexed fresh, so line spans and
+`files.content_hash` agree with the tree by construction. That is no longer optional
+bookkeeping: after the content-drift guard, a shared tip-commit index would disagree
+with almost every historical commit's bytes and the sweep would measure the guard
+firing, not selectivity.
+
+| | 14 journeys (per-commit index) | 8 journeys (shared index) |
+|---|---|---|
+| mean selected | **2.64 / 14 (18.9%)** | 2.21 / 8 (27.7%) |
+| journey-runs avoided | **81.1%** | 72.3% |
+| `<= 2` journeys | **11 of 14** (4 of them zero) | 12 of 14 (4 zero) |
+| selects every journey | **0 of 14** | 2 of 14 |
+| degraded runs | **0** | 0 |
+
+Histogram, journeys selected -> commits: `{0: 4, 1: 2, 2: 5, 3: 1, 11: 2}`.
+
+**"Narrow or total" survived; "total" stopped being literal.** The gap in the middle
+is still there — nothing lands between 3 and 11 — but the ceiling fell from 8/8 to
+**11/14**, reached by two related PDF-regeneration commits. The two commits that used
+to select *everything* now select 79% of everything. J13 (`instrumentation.register`)
+and J14 (the seed-staff CLI) are structurally isolated and are never pulled in by the
+shared-symbol fan-out that produced a literal 8/8.
+
+That is a partial answer to the open question above — whether the broad tail grows or
+shrinks as journey count rises. Here it shrank, and selectivity *improved* with a
+larger registry (81.1% vs 72.3% avoided), because the journeys added were not on the
+shared-symbol paths. One repo at one step in registry size is not the 20+ journey
+falsification #13 asked for, and the mechanism named — isolated journeys dilute the
+fan-out — predicts the effect reverses for a registry grown along shared paths
+instead. Still selection *sizes*, still no hand-labeled oracle here.
 
 ### Re-derived from `propose`, then reviewed (2026-07-30)
 
@@ -821,8 +858,16 @@ mean 2.21 of 8 journeys, 72.3% of journey-runs avoided, **12 of 14 commits selec
 and 2 select all 8, with nothing in between**. Same bimodality, an independent
 codebase, a different language, and better selectivity than honeyslate. So the shape
 is how change lands in code, not a honeyslate quirk — and the "narrow or total"
-pattern is what the guards and the ranking exist to serve. Still open: this is a
-second *8-journey* registry, so the 20+ question below is untested.
+pattern is what the guards and the ranking exist to serve.
+
+**Update 2 — re-measured at 14 journeys (`harness/selectivity.py`, 2026-07-31).** The
+numbers above are the retired 8-journey registry. At 14, per-commit indexes: mean
+**2.64 of 14, 81.1% avoided**, 11 of 14 commits select <= 2, and **nothing selects all
+14** — the ceiling is 11/14, with the histogram empty from 4 through 10. The gap in
+the middle survived; "total" did not. Selectivity improved as the registry grew,
+because the journeys added (a lifespan hook, a CLI script) sit off the shared-symbol
+paths — which also means the effect should reverse for a registry grown *along* them.
+The 20+ question below is still untested.
 
 **What would falsify the whole thing:** if a second registry (#11) shows the same
 bimodal shape at 20+ journeys — narrow commits stay narrow, shared-symbol commits
