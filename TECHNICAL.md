@@ -79,6 +79,15 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
   `--export-kb` readers. Refuses a journey id the registry does not know.
 - `journeys/honeyslate.json` — 8 journeys (submit, browse, edit, reschedule,
   comments, auth, gcal sync, scheduler) + `spot_checks` floors for the guard.
+- `harness/plugin/tgtrace.py` — pytest plugin, loaded into the TARGET's
+  interpreter; records every function entered during each test body. Imports
+  nothing from this project, and sits in its own directory so only that
+  directory joins the target's `PYTHONPATH` — exporting `harness/` would shadow
+  the stdlib `trace` module for the traced suite.
+- `harness/trace.py` — runs a target's suite under that plugin and writes the
+  trace JSON.
+- `harness/ground_truth.py` — joins traces to journeys and scores the static
+  footprint against them: `traced_only` / `static_only` / `unresolved`.
 - `harness/accuracy.py` — checks each labeled commit out in an isolated worktree
   off `.bare`, builds its own index there, runs the selector for that commit,
   scores recall/precision against `harness/labels_honeyslate.json`.
@@ -1076,6 +1085,88 @@ product registries), and `harness/selectivity.py --bare ... --registry ...` runs
 sweep. `tests/test_couple.py` pins the one piece of new logic that could silently
 invalidate the split: `footprint()` inverts `db.impacted_closure` exactly, checked
 node-by-node against the real closure rather than by eye.
+
+### Update 4 — trace-derived ground truth: the instrument works, the honeyslate run is blocked (2026-08-06)
+
+Issue #12. Every recall number this project has published was scored against a
+**static** oracle: five hand labels, or `harness/ast_oracle.py`, which is
+independent of CodeGraph but still derived from source text. Both inherit static
+analysis' blind spots — dynamic dispatch, `getattr`, decorator registries,
+framework-driven entry. A trace has none of them, because it records what ran.
+
+**The instrument** (`harness/tgtrace.py`, `harness/trace.py`,
+`harness/ground_truth.py`) runs a target's own pytest suite under `sys.monitoring`
+(PEP 669; `sys.setprofile` fallback below 3.12), recording every function entered
+during each test *body* — not setup or teardown, because fixtures build the world
+and everything they touch would land in every journey sharing a fixture. Tests map
+to journeys through a hand-authored file, and the comparison is:
+
+    traced_only = traced(J) − Dep(E)
+
+where `Dep(E)` is `couple.footprint(entries)` — exactly the set of edits that would
+cause testgraph to select J. A symbol in `traced_only` runs during J and cannot
+select J. That is the silent-miss shape.
+
+Three buckets, kept apart on purpose: `traced_only` (gated — a traversal gap),
+`static_only` (reported, never gated — over-selection is the chosen direction, and
+an uncovered branch produces these too, which is why this side cannot be a
+precision score), and `unresolved` (traced symbols with no node at all — an
+*indexing* gap, a different defect with a different fix).
+
+**Demonstrated end to end on a controlled target.** `harness/fixtures/dyndemo` is
+four modules where `routes.create` reaches `dyn.audit` only through
+`getattr(mod, HOOK)`. Measured 2026-08-06:
+
+```
+1/1 journey(s) scored; 1 traced symbol(s) outside the static footprint
+  J1  create a thing  ! SILENT-MISS SOURCE
+      traced 5 symbol(s) -> 4 node(s); static footprint 7 (from 1 resolved entry symbol(s))
+      traced_only 1   static_only 4   unresolved 0
+        - audit (app/dyn.py)
+```
+
+The harness found the planted defect. That validates the instrument; it says
+nothing about honeyslate.
+
+**The honeyslate measurement did not run, and the reason is not a bug in this
+code.** `backend/tests/conftest.py` declares `clean_db` as `autouse=True`, and it
+opens `postgresql+psycopg://honeyslate@localhost:55433/honeyslate` before every
+test. That port is **closed** on this machine (probed 2026-08-06), and Docker is
+not installed under WSL, so `deploy/docker-compose.yml` cannot bring it up either.
+`pytest --collect-only` finishes in 0.05s — collection imports fine — while a real
+run blocks on the DB connect and was killed at 300s. The suite is not slow; it is
+waiting for infrastructure that is not here.
+
+This is the #8 decision arriving with its bill. testgraph deliberately does not own
+an environment, so the trace harness inherits whatever the target needs to run, and
+honeyslate needs a seeded Postgres. `harness/journey_tests_honeyslate.json` is
+written and ready; the run needs a dev Postgres on :55433 and nothing else.
+
+**The map is keyed on path suffixes, not on exact nodeids.** pytest nodeids are
+relative to its *rootdir*, which for a target with no ini file falls back to the
+invocation directory — so `--repo <r>/backend --tests tests` yields
+`tests/test_auth.py::…` while `--repo <r> --tests backend/tests` yields
+`backend/tests/test_auth.py::…` for the same test. Matching longest-suffix-first
+makes the map independent of how the harness was invoked. Keying on exact
+nodeids meant every test went unmapped under the other invocation form, every
+journey reported `no_trace`, and the summary line read as a clean run.
+
+**The map is coarse on purpose.** It labels at *file* level, never per test-nodeid:
+a per-test label needs a reading of what each test asserts, which is the judgement
+call #12 exists to replace, and a wrong per-test label is invisible in the result. A
+file exercising several journeys is mapped to *all* of them, which inflates
+`traced(J)` and therefore inflates `traced_only` — making the selector look worse.
+Same argument as `ast_oracle.py`'s bare-name matching: an over-approximating oracle
+makes the test harder to pass, never easier.
+
+`tests/test_notifications.py` is left deliberately unmapped and is *reported* as
+unmapped. A traced behaviour with no journey is a registry gap; quietly attaching
+the digest mailer to J8 would hide it.
+
+**Scope not delivered.** #12's full scope is traces *replacing* hand-labeled
+journeys. This ships the measurement, not the replacement — and one hand-labeled
+artifact survives by design, in its own visible file rather than as a heuristic
+inside `ground_truth.py`.
 
 ## Known Limitations
 
