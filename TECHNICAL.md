@@ -1204,9 +1204,36 @@ correction says the 15-commit column is the honest one, so it is the one in bold
 **The zero-selections are exactly the non-product commits.** All five commits selecting
 nothing (`cc51770e`, `62e07cb5`, `2f50ba94`, `cc23851c`, `e6833481`) touch no file that
 `select._is_product` accepts, and every one of the fifteen that does touch product code
-selected at least one journey. Zero silent "nothing affected" answers on a real code
-change, on this repo, in this window. That is a recall-side observation and it is weaker
-than it looks — see the self-reference caveat below.
+selected at least one journey.
+
+**That is NOT "zero silent misses", and an earlier draft of this section said it was.**
+Review of this PR falsified it. `testgraph/db.py` and `testgraph/registry.py` are
+reachable from no journey at all: seeding every node in either file and running the full
+impacted closure intersects the entry map in **zero** nodes. A commit rewriting the whole
+of `db.py` — the graph traversal this tool *is* — answers `journeys to test: NONE` with
+`status: OK` and `recall_degraded: false`. The window could not see it because **no commit
+in it touches either file alone**, so the clean result was an artifact of co-changed files,
+which is exactly the failure mode a 20-commit window is worst at detecting.
+
+| file seeded whole | closure | journeys named | imported as |
+|---|---|---|---|
+| `testgraph/db.py` | 14 nodes (never leaves the file) | **NONE** | `db as dbmod` |
+| `testgraph/registry.py` | 24 nodes (never leaves the file) | **NONE** | `registry as reg` |
+| `testgraph/integrity.py` | 151 nodes | J2, J4, J6 | `integrity` |
+| `testgraph/ledger.py` | 257 nodes | all six | `ledger` |
+
+The cause is not the registry. **codegraph records no cross-file edges for aliased
+relative imports** — cross-file inbound edge counts are exactly 0 for the two modules
+imported `from . import X as Y`, against 15/44/15 for the unaliased ones. Adding these
+files' symbols as journey `entries` would manufacture the right answer from a false claim
+about what an entry is, so the registry declares the gap instead. Until the indexer links
+aliased imports, a `NONE` following a `db.py` or `registry.py` change means **unknown**,
+not none.
+
+This is the sharpest available demonstration of the limitation this document already
+states — that the selector's recall is bounded by the edges the indexer records — and it
+was found in the repo running the instrument on itself, which is the one thing
+self-reference is genuinely good for.
 
 **A populated middle, and why it does not refute Update 3.** testgraph's histogram has
 1, 2, and 3 all occupied — 13 of 20 commits — where mealie's was `{0: 38, 23: 2}` with
@@ -1239,7 +1266,11 @@ resolves an ancestor. Both `testgraph/main` and this worktree are now indexed co
 
 ## Known Limitations
 
-- **Scope:** honeyslate is the only *approved* registry. `testgraph.propose`
+- **Scope:** three *approved* registries — honeyslate, signedintake, and
+  testgraph itself. Only honeyslate carries hand-labeled journeys, so it remains
+  the only source of a recall/precision number; signedintake and testgraph report
+  sizes (`harness/selectivity.py`) rather than accuracy, and testgraph's is
+  self-referential besides. `testgraph.propose`
   (issue #6) drafts one for any Python repo with decorator-style routes, but a
   draft is unreviewed by construction and says so on every run. Frontend files are
   *seeded* (issue #21), but no journey has a frontend entry point, so a frontend

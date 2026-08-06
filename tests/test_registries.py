@@ -39,6 +39,7 @@ What each check pins:
 import json
 import os
 import sys
+import tempfile
 import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -112,9 +113,18 @@ class ShippedRegistries(unittest.TestCase):
                             f"resolve_symbol would match that name in ANY file",
                         )
 
-                # Used to order every rendered answer; a non-conforming id here
-                # surfaces as a TypeError mid-render on somebody's push.
-                sorted(journeys, key=reg.journey_sort_key)
+                # `journey_sort_key` orders every rendered answer. Merely CALLING
+                # it proved nothing — it cannot raise for any `str` key, so the
+                # guard stayed green under any mutation. Assert the property the
+                # renderer actually depends on: J2 before J10, i.e. numeric and
+                # not lexicographic.
+                ordered = sorted(journeys, key=reg.journey_sort_key)
+                numbered = [j for j in ordered if j[1:].isdigit() and j[0] == "J"]
+                self.assertEqual(
+                    numbered,
+                    sorted(numbered, key=lambda j: int(j[1:])),
+                    f"{path} journey ids do not sort numerically",
+                )
 
     def test_targets_are_unique(self):
         """`resolve_for_repo` returns the FIRST file whose target matches, in
@@ -147,18 +157,54 @@ class ShippedRegistries(unittest.TestCase):
                     f"which does not exist",
                 )
 
-    def test_testgraph_registry_is_resolvable_for_this_repo(self):
-        """The end-to-end path the hook depends on: given this checkout,
-        `resolve_for_repo` must find testgraph's registry and no other."""
-        path = reg.resolve_for_repo(ROOT_DIR, journeys_dir=JOURNEYS_DIR)
-        self.assertIsNotNone(
-            path, "resolve_for_repo found no registry for this repo"
-        )
+    def test_testgraph_registry_is_resolvable_by_its_target(self):
+        """The end-to-end path the hook depends on: `resolve_for_repo` must find
+        testgraph's registry by target and no other.
+
+        The repo path is SYNTHESIZED rather than taken from `ROOT_DIR`.
+        `repo_name` derives the target from the checkout's directory name (or its
+        bare-worktree parent), so asserting on `ROOT_DIR` made this test pass or
+        fail on what the directory happens to be CALLED. It failed in any
+        worktree not literally named `testgraph` — including every scratch
+        worktree `harness/selectivity.py` and `harness/accuracy.py` create, which
+        is precisely where it will run once testgraph is its own measured
+        target."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = os.path.join(tmp, "testgraph", "main")
+            os.makedirs(repo)
+            os.makedirs(os.path.join(tmp, "testgraph", ".bare"))
+            self.assertEqual(reg.repo_name(repo), "testgraph")
+            path = reg.resolve_for_repo(repo, journeys_dir=JOURNEYS_DIR)
+
+        self.assertIsNotNone(path, "resolve_for_repo found no registry for testgraph")
         self.assertEqual(os.path.basename(path), "testgraph.json")
         self.assertIsNone(
             reg.approval_warning(reg.load(path)),
             "testgraph's own registry is shipped unapproved",
         )
+
+    def test_the_registry_carries_spot_checks_for_the_integrity_guard(self):
+        """`select` hands `registry["spot_checks"]` to `integrity.check`. An
+        absent key yields `{}`, which silently no-ops the CALLER-COUNT check —
+        the only one of the three that catches the 2026-07-17 incident
+        `integrity.py` exists for, and the one `codegraph sync` cannot clear.
+        Both other shipped registries carry spot-checks and `propose` emits them
+        automatically; a hand-authored registry is the one way to omit them."""
+        for path in registry_files():
+            with self.subTest(registry=os.path.basename(path)):
+                spots = reg.load(path).get("spot_checks")
+                self.assertIsInstance(spots, dict, f"{path} has no spot_checks")
+                self.assertTrue(spots, f"{path} has an empty spot_checks")
+                for name, spec in spots.items():
+                    self.assertIsInstance(spec, dict, f"{path}:{name}")
+                    self.assertIsInstance(
+                        spec.get("min_caller_edges"), int, f"{path}:{name}"
+                    )
+                    self.assertTrue(
+                        (spec.get("file") or "").strip(),
+                        f"{path}:{name} has no file, so the symbol is matched "
+                        f"by bare name in any file",
+                    )
 
 
 if __name__ == "__main__":
