@@ -1387,20 +1387,38 @@ here than anywhere else.
 Found with the same structural sweep that found testgraph's own blind spot (Update 5):
 seed every node of each product file, run the impact closure, intersect with the entry
 map. **17 of 38 honeyslate product files reached no journey.** Most were expected — 6
-alembic migrations, 6 frontend files this document already excludes. Two were not:
+alembic migrations and **8** frontend files this document already excludes (the frontend count
+includes `svelte.config.js` and `vite.config.js`, omitted from an earlier draft of this
+tally). Two were not:
 
 | file | why it is a real gap |
 |---|---|
 | `app/main.py` | `lifespan` calls `scheduler.start()`. Break it and the auto-scheduler never runs — yet no journey selected for a change to it. **A recall bug, not a registration preference.** |
-| `app/routers/google.py` | a **live wired router** (`app.include_router(google.router)`) serving `/api/google/status` and `/selftest`, with no journey at all |
+| `app/routers/google.py` | a **live wired router** (`app.include_router(google.router)`) serving `/api/google/status` and `/api/google/selftest`, with no journey at all |
+
+A third gap, found in review of this change rather than by the sweep: **`delete_task`**, a
+live `@router.delete("/tasks/{task_id}")` handler that this document *already listed* at
+line 504 as missed by the hand registry. The file-level sweep structurally could not see
+it — `routers/tasks.py` is covered by J1–J5, so the file reaches journeys while that one
+symbol does not. Seeding `delete_task` alone answered `NONE`. It joins J3, which costs no
+new fan-out because that file is already reached.
 
 Closed by extending the **entries of existing journeys**, deliberately not by adding
-journeys: `lifespan` and `create_app` join J8, and the two Google diagnostics join J7
-(same integration as `gcal_push`). Adding a J9 would have changed the registry's journey
-set, which is what `labels_honeyslate.json` and the published "mean 3.33 of 8 journeys
-named" are both written against. `app/cli.py` stays uncovered and is now *declared* — CLI
-entry points are the first item on the proposer's own blind-spot list, and signedintake
-and testgraph declare the same class.
+journeys: `lifespan` joins J8, the two Google diagnostics join J7, `delete_task` joins J3.
+`create_app` was considered and **rejected** — measured, it produces a fan-out identical
+to `lifespan`, so it buys nothing for selection while widening the `ast_oracle`.
+`app/cli.py` stays uncovered and is now *declared*, in a structured `blind_spots` key
+rather than only in prose.
+
+**The cost of the J8 change, measured and accepted.** `impacted_closure` expands a file
+node into every symbol it contains, so `file:app/main.py` enters the closure of every
+router. Five files that previously did not name J8 now do — `routers/tasks.py`,
+`routers/auth.py`, `auth_service.py`, `schemas.py`, `scheduling.py` — at confidence 0.9,
+**above `LOW_CONFIDENCE`, so not flagged `verify_manually`**. An engineer editing only
+`routers/auth.py` is now confidently told to check the auto-scheduler. That is a real
+precision cost paid to close a real recall gap, and this project ranks recall first — but
+it is a cost, not a free win, and it is recorded here because nothing in the harness
+output would have surfaced it.
 
 **Re-measured, because the registry changed.** `harness/accuracy.py` reads
 `journeys/honeyslate.json` live, so any edit silently re-points every published number at
@@ -1413,15 +1431,44 @@ were run through the harness back to back:
 | before | 16 | 1.00 | 0.68 |
 | **after** | **20** | **1.00** | **0.68** |
 
-S1 PASS either way, and the honest reason precision did not move is worth stating: the
-five labeled commits barely touch the newly covered files. This shows the entries cost
-nothing **on the scored set**, not that widening entries is free in general. A future
-commit touching `app/main.py` will now select J8 — which is the entire point, and is
-exactly the case the labeled set does not contain.
+S1 PASS either way — but **"precision unchanged" is masked, not tested**, and an earlier
+draft of this section got that wrong. It said the five labeled commits "barely touch the
+newly covered files", which is true and irrelevant. The real reason is stronger: **J8 was
+already selected on every scored commit before the change.** The labeled set is therefore
+structurally incapable of registering the five-file fan-out above, whatever files the new
+entries cover. `accuracy.py` cannot see this cost, so its agreement is not evidence.
+
+**The second harness was not re-run at first, which is the same defect this section cites
+three lines above.** `harness/seed_regressions.py` also reads this registry live, for both
+the selector and `ast_oracle.journey_oracle`, and it feeds the "20 sites … mean 3.33 of 8
+journeys named" figures near line 350. Re-run, A/B at the same base:
+
+| registry | min recall | mean worst rank | mean journeys named | verdict |
+|---|---|---|---|---|
+| before, base `3f46a54` | 1.00 | 6.00 | **8.00 / 8** | PASS |
+| after, base `3f46a54` | 1.00 | 6.07 | **8.00 / 8** | PASS |
+
+This change moves worst rank by 0.07 and nothing else. **But note what the A/B exposed
+that has nothing to do with this change:** the published "3.33 of 8, worst rank 3.17" was
+measured at base `1cd0385`, and the harness runs at whatever honeyslate's HEAD is now
+(`3f46a54`). At the current base *both* registries select 8 of 8. The published figures
+are stale because **the target repo moved**, not because the registry did — a second way
+for a number to describe a world that no longer exists, and one that no registry
+discipline would have caught. The run reports it as 3 `STALE EXCUSES`, adjudicated at a
+different base.
+
+**The shipped map was regenerated, and that was the finding that mattered most.**
+`maps/honeyslate.md` is what the `testgraph-verify` skill reads — not a live index. Before
+regeneration it had no section for `app/main.py` or `routers/google.py` at all and its
+legend still read `J7 … entry: gcal_push`, so an agent editing `main.py` would have gotten
+"unknown, escalate": the exact pre-fix behaviour, from a registry that had been fixed. The
+first draft of this section claimed "verified after the edit" on the strength of `select`
+against a live index, which does not exercise that path. Now 149 symbols across 23 files
+(was 21), with both files present.
 
 Verified after the edit: all 8 journeys resolve, 20 entry nodes, no `unchecked_entries`,
 no approval warning, and `app/main.py -> [J8]`, `routers/google.py -> [J7]`,
-`app/cli.py -> NONE` (declared).
+`delete_task -> [J3]`, `app/cli.py -> NONE` (declared).
 
 ## Known Limitations
 

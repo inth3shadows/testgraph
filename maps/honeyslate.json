@@ -2,8 +2,11 @@
   "meta": {
     "repo": "/home/ericm/personal_projects/honeyslate/main",
     "schema": 8,
-    "commit": "1cd0385",
-    "symbols": 137
+    "commit": "3f46a54",
+    "symbols": 149,
+    "warnings": [],
+    "unchecked_entries": [],
+    "registry_approval": null
   },
   "files": {
     "backend/app/auth_service.py": [
@@ -15,10 +18,12 @@
           7
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -30,10 +35,12 @@
           13
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -45,10 +52,12 @@
           30
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -60,10 +69,12 @@
           53
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }
@@ -267,6 +278,36 @@
         "verify_manually": []
       },
       {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          16,
+          16
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "engine",
+        "kind": "variable",
+        "lines": [
+          20,
+          20
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
         "symbol": "SessionLocal",
         "kind": "variable",
         "lines": [
@@ -308,7 +349,9 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J7",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -316,7 +359,9 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }
@@ -335,7 +380,9 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J7",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -343,7 +390,9 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -360,7 +409,8 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -368,7 +418,8 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -385,7 +436,9 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J7",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -393,7 +446,9 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }
@@ -422,10 +477,12 @@
           133
         ],
         "journeys": [
-          "J7"
+          "J7",
+          "J8"
         ],
         "confidence": {
-          "J7": 0.9
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -437,10 +494,12 @@
           146
         ],
         "journeys": [
-          "J7"
+          "J7",
+          "J8"
         ],
         "confidence": {
-          "J7": 0.9
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -452,10 +511,12 @@
           187
         ],
         "journeys": [
-          "J7"
+          "J7",
+          "J8"
         ],
         "confidence": {
-          "J7": 0.9
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }
@@ -570,6 +631,23 @@
         "verify_manually": []
       },
       {
+        "symbol": "service_account_email",
+        "kind": "function",
+        "lines": [
+          39,
+          46
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      },
+      {
         "symbol": "_build_service",
         "kind": "function",
         "lines": [
@@ -631,9 +709,11 @@
           109
         ],
         "journeys": [
+          "J7",
           "J8"
         ],
         "confidence": {
+          "J7": 0.9,
           "J8": 0.9
         },
         "verify_manually": []
@@ -650,14 +730,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -777,6 +859,55 @@
           "J8": 0.9
         },
         "verify_manually": []
+      },
+      {
+        "symbol": "selftest",
+        "kind": "function",
+        "lines": [
+          277,
+          300
+        ],
+        "journeys": [
+          "J7",
+          "J8"
+        ],
+        "confidence": {
+          "J7": 0.9,
+          "J8": 0.9
+        },
+        "verify_manually": []
+      }
+    ],
+    "backend/app/main.py": [
+      {
+        "symbol": "lifespan",
+        "kind": "function",
+        "lines": [
+          21,
+          26
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "app",
+        "kind": "variable",
+        "lines": [
+          57,
+          57
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.9
+        },
+        "verify_manually": []
       }
     ],
     "backend/app/models.py": [
@@ -821,14 +952,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.7,
           "J2": 0.7,
           "J3": 0.7,
           "J4": 0.7,
-          "J5": 0.7
+          "J5": 0.7,
+          "J8": 0.7
         },
         "verify_manually": []
       },
@@ -874,7 +1007,9 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J7",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -882,7 +1017,9 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -944,14 +1081,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -994,14 +1133,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -1184,10 +1325,12 @@
           97
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -1203,14 +1346,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }
@@ -1551,10 +1696,12 @@
           7
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.95
+          "J6": 0.95,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -1566,10 +1713,12 @@
           10
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.95
+          "J6": 0.95,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -1724,6 +1873,68 @@
         "verify_manually": []
       }
     ],
+    "backend/app/routers/google.py": [
+      {
+        "symbol": "_settings",
+        "kind": "variable",
+        "lines": [
+          18,
+          18
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "GoogleStatus",
+        "kind": "class",
+        "lines": [
+          21,
+          24
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 0.9
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "google_status",
+        "kind": "function",
+        "lines": [
+          28,
+          33
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 1.0
+        },
+        "verify_manually": []
+      },
+      {
+        "symbol": "google_selftest",
+        "kind": "function",
+        "lines": [
+          37,
+          44
+        ],
+        "journeys": [
+          "J7"
+        ],
+        "confidence": {
+          "J7": 1.0
+        },
+        "verify_manually": []
+      }
+    ],
     "backend/app/routers/tasks.py": [
       {
         "symbol": "sqlalchemy.orm",
@@ -1737,14 +1948,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.95,
           "J2": 0.95,
           "J3": 0.95,
           "J4": 0.95,
-          "J5": 0.95
+          "J5": 0.95,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -1926,6 +2139,21 @@
         "verify_manually": []
       },
       {
+        "symbol": "delete_task",
+        "kind": "function",
+        "lines": [
+          179,
+          189
+        ],
+        "journeys": [
+          "J3"
+        ],
+        "confidence": {
+          "J3": 1.0
+        },
+        "verify_manually": []
+      },
+      {
         "symbol": "reschedule_task",
         "kind": "function",
         "lines": [
@@ -2063,6 +2291,21 @@
           "J8": 1.0
         },
         "verify_manually": []
+      },
+      {
+        "symbol": "shutdown",
+        "kind": "function",
+        "lines": [
+          123,
+          127
+        ],
+        "journeys": [
+          "J8"
+        ],
+        "confidence": {
+          "J8": 0.85
+        },
+        "verify_manually": []
       }
     ],
     "backend/app/scheduling.py": [
@@ -2078,14 +2321,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2101,14 +2346,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }
@@ -2126,14 +2373,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2149,14 +2398,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2187,14 +2438,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2210,14 +2463,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2233,14 +2488,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2256,14 +2513,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2279,14 +2538,16 @@
           "J2",
           "J3",
           "J4",
-          "J5"
+          "J5",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
           "J2": 0.9,
           "J3": 0.9,
           "J4": 0.9,
-          "J5": 0.9
+          "J5": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }
@@ -2305,7 +2566,9 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J7",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -2313,7 +2576,9 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2330,7 +2595,9 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J7",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -2338,7 +2605,9 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2379,10 +2648,12 @@
           28
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2394,10 +2665,12 @@
           32
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2409,10 +2682,12 @@
           36
         ],
         "journeys": [
-          "J6"
+          "J6",
+          "J8"
         ],
         "confidence": {
-          "J6": 0.9
+          "J6": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       },
@@ -2429,7 +2704,9 @@
           "J3",
           "J4",
           "J5",
-          "J6"
+          "J6",
+          "J7",
+          "J8"
         ],
         "confidence": {
           "J1": 0.9,
@@ -2437,7 +2714,9 @@
           "J3": 0.9,
           "J4": 0.9,
           "J5": 0.9,
-          "J6": 0.9
+          "J6": 0.9,
+          "J7": 0.9,
+          "J8": 0.9
         },
         "verify_manually": []
       }

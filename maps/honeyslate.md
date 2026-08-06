@@ -1,6 +1,6 @@
 # Journey map — which user journeys depend on which symbols
 
-Target: `/home/ericm/personal_projects/honeyslate/main` · index schema 8 · generated from commit `1cd0385`
+Target: `/home/ericm/personal_projects/honeyslate/main` · index schema 8 · generated from commit `3f46a54`
 
 Look up the symbols you changed **by name**. Every journey listed for them may have changed behavior and is worth verifying. This is **recall-first**: a shared symbol legitimately fans out to many journeys.
 
@@ -12,12 +12,12 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 - **J1** submit task — entry: `create_task`
 - **J2** browse tasks — entry: `list_tasks`, `get_task`, `list_task_types`
-- **J3** edit task — entry: `patch_task`
+- **J3** edit task — entry: `patch_task`, `delete_task`
 - **J4** reschedule — entry: `reschedule_task`
 - **J5** comments — entry: `list_comments`, `add_comment`
 - **J6** auth / sign-in — entry: `mint_magic_link`, `request_link`, `consume`, `logout`, `me`
-- **J7** gcal sync — entry: `gcal_push`
-- **J8** auto-scheduler — entry: `sweep`, `start`
+- **J7** gcal sync — entry: `gcal_push`, `google_status`, `google_selftest`
+- **J8** auto-scheduler — entry: `sweep`, `start`, `lifespan`
 
 ## Symbols by file
 
@@ -25,10 +25,10 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `sqlalchemy.orm` | J6 | 7–7 |
-| `_settings` | J6 | 13–13 |
-| `create_magic_link` | J6 | 16–30 |
-| `consume_magic_link` | J6 | 33–53 |
+| `sqlalchemy.orm` | J6 J8 | 7–7 |
+| `_settings` | J6 J8 | 13–13 |
+| `create_magic_link` | J6 J8 | 16–30 |
+| `consume_magic_link` | J6 J8 | 33–53 |
 
 ### `backend/app/config.py`
 
@@ -46,25 +46,27 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `collections.abc` | J1 J2 J3 J4 J5 J6 J7 J8 | 4–4 |
 | `sqlalchemy.orm` | J1 J2 J3 J4 J5 J6 J7 J8 | 7–7 |
 | `Base` | J1 J2 J3 J4 J5 J6 J7 J8 | 12–13 |
+| `_settings` | J8 | 16–16 |
+| `engine` | J8 | 20–20 |
 | `SessionLocal` | J1 J2 J3 J4 J5 J6 J7 J8 | 22–22 |
-| `get_db` | J1 J2 J3 J4 J5 J6 | 25–31 |
+| `get_db` | J1 J2 J3 J4 J5 J6 J7 J8 | 25–31 |
 
 ### `backend/app/deps.py`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `sqlalchemy.orm` | J1 J2 J3 J4 J5 J6 | 6–6 |
-| `require_user` | J1 J2 J3 J4 J5 J6 | 34–37 |
-| `require_operator` | J1 J2 J3 J4 J5 J6 | 40–43 |
+| `sqlalchemy.orm` | J1 J2 J3 J4 J5 J6 J7 J8 | 6–6 |
+| `require_user` | J1 J2 J3 J4 J5 J6 J8 | 34–37 |
+| `require_operator` | J1 J2 J3 J4 J5 J6 J7 J8 | 40–43 |
 
 ### `backend/app/gcal_sync.py`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
 | `sync_channel` | J8 | 36–91 |
-| `reconcile` | J7 | 94–133 |
-| `_parse_gcal_time` | J7 | 136–146 |
-| `_apply_event` | J7 | 149–187 |
+| `reconcile` | J7 J8 | 94–133 |
+| `_parse_gcal_time` | J7 J8 | 136–146 |
+| `_apply_event` | J7 J8 | 149–187 |
 
 ### `backend/app/google_calendar.py`
 
@@ -74,10 +76,11 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `SCOPES` | J1 J2 J3 J4 J5 J7 J8 | 28–28 |
 | `CALENDAR_SUMMARY` | J1 J2 J3 J4 J5 J7 J8 | 29–29 |
 | `calendar_configured` | J1 J2 J3 J4 J5 J7 J8 | 33–36 |
+| `service_account_email` | J7 J8 | 39–46 |
 | `_build_service` | J1 J2 J3 J4 J5 J7 J8 | 49–66 |
 | `_resolve_calendar` | J1 J2 J3 J4 J5 J7 J8 | 69–105 |
-| `_event_time` | J8 | 108–109 |
-| `delete_event` | J1 J2 J3 J4 J5 | 112–121 |
+| `_event_time` | J7 J8 | 108–109 |
+| `delete_event` | J1 J2 J3 J4 J5 J8 | 112–121 |
 | `push_block` | J8 | 124–146 |
 | `get_managed_calendar_id` | J7 J8 | 149–152 |
 | `SyncTokenExpiredError` | J7 J8 | 160–161 |
@@ -85,20 +88,28 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `stop_watch` | J7 J8 | 201–211 |
 | `initial_sync` | J7 J8 | 214–234 |
 | `list_events_incremental` | J7 J8 | 237–274 |
+| `selftest` | J7 J8 | 277–300 |
+
+### `backend/app/main.py`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `lifespan` | J8 | 21–26 |
+| `app` | J8 | 57–57 |
 
 ### `backend/app/models.py`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
 | `sqlalchemy.orm` | J1 J2 J3 J4 J5 J6 J7 J8 | 22–22 |
-| `STATUSES` | J1 J2 J3 J4 J5 | 28–28 |
+| `STATUSES` | J1 J2 J3 J4 J5 J8 | 28–28 |
 | `_ts` | J1 J2 J3 J4 J5 J6 J7 J8 | 32–33 |
-| `User` | J1 J2 J3 J4 J5 J6 | 36–45 |
+| `User` | J1 J2 J3 J4 J5 J6 J7 J8 | 36–45 |
 | `Session` | J1 J2 J3 J4 J5 J6 J7 J8 | 48–60 |
 | `MagicLink` | J6 J8 | 63–73 |
-| `TaskType` | J1 J2 J3 J4 J5 | 76–81 |
+| `TaskType` | J1 J2 J3 J4 J5 J8 | 76–81 |
 | `Task` | J1 J2 J3 J4 J5 J6 J8 | 84–121 |
-| `Comment` | J1 J2 J3 J4 J5 | 124–141 |
+| `Comment` | J1 J2 J3 J4 J5 J8 | 124–141 |
 | `CalendarBlock` | J1 J2 J3 J4 J5 J7 J8 | 144–160 |
 | `GcalChannel` | J7 J8 | 163–181 |
 
@@ -111,8 +122,8 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `digest_configured` | J1 J2 J3 J4 J5 J6 J8 | 24–25 |
 | `_send_email` | J1 J2 J3 J4 J5 J6 J8 | 46–55 |
 | `send_scheduled` | J3 J8 | 58–75 |
-| `send_login_link` | J6 | 89–97 |
-| `send_task_update` | J1 J2 J3 J4 J5 | 100–117 |
+| `send_login_link` | J6 J8 | 89–97 |
+| `send_task_update` | J1 J2 J3 J4 J5 J8 | 100–117 |
 
 ### `backend/app/placement.py`
 
@@ -136,8 +147,8 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `fastapi.responses` | J6 | 7–7 |
-| `sqlalchemy.orm` | J6 | 10–10 |
+| `fastapi.responses` | J6 J8 | 7–7 |
+| `sqlalchemy.orm` | J6 J8 | 10–10 |
 | `_settings` | J6 | 23–23 |
 | `MagicLinkResponse` | J6 | 30–31 |
 | `RequestLinkResponse` | J6 | 34–35 |
@@ -149,11 +160,20 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `logout` | J6 | 123–137 |
 | `me` | J6 | 141–142 |
 
+### `backend/app/routers/google.py`
+
+| symbol | journeys | lines (at generation — stale hint) |
+|---|---|---|
+| `_settings` | J7 | 18–18 |
+| `GoogleStatus` | J7 | 21–24 |
+| `google_status` | J7 | 28–33 |
+| `google_selftest` | J7 | 37–44 |
+
 ### `backend/app/routers/tasks.py`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `sqlalchemy.orm` | J1 J2 J3 J4 J5 | 16–16 |
+| `sqlalchemy.orm` | J1 J2 J3 J4 J5 J8 | 16–16 |
 | `_settings` | J4 | 37–37 |
 | `_fmt_dt` | J4 | 40–43 |
 | `_notify_others` | J3 J4 J5 | 46–57 |
@@ -165,6 +185,7 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `get_task` | J2 | 97–98 |
 | `create_task` | J1 | 102–120 |
 | `patch_task` | J3 | 124–175 |
+| `delete_task` | J3 | 179–189 |
 | `reschedule_task` | J4 | 193–215 |
 | `list_comments` | J5 | 219–227 |
 | `add_comment` | J5 | 231–245 |
@@ -184,38 +205,39 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `_settings` | J8 | 28–28 |
 | `sweep` | J8 | 32–81 |
 | `start` | J8 | 84–120 |
+| `shutdown` | J8 | 123–127 |
 
 ### `backend/app/scheduling.py`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `_settings` | J1 J2 J3 J4 J5 | 8–8 |
-| `compute_due_date` | J1 J2 J3 J4 J5 | 11–22 |
+| `_settings` | J1 J2 J3 J4 J5 J8 | 8–8 |
+| `compute_due_date` | J1 J2 J3 J4 J5 J8 | 11–22 |
 
 ### `backend/app/schemas.py`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `TaskCreate` | J1 J2 J3 J4 J5 | 11–17 |
-| `TaskPatch` | J1 J2 J3 J4 J5 | 20–34 |
+| `TaskCreate` | J1 J2 J3 J4 J5 J8 | 11–17 |
+| `TaskPatch` | J1 J2 J3 J4 J5 J8 | 20–34 |
 | `status_is_valid` | J3 | 33–34 |
-| `TaskOut` | J1 J2 J3 J4 J5 | 37–53 |
-| `TaskReschedule` | J1 J2 J3 J4 J5 | 56–60 |
-| `TaskTypeOut` | J1 J2 J3 J4 J5 | 63–67 |
-| `CommentCreate` | J1 J2 J3 J4 J5 | 70–71 |
-| `CommentOut` | J1 J2 J3 J4 J5 | 74–82 |
+| `TaskOut` | J1 J2 J3 J4 J5 J8 | 37–53 |
+| `TaskReschedule` | J1 J2 J3 J4 J5 J8 | 56–60 |
+| `TaskTypeOut` | J1 J2 J3 J4 J5 J8 | 63–67 |
+| `CommentCreate` | J1 J2 J3 J4 J5 J8 | 70–71 |
+| `CommentOut` | J1 J2 J3 J4 J5 J8 | 74–82 |
 
 ### `backend/app/security.py`
 
 | symbol | journeys | lines (at generation — stale hint) |
 |---|---|---|
-| `_settings` | J1 J2 J3 J4 J5 J6 | 18–18 |
-| `_serializer` | J1 J2 J3 J4 J5 J6 | 19–19 |
+| `_settings` | J1 J2 J3 J4 J5 J6 J7 J8 | 18–18 |
+| `_serializer` | J1 J2 J3 J4 J5 J6 J7 J8 | 19–19 |
 | `now` | J1 J2 J3 J4 J5 J6 J7 J8 | 22–23 |
-| `new_token` | J6 | 26–28 |
-| `hash_token` | J6 | 31–32 |
-| `sign_session` | J6 | 35–36 |
-| `unsign_session` | J1 J2 J3 J4 J5 J6 | 39–44 |
+| `new_token` | J6 J8 | 26–28 |
+| `hash_token` | J6 J8 | 31–32 |
+| `sign_session` | J6 J8 | 35–36 |
+| `unsign_session` | J1 J2 J3 J4 J5 J6 J7 J8 | 39–44 |
 
 ### `frontend/src/lib/api.js`
 
@@ -263,4 +285,4 @@ Look up the symbols you changed **by name**. Every journey listed for them may h
 | `handleOnline` | J8! | 99–101 |
 | `patch` | J8! | 158–165 |
 
-_137 symbols across 21 files reach at least one journey. Symbols reaching none are omitted._
+_149 symbols across 23 files reach at least one journey. Symbols reaching none are omitted._
