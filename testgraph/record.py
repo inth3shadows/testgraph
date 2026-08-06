@@ -30,23 +30,40 @@ from . import registry as reg
 
 
 def known_journeys(repo, registry_path=None):
-    """{journey_id: name} for a repo, or None if it has no registry.
+    """({journey_id: name}, None) for a repo, or (None, why) if there is none.
 
     An unknown id is rejected rather than stored. A typo'd `--journey J33` in a
     write-only log is invisible forever, and it does not just lose one row: it
     silently deflates that journey's failure count, which is the number this
-    ledger exists to produce."""
+    ledger exists to produce.
+
+    "No file matched this target" and "the file is there and will not parse" are
+    reported apart. `json.JSONDecodeError` is a `ValueError`, so a trailing comma
+    in an approved registry used to surface as "no journey registry — draft one",
+    telling the user to write a file they already have. That same typo also
+    silently disables the pre-push hook, since `reg.resolve_for_repo` swallows
+    the identical exception — so the misleading message hides a second fault."""
+    name = reg.repo_name(repo)
     registry_path = registry_path or reg.resolve_for_repo(repo)
     if registry_path is None:
-        return None
+        return None, (
+            f"no journey registry for {name} — draft one with "
+            f"`python3 -m testgraph.propose --repo {repo}`"
+        )
     try:
         registry = reg.load(registry_path)
-    except (OSError, ValueError):
-        return None
+    except OSError as exc:
+        return None, f"cannot read {registry_path}: {exc}"
+    except ValueError as exc:
+        return None, (
+            f"{registry_path} exists but will not parse: {exc}. Note this also "
+            f"disables the pre-push hook for {name} — fix the file, do not draft "
+            f"a new one."
+        )
     journeys = registry.get("journeys") or {}
     if not isinstance(journeys, dict):
-        return None
-    return {jid: (j or {}).get("name", "") for jid, j in journeys.items()}
+        return None, f"{registry_path} has no `journeys` object"
+    return {jid: (j or {}).get("name", "") for jid, j in journeys.items()}, None
 
 
 def add_outcome(repo, journey, verdict, commit=None, note=None, registry_path=None):
@@ -57,21 +74,28 @@ def add_outcome(repo, journey, verdict, commit=None, note=None, registry_path=No
         return None, f"no such repo: {repo}"
 
     name = reg.repo_name(repo)
-    known = known_journeys(repo, registry_path)
+    known, why = known_journeys(repo, registry_path)
     if known is None:
-        return None, (
-            f"no journey registry for {name} — draft one with "
-            f"`python3 -m testgraph.propose --repo {repo}`"
-        )
+        return None, why
     if journey not in known:
         return None, (
             f"unknown journey {journey!r} for {name}; "
             f"registry has {', '.join(sorted(known))}"
         )
 
-    row = ledger.outcome_row(
-        name, ledger.resolve_commit(repo, commit or "HEAD"), journey, verdict, note
-    )
+    # An unresolvable rev is refused rather than stored under its literal
+    # spelling. `--repo ~/personal_projects/honeyslate` (the bare-worktree
+    # PARENT — a directory, and repo_name still resolves it, so every other
+    # check passes) has no work tree, and every outcome used to land under the
+    # key "HEAD" where unrelated commits joined to each other.
+    sha = ledger.resolve_commit(repo, commit or "HEAD")
+    if sha is None:
+        return None, (
+            f"cannot resolve {commit or 'HEAD'!r} to a commit in {repo} — "
+            f"an unjoinable key would silently sit in `unasked` forever"
+        )
+
+    row = ledger.outcome_row(name, sha, journey, verdict, note)
     if not ledger.append(row):
         return None, f"could not write {ledger.path()}"
     return row, None
@@ -107,6 +131,13 @@ def render_summary(summary, known=None):
             f"  ! {summary['missed']} SILENT MISS(ES) — a journey failed on a commit "
             f"whose selection did not name it"
         )
+    unbaselined = sum(j["unbaselined"] for j in summary["journeys"].values())
+    if unbaselined:
+        lines.append(
+            f"  {unbaselined} failure(s) NOT judged — a selection answered, but "
+            f"nothing records the journey passing at that push's base, so the "
+            f"breakage may predate the push. Run journeys per push to judge these."
+        )
 
     if summary["journeys"]:
         lines.append("  per journey:")
@@ -122,7 +153,8 @@ def render_summary(summary, known=None):
             lines.append(
                 f"    {jid}  {label:<20.20} runs {j['runs']:>3}  fail {j['failures']:>3}  "
                 f"caught {j['caught']:>3}  missed {j['missed']:>3}  "
-                f"unjudged {j['unjudged']:>3}  last {last}{flag}"
+                f"unasked {j['unasked']:>3}  unbaselined {j['unbaselined']:>3}  "
+                f"last {last}{flag}"
             )
 
     if not summary["ready_for_ranking"]:
@@ -238,7 +270,7 @@ def main(argv=None):
             f"{wrote['commit'][:9]} in {wrote['repo']}"
         )
     if args.summary:
-        print(render_summary(summary, known_journeys(args.repo, args.registry)))
+        print(render_summary(summary, known_journeys(args.repo, args.registry)[0]))
     return 0
 
 

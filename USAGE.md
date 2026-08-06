@@ -91,8 +91,14 @@ invisible forever, and it silently deflates the count this ledger exists to prod
 - **caught** — it failed and the selection for that commit named it.
 - **missed** — it failed, a selection exists for that commit, and it was not named.
   This is a real silent under-selection and is shouted, not tucked in a column.
-- **unjudged** — it failed on a commit with no selection row. testgraph was never
-  asked, so this is excluded from observed recall rather than blamed on it.
+- **unasked** — it failed on a commit no selection answered for. testgraph was
+  never asked, so this is excluded from observed recall rather than blamed on it.
+  A selection that reported `BLOCKED`, `ERROR`, `NO_INDEX` or `NO_REGISTRY` did
+  not answer either, and lands here too.
+- **unbaselined** — a selection answered, but nothing records the journey passing
+  at that push's *base*, so the breakage may predate the push. You only get to
+  call it a miss when you had a green baseline to regress from — which means
+  running journeys per push, not occasionally.
 
 Ranking does **not** consult this history yet. It will be worth wiring once 20
 commits carry both a selection and an outcome; below that the ledger reports how far

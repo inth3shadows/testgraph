@@ -73,8 +73,8 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
   for route-decorated handlers, index resolution, spot-check derivation, declared
   blind spots. Writes `approved: false`.
 - `testgraph/ledger.py` — the append-only `selection`/`outcome` store and the
-  `caught`/`missed`/`unjudged` join over it. Never raises; a torn line is skipped
-  rather than fatal.
+  `caught`/`missed`/`unasked`/`unbaselined` join over it. Never raises; a torn
+  line is skipped rather than fatal.
 - `testgraph/record.py` — the `outcome` writer and the `--summary` /
   `--export-kb` readers. Refuses a journey id the registry does not know.
 - `journeys/honeyslate.json` — 8 journeys (submit, browse, edit, reschedule,
@@ -677,19 +677,59 @@ an outcome log answers "did the app break". The value is the join on
 rather than measured: a journey that failed on a commit whose selection did not
 name it.
 
-### Three buckets for a failure, and why they must stay apart
+### Four buckets for a failure, and why they must stay apart
 
-- **caught** — the selection for that commit named the journey.
-- **missed** — a selection exists for that commit and did not name it. A real
-  silent under-selection, the one failure mode a recall-first selector must not
-  have.
-- **unjudged** — no selection row for that commit at all. testgraph was never
-  asked, so this says nothing about the selector.
+- **caught** — the selection for that push named the journey.
+- **missed** — the selection **answered** for that push, did not name the
+  journey, and the journey was **known-good at the push's base**. A real silent
+  under-selection, the one failure mode a recall-first selector must not have.
+- **unasked** — no selection answered for that commit. testgraph was never asked,
+  so this says nothing about it.
+- **unbaselined** — a selection answered, but nothing records the journey passing
+  at that push's base, so the breakage may predate the push.
 
-Collapsing `unjudged` into `missed` is the easy bug and it would be badly
-misleading: every failure recorded before the hook was installed would score as a
-recall miss. `observed_recall` is therefore `caught / (caught + missed)` and is
-`None` — not `0.0` — until something is actually judged.
+`observed_recall` is `caught / (caught + missed)` and is `None` — not `0.0` —
+until something is actually judged.
+
+The last two buckets are each a bug that was caught in review, and both had the
+same shape: a row that says nothing about the selector being counted as evidence
+against it.
+
+**`unasked` is not just "no row".** `hook.run` writes selection rows on four
+*non-answer* paths — `NO_REGISTRY`, `NO_INDEX`, `ERROR`, and `BLOCKED` — each with
+no `journey_ids`. Treating those as "asked, and it named nothing" meant a tripped
+integrity guard scored every later failure at that commit as a silent miss. Worse,
+it chained: one JSON typo in an approved registry makes `resolve_for_repo` return
+`None` (it swallows `ValueError`), so every push logs `NO_REGISTRY` and every
+subsequent failure is blamed on the selector. Only `status == "OK"` counts as an
+answer.
+
+**`unbaselined` exists because the join compares a delta against a state.** A
+`selection` row answers "what could `base..head` break" — a delta. An `outcome`
+row asserts "journey J is broken *at* this commit" — a state. Joining on the head
+commit alone scores this as a miss:
+
+> push A..B breaks J3, and the selection for B correctly **names** J3. Nobody runs
+> journeys. Push B..C touches only `README.md`, so the selection for C names
+> nothing. The developer runs J3 at `HEAD` (=C) — exactly what USAGE.md says to do
+> — and it fails, so it is recorded at C.
+
+The selector was right both times, and the old join reported a silent miss and
+dropped `observed_recall`. Requiring a recorded `pass` at the push's base before
+blaming the selector removes that: **you only get to call it a miss when you had a
+green baseline to regress from.** The cost is that misses stay rare unless
+journeys run on every push — which is the discipline this number needs in order
+to mean anything, so the cost is the point.
+
+Two smaller rules follow from the same principle. Observations are deduplicated
+on `(commit, journey)`, last verdict wins, so re-recording one failure does not
+multiply the headline count. And the commit key must be a 40-hex sha:
+`resolve_commit` returns `None` rather than the rev verbatim when git cannot
+answer, because `record --repo ~/personal_projects/honeyslate` (the bare-worktree
+*parent* — a directory whose `repo_name` still resolves, so every other check
+passes) filed every outcome under the literal key `"HEAD"`, where two unrelated
+commits' failures joined to each other and produced one fabricated catch and one
+fabricated miss.
 
 ### Storage: why local JSONL, and not the KB as #10 decided
 
@@ -726,6 +766,11 @@ signal. `summarize()` therefore exposes `ready_for_ranking`, gated at
 the smallest set that has yet said anything falsifiable about this selector, and a
 ranking signal is a weaker instrument than that eval rather than a stronger one.
 Below the threshold, `--summary` prints the distance to it.
+
+The gate needs **both** enough judged commits and at least one judged *failure*,
+and `skip` verdicts count toward neither. Twenty commits' worth of "deliberately
+did not run this" used to flip the flag while carrying zero failure evidence —
+which is the only quantity the threshold is actually reasoning about.
 
 `invocations.jsonl` is still read if present, as `selection` rows, so no install
 loses its history to the rename.

@@ -115,8 +115,9 @@ python3 -m testgraph.record --repo <path> --summary
 Joined on `(repo, commit)`, the two kinds produce the one number the project has so
 far asserted rather than measured: a journey that **failed on a commit whose selection
 did not name it** — a silent under-selection. A failure on a commit testgraph was
-never asked about is counted separately, as `unjudged`, because it says nothing about
-the selector.
+never asked about is counted separately, as `unasked`, because it says nothing about
+the selector — as is one where nothing records the journey passing at that push's base
+(`unbaselined`), since the breakage may predate the push.
 
 ## Project Structure
 
