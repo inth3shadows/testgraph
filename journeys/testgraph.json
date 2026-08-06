@@ -1,0 +1,68 @@
+{
+  "target": "testgraph",
+  "note": "Hand-authored 2026-08-06, NOT drafted by testgraph.propose — `propose --repo .` found 0 route handlers and said so, correctly: testgraph is a CLI, and CLI entry points are the first item on its own declared blind-spot list. One journey per CLI surface, entries being each module's `main` plus the one function that carries the surface's real work (so a change to that function is named even if `main` is untouched).\n\nWHY THIS REGISTRY EXISTS, AND WHAT IT IS NOT EVIDENCE FOR: the ledger held zero rows because the only two repos with approved registries — honeyslate and signedintake — have not been pushed to since 2026-07-19, and hooks/install.sh only installs into repos that have one. testgraph is the most actively pushed repo on this box and was the one repo the hook did not cover. This registry closes that: it makes the selection -> outcome pipeline produce joinable rows at all. It is a LIVENESS test, not an accuracy test. Do not quote testgraph's observed_recall as the tool's accuracy figure: the instrument and the target are the same repo, so a good number here is not independent evidence the way honeyslate and signedintake are. Selectivity, unlike recall, IS reportable — `harness/selectivity.py` builds a fresh per-commit index and never sees this registry's authorship — and it was measured on 2026-08-06 over the last 20 commits of main: mean 2.07/6 (34.4%) over the 15 commits that touch product code, 65.6% of journey-runs avoided; 1.55/6 (25.8%) over all 20. That sits beside signedintake's 2.21/8 and honeyslate's 3.4/8 rather than above them, so the earlier guess that a small stdlib codebase would be a trivially easier target was wrong and is not the caveat to carry. The caveat to carry is self-reference.\n\nKNOWN BLIND SPOT, AND IT IS A REAL ONE: `testgraph/db.py` and `testgraph/registry.py` are reachable from NO journey. Seeding every node in either file and running the full impacted closure intersects the entry map in zero nodes — a commit rewriting the whole of db.py, which is the graph traversal this tool IS, answers `journeys to test: NONE` with `status: OK` and `recall_degraded: false`. Measured, not suspected: closure of all 14 db.py nodes = 14 nodes (it never leaves the file) and all 24 registry.py nodes = 24, against ledger.py's 257 -> all six journeys. Cause is not the registry and cannot be fixed here: codegraph does not resolve calls through a module bound under an ALIAS. `from . import ledger` then `ledger.append(...)` links; `from . import db as dbmod` then `dbmod.connect(...)` does not, because the local name no longer matches the module name. Measured across all five same-package modules called as `module.attr()`: registry.py 38 call sites -> 0 cross-file inbound edges, db.py 18 -> 0, select.py 6 -> 1, against ledger.py 10 -> 44 and integrity.py 3 -> 15. Not strictly all-or-nothing (select.py keeps one edge) but the same collapse. Checked separately and worth recording: honeyslate is NOT exposed to this — its 9 aliased imports all alias a symbol (`Session as DbSession`), never a module, so the `alias.attr()` form never arises and the accuracy figures measured there stand. Adding these files' symbols as journey `entries` would manufacture the right answer out of a false claim about what an entry is, so it is deliberately not done. Until the indexer links aliased imports, treat a NONE that follows a db.py or registry.py change as UNKNOWN, and note that the selectivity figures in TECHNICAL.md's Update 5 do not cover this case: no commit in that 20-commit window touched either file alone.\n\nKnowingly uncovered, and each for a reason that has no fix in this file: (1) hooks/install.sh and hooks/pre-push are shell entry points with no symbols in the index — the same class as signedintake's scripts/pg-backup.sh; the pre-push template's behaviour is pinned by tests/test_hook.py instead. (2) skills/testgraph-verify/SKILL.md is the skill contract, markdown with no symbols; tests/test_skill_contract.py pins it. (3) harness/plugin/tgtrace.py is a pytest plugin loaded by name via `-p`, reached by pytest's plugin loader rather than by any call edge, so no entry symbol registers it; it is reached indirectly through J6's trace.run, which passes it. (4) harness/fixtures/dyndemo/ is a fixture repo, deliberately not product.",
+  "approved": true,
+  "proposed_by": "hand-authored",
+  "codegraph_schema_version": 8,
+  "spot_checks": {
+    "append": { "min_caller_edges": 5, "file": "testgraph/ledger.py" },
+    "StampError": { "min_caller_edges": 4, "file": "testgraph/export.py" }
+  },
+  "journeys": {
+    "J1": {
+      "name": "pre-push hook names what a push could break",
+      "entries": [
+        { "name": "main", "file": "testgraph/hook.py" },
+        { "name": "run", "file": "testgraph/hook.py" },
+        { "name": "render", "file": "testgraph/hook.py" }
+      ],
+      "route": ["CLI python3 -m testgraph.hook", "GIT-HOOK pre-push"]
+    },
+    "J2": {
+      "name": "developer asks what a diff could break",
+      "entries": [
+        { "name": "main", "file": "testgraph/select.py" },
+        { "name": "select", "file": "testgraph/select.py" }
+      ],
+      "route": ["CLI python3 -m testgraph.select"]
+    },
+    "J3": {
+      "name": "draft a journey registry for a new repo",
+      "entries": [
+        { "name": "main", "file": "testgraph/propose.py" },
+        { "name": "propose", "file": "testgraph/propose.py" }
+      ],
+      "route": ["CLI python3 -m testgraph.propose"]
+    },
+    "J4": {
+      "name": "export the journey map the skill reads",
+      "entries": [
+        { "name": "main", "file": "testgraph/export.py" },
+        { "name": "build_map", "file": "testgraph/export.py" },
+        { "name": "render_markdown", "file": "testgraph/export.py" }
+      ],
+      "route": ["CLI python3 -m testgraph.export"]
+    },
+    "J5": {
+      "name": "record journey outcomes and read observed recall",
+      "entries": [
+        { "name": "main", "file": "testgraph/record.py" },
+        { "name": "add_outcome", "file": "testgraph/record.py" },
+        { "name": "render_summary", "file": "testgraph/record.py" }
+      ],
+      "route": ["CLI python3 -m testgraph.record"]
+    },
+    "J6": {
+      "name": "measure the selector against ground truth",
+      "entries": [
+        { "name": "main", "file": "harness/accuracy.py" },
+        { "name": "main", "file": "harness/selectivity.py" },
+        { "name": "main", "file": "harness/ground_truth.py" },
+        { "name": "main", "file": "harness/trace.py" },
+        { "name": "main", "file": "harness/couple.py" },
+        { "name": "main", "file": "harness/seed_regressions.py" }
+      ],
+      "route": ["CLI python3 harness/accuracy.py", "CLI python3 harness/ground_truth.py"]
+    }
+  }
+}

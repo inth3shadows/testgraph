@@ -136,7 +136,9 @@ approving it. Until someone approves it, every run prints `UNAPPROVED REGISTRY` 
 the answers are usable, but a `NONE` may mean "that flow isn't registered yet"
 rather than "nothing broke".
 
-**Which projects does it support today?** honeyslate is the only reviewed one. Backend Python and
+**Which projects does it support today?** Three reviewed registries: honeyslate,
+signedintake, and testgraph itself. Only honeyslate has hand-labeled journeys, so it is
+the only one with a measured recall figure. Backend Python and
 frontend `.js/.ts/.jsx/.tsx/.svelte/.vue` changes are both analysed; the journeys
 themselves are registered against backend entry points.
 

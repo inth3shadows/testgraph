@@ -1168,9 +1168,129 @@ journeys. This ships the measurement, not the replacement — and one hand-label
 artifact survives by design, in its own visible file rather than as a heuristic
 inside `ground_truth.py`.
 
+### Update 5 — testgraph registers itself, and the ledger gets something to record (2026-08-06)
+
+The results ledger shipped in #57 and held **zero rows**. Not a bug — an absence of
+opportunity. `hooks/install.sh` installs only into repos with an approved registry, and
+the only two were honeyslate (last pushed 2026-07-17) and signedintake (2026-07-19).
+Meanwhile testgraph is the most actively pushed repo on this machine and was the one repo
+the hook did not cover. `journeys/testgraph.json` closes that.
+
+**`propose` correctly refused to write it.** `python3 -m testgraph.propose --repo .`
+reports `found 0 route handler(s) -> 0 draft journey(s)` and names the reason from its own
+blind-spot list: *CLI entry points and management commands*. testgraph has no decorator
+routes and no Next.js pages. The registry is therefore hand-authored — one journey per CLI
+surface (J1 hook, J2 select, J3 propose, J4 export, J5 record, J6 the measurement
+harness), 19 entry nodes, all six resolving with no `unchecked_entries` and no approval
+warning. A proposer that had invented six journeys from nothing would have been the
+silent-confidence failure this codebase keeps designing against; it said "nothing here I
+can see" instead.
+
+**Selectivity, measured the corrected way from the start.** `harness/selectivity.py
+--bare .../testgraph/.bare --registry journeys/testgraph.json -n 20 --branch main`, fresh
+per-commit index throughout:
+
+| | all 20 commits | **15 touching product code** |
+|---|---|---|
+| mean selected | 1.55 / 6 (25.8%) | **2.07 / 6 (34.4%)** |
+| journey-runs avoided | 74.2% | **65.6%** |
+| `<= 2` journeys | 17 of 20 | 12 of 15 |
+| `recall_degraded` | 1 of 20 | 1 of 15 |
+
+Histogram over all 20: `{0: 5, 1: 8, 2: 4, 3: 1, 6: 2}`. The all-commit column is
+reported only because the numbers above this line still are; Update 3's methodology
+correction says the 15-commit column is the honest one, so it is the one in bold.
+
+**The zero-selections are exactly the non-product commits.** All five commits selecting
+nothing (`cc51770e`, `62e07cb5`, `2f50ba94`, `cc23851c`, `e6833481`) touch no file that
+`select._is_product` accepts, and every one of the fifteen that does touch product code
+selected at least one journey.
+
+**That is NOT "zero silent misses", and an earlier draft of this section said it was.**
+Review of this PR falsified it. `testgraph/db.py` and `testgraph/registry.py` are
+reachable from no journey at all: seeding every node in either file and running the full
+impacted closure intersects the entry map in **zero** nodes. A commit rewriting the whole
+of `db.py` — the graph traversal this tool *is* — answers `journeys to test: NONE` with
+`status: OK` and `recall_degraded: false`. The window could not see it because **no commit
+in it touches either file alone**, so the clean result was an artifact of co-changed files,
+which is exactly the failure mode a 20-commit window is worst at detecting.
+
+| file seeded whole | closure | journeys named | imported as |
+|---|---|---|---|
+| `testgraph/db.py` | 14 nodes (never leaves the file) | **NONE** | `db as dbmod` |
+| `testgraph/registry.py` | 24 nodes (never leaves the file) | **NONE** | `registry as reg` |
+| `testgraph/integrity.py` | 151 nodes | J2, J4, J6 | `integrity` |
+| `testgraph/ledger.py` | 257 nodes | all six | `ledger` |
+
+The cause is not the registry. **codegraph does not resolve calls through a module bound
+under an alias.** `from . import ledger` then `ledger.append(...)` links; `from . import
+db as dbmod` then `dbmod.connect(...)` does not — the local name no longer matches the
+module name. Both forms are `module.attr()` calls in the same package, and the alias is
+the only difference:
+
+| module | bound as | `alias.attr()` call sites in source | cross-file inbound edges |
+|---|---|---|---|
+| `registry.py` | `reg` | **38** | **0** |
+| `db.py` | `dbmod` | 18 | **0** |
+| `select.py` | `sel` | 6 | 1 |
+| `ledger.py` | `ledger` | 10 | **44** |
+| `integrity.py` | `integrity` | 3 | **15** |
+
+Thirty-eight call sites resolving to zero edges, against ten resolving to forty-four.
+`select.py` shows the effect is not strictly all-or-nothing — one edge survives — but at
+6 call sites it is the same collapse, and its journeys are covered because it is itself a
+registered entry point rather than because the graph reaches it.
+
+**This does not reach honeyslate's numbers.** Checked directly: honeyslate has 9 aliased
+imports and every one aliases a *symbol* (`Session as DbSession`), never a module, so the
+`alias.attr()` form never arises. The recall figures in this document are unaffected.
+Adding these
+files' symbols as journey `entries` would manufacture the right answer from a false claim
+about what an entry is, so the registry declares the gap instead. Until the indexer links
+aliased imports, a `NONE` following a `db.py` or `registry.py` change means **unknown**,
+not none.
+
+This is the sharpest available demonstration of the limitation this document already
+states — that the selector's recall is bounded by the edges the indexer records — and it
+was found in the repo running the instrument on itself, which is the one thing
+self-reference is genuinely good for.
+
+**A populated middle, and why it does not refute Update 3.** testgraph's histogram has
+1, 2, and 3 all occupied — 13 of 20 commits — where mealie's was `{0: 38, 23: 2}` with
+literally nothing between. That is *not* evidence against the bimodality finding, and
+reading it that way would be the error. With six journeys the "middle" is only 1–5 wide,
+so a registry this small cannot exhibit the shape either way: bimodality is a claim about
+what happens at 20+ journeys, and six is not a test of it. Recorded here so the histogram
+is not later mistaken for a counter-example.
+
+**What this is not evidence for.** The instrument and the target are the same repo.
+Selectivity survives that better than recall does — `harness/selectivity.py` checks each
+commit into its own worktree, builds its own index, and never sees who wrote the registry
+— but observed_recall from the ledger will be scored by testgraph, on testgraph, against
+a registry authored while reading testgraph's source. Treat the ledger's testgraph rows
+as a **liveness** test of the selection -> outcome join, not as an accuracy claim. The
+accuracy claims in this document come from honeyslate's hand labels and from the outside
+repos in Update 3, and nothing here changes them.
+
+**Operational finding: codegraph cannot find a bare-worktree repo root.** In the
+`claudew` layout a worktree's `.git` is a *file* (`gitdir: .../.bare/worktrees/main`), not
+a directory. codegraph 1.5.0's root detection wants a `.git` directory, so from any
+worktree it walks up past the repo, and `codegraph index <path>` silently rebuilds
+whichever ancestor index it finds — or refuses at `$HOME` when there is none. This is the
+mechanism behind the 279 MB stray `~/personal_projects/.codegraph` that had to be removed
+before testgraph could be indexed at all; it had been answering every query from any
+un-indexed repo under that root. **Use `codegraph init <path>` for a first index, never
+`codegraph index <path>`** — `init` creates the index in the directory named, `index`
+resolves an ancestor. Both `testgraph/main` and this worktree are now indexed correctly
+(34 files, 798 nodes, 1,509 edges, ~0.5s).
+
 ## Known Limitations
 
-- **Scope:** honeyslate is the only *approved* registry. `testgraph.propose`
+- **Scope:** three *approved* registries — honeyslate, signedintake, and
+  testgraph itself. Only honeyslate carries hand-labeled journeys, so it remains
+  the only source of a recall/precision number; signedintake and testgraph report
+  sizes (`harness/selectivity.py`) rather than accuracy, and testgraph's is
+  self-referential besides. `testgraph.propose`
   (issue #6) drafts one for any Python repo with decorator-style routes, but a
   draft is unreviewed by construction and says so on every run. Frontend files are
   *seeded* (issue #21), but no journey has a frontend entry point, so a frontend
