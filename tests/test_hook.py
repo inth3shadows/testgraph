@@ -174,7 +174,7 @@ class NeverBlocksTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def _log(self):
-        path = os.path.join(self.dir, "invocations.jsonl")
+        path = os.path.join(self.dir, "ledger.jsonl")
         if not os.path.exists(path):
             return []
         with open(path) as f:
@@ -217,7 +217,7 @@ class InvocationLogTest(unittest.TestCase):
         with mock.patch.object(hook.reg, "resolve_for_repo", return_value=None):
             for _ in range(3):
                 hook.main(["--repo", GAMMA, "--base", "HEAD~1"])
-        with open(os.path.join(self.dir, "invocations.jsonl")) as f:
+        with open(os.path.join(self.dir, "ledger.jsonl")) as f:
             lines = [json.loads(x) for x in f if x.strip()]
         self.assertEqual(len(lines), 3)
 
@@ -226,7 +226,7 @@ class InvocationLogTest(unittest.TestCase):
              mock.patch.object(hook.os.path, "exists", return_value=True), \
              mock.patch.object(hook.sel, "select", return_value=_result(2)):
             hook.main(["--repo", ALPHA, "--base", "HEAD~1", "--caller", "manual"])
-        rec = json.loads(open(os.path.join(self.dir, "invocations.jsonl")).read())
+        rec = json.loads(open(os.path.join(self.dir, "ledger.jsonl")).read())
         self.assertEqual(rec["repo"], "alpha")
         self.assertEqual(rec["status"], "OK")
         self.assertEqual(rec["n_journeys"], 2)

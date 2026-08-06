@@ -72,6 +72,11 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
 - `testgraph/propose.py` — drafts a registry for a repo that has none: ast scan
   for route-decorated handlers, index resolution, spot-check derivation, declared
   blind spots. Writes `approved: false`.
+- `testgraph/ledger.py` — the append-only `selection`/`outcome` store and the
+  `caught`/`missed`/`unasked`/`unbaselined` join over it. Never raises; a torn
+  line is skipped rather than fatal.
+- `testgraph/record.py` — the `outcome` writer and the `--summary` /
+  `--export-kb` readers. Refuses a journey id the registry does not know.
 - `journeys/honeyslate.json` — 8 journeys (submit, browse, edit, reschedule,
   comments, auth, gcal sync, scheduler) + `spot_checks` floors for the guard.
 - `harness/accuracy.py` — checks each labeled commit out in an isolated worktree
@@ -109,8 +114,8 @@ No service to deploy — a CLI run against a target repo's index. The **live**
 consumer is `hooks/pre-push`, installed by `hooks/install.sh` into the shared
 hooks dir (`git rev-parse --git-common-dir`/hooks) of every repo with an approved
 registry, so one install covers all of that repo's worktrees. It runs
-`python3 -m testgraph.hook`, which renders a push-sized summary and appends to
-`~/.local/share/testgraph/invocations.jsonl`.
+`python3 -m testgraph.hook`, which renders a push-sized summary and appends a
+`selection` row to `~/.local/share/testgraph/ledger.jsonl`.
 
 Two properties are load-bearing and neither is about selection quality:
 
@@ -146,8 +151,8 @@ decision rule, is `~/.claude/plans/testgraph-mcp-vs-map-probe.md`.
 The same probe found the thing that actually matters: those 82 calls were all
 testgraph's own development, and `Skill(testgraph-verify)` had been invoked **zero
 times** (issue #49). The pre-push hook exists to end that, and it carries its own
-scoreboard: `wc -l ~/.local/share/testgraph/invocations.jsonl`. If that number is
-still near zero a week after install, the hook failed too — and the honest
+scoreboard: the `selections` count in `testgraph.record --summary`. If that number
+is still near zero a week after install, the hook failed too — and the honest
 conclusion would be that nothing in this workflow wants a selector, not that the
 next consumer will be the one.
 
@@ -655,6 +660,120 @@ and costs:
   ledger accumulates on that cadence rather than per-commit. That is the trade for
   not building an environment; if the ledger turns out to need denser data, this
   decision is the thing to revisit first.
+
+## The results ledger (issue #10)
+
+`testgraph/ledger.py` + `testgraph/record.py`. One append-only JSONL at
+`~/.local/share/testgraph/ledger.jsonl`, two row kinds discriminated by `kind`:
+
+| kind | written by | says |
+|---|---|---|
+| `selection` | `testgraph.hook` (the pre-push consumer) | testgraph named these journeys for this commit |
+| `outcome` | `testgraph.record` (a human, or `/autorun` per the #8 decision) | this journey was run at this commit and passed/failed |
+
+Neither kind is worth much alone — a selection log answers "was the tool called",
+an outcome log answers "did the app break". The value is the join on
+`(repo, commit)`, which yields the number this project has so far *asserted*
+rather than measured: a journey that failed on a commit whose selection did not
+name it.
+
+### Four buckets for a failure, and why they must stay apart
+
+- **caught** — the selection for that push named the journey.
+- **missed** — the selection **answered** for that push, did not name the
+  journey, and the journey was **known-good at the push's base**. A real silent
+  under-selection, the one failure mode a recall-first selector must not have.
+- **unasked** — no selection answered for that commit. testgraph was never asked,
+  so this says nothing about it.
+- **unbaselined** — a selection answered, but nothing records the journey passing
+  at that push's base, so the breakage may predate the push.
+
+`observed_recall` is `caught / (caught + missed)` and is `None` — not `0.0` —
+until something is actually judged.
+
+The last two buckets are each a bug that was caught in review, and both had the
+same shape: a row that says nothing about the selector being counted as evidence
+against it.
+
+**`unasked` is not just "no row".** `hook.run` writes selection rows on four
+*non-answer* paths — `NO_REGISTRY`, `NO_INDEX`, `ERROR`, and `BLOCKED` — each with
+no `journey_ids`. Treating those as "asked, and it named nothing" meant a tripped
+integrity guard scored every later failure at that commit as a silent miss. Worse,
+it chained: one JSON typo in an approved registry makes `resolve_for_repo` return
+`None` (it swallows `ValueError`), so every push logs `NO_REGISTRY` and every
+subsequent failure is blamed on the selector. Only `status == "OK"` counts as an
+answer.
+
+**`unbaselined` exists because the join compares a delta against a state.** A
+`selection` row answers "what could `base..head` break" — a delta. An `outcome`
+row asserts "journey J is broken *at* this commit" — a state. Joining on the head
+commit alone scores this as a miss:
+
+> push A..B breaks J3, and the selection for B correctly **names** J3. Nobody runs
+> journeys. Push B..C touches only `README.md`, so the selection for C names
+> nothing. The developer runs J3 at `HEAD` (=C) — exactly what USAGE.md says to do
+> — and it fails, so it is recorded at C.
+
+The selector was right both times, and the old join reported a silent miss and
+dropped `observed_recall`. Requiring a recorded `pass` at the push's base before
+blaming the selector removes that: **you only get to call it a miss when you had a
+green baseline to regress from.** The cost is that misses stay rare unless
+journeys run on every push — which is the discipline this number needs in order
+to mean anything, so the cost is the point.
+
+Two smaller rules follow from the same principle. Observations are deduplicated
+on `(commit, journey)`, last verdict wins, so re-recording one failure does not
+multiply the headline count. And the commit key must be a 40-hex sha:
+`resolve_commit` returns `None` rather than the rev verbatim when git cannot
+answer, because `record --repo ~/personal_projects/honeyslate` (the bare-worktree
+*parent* — a directory whose `repo_name` still resolves, so every other check
+passes) filed every outcome under the literal key `"HEAD"`, where two unrelated
+commits' failures joined to each other and produced one fabricated catch and one
+fabricated miss.
+
+### Storage: why local JSONL, and not the KB as #10 decided
+
+Issue #10 decided the ledger belongs in the shared `kb.*` Postgres rather than a
+local store, for three reasons. One was already false, and the decision as a whole
+is unbuildable at the write path:
+
+- **"lost to `wtclean`"** — false. `state_dir()` resolves to
+  `~/.local/share/testgraph`, outside every worktree. That was already true of
+  `invocations.jsonl`.
+- **"invisible from the work Mac"** and **"no reviewer or browsable surface"** —
+  both stand, and both are real requirements.
+- The blocker: **the KB is reachable only through an MCP server that an agent
+  drives.** There is no Python client, so `hook.py` cannot be the writer without
+  taking on a tunnel, a credential and a network round-trip inside a hook whose
+  entire contract is that it never fails a push. A KB-only ledger would have *no
+  writer at all* — which is precisely the defect #8 named ("the ledger has no
+  writer and would ship as dead schema"), relocated one layer up.
+
+Resolved as a split rather than a reversal: the local JSONL is the write path, and
+`record --summary --export-kb` emits a proposal payload an agent pushes into the
+KB. The export deliberately does **not** name a target table — KB conventions
+require `kb.read.search` first and `kb.propose.extend` over a new table, which is a
+decision that needs the KB in front of it, not a hardcoded guess in a CLI that has
+never read it.
+
+### Ranking is not wired to this yet, on purpose
+
+#10 asks for staleness and failure history to feed the next ranking. It should —
+but at the time this shipped the ledger held **zero rows**: the pre-push hook had
+not fired once since it merged. Ranking on an empty history is manufacturing a
+signal. `summarize()` therefore exposes `ready_for_ranking`, gated at
+`MIN_JUDGED_COMMITS = 20` — the size of the seeded-regression eval (#5), which is
+the smallest set that has yet said anything falsifiable about this selector, and a
+ranking signal is a weaker instrument than that eval rather than a stronger one.
+Below the threshold, `--summary` prints the distance to it.
+
+The gate needs **both** enough judged commits and at least one judged *failure*,
+and `skip` verdicts count toward neither. Twenty commits' worth of "deliberately
+did not run this" used to flip the flag while carrying zero failure evidence —
+which is the only quantity the threshold is actually reasoning about.
+
+`invocations.jsonl` is still read if present, as `selection` rows, so no install
+loses its history to the rename.
 
 ## Second registry: signedintake (issue #11)
 
