@@ -1,0 +1,3507 @@
+{
+  "target": "coriolis-local",
+  "note": "All 207 handlers testgraph.propose drafted for coriolis-local, unmodified except for target/note. The FULL-COVERAGE control arm: the HIGH/LOW arms register 22 of 207 handlers, so most commits touch surface no journey covers and their NONE answers measure registry coverage rather than selector precision. signedintake's 14 journeys covered 19 of 19 handlers, so only this arm is comparable to it. UNAPPROVED: machine-drafted, nobody has read 207 journeys.",
+  "approved": false,
+  "proposed_by": "testgraph.propose",
+  "journeys": {
+    "J_backend_app_main_health": {
+      "name": "GET /health",
+      "entries": [
+        {
+          "name": "health",
+          "file": "backend/app/main.py"
+        }
+      ],
+      "route": [
+        "GET /health"
+      ]
+    },
+    "J_main_readyz": {
+      "name": "GET /readyz",
+      "entries": [
+        {
+          "name": "readyz",
+          "file": "backend/app/main.py"
+        }
+      ],
+      "route": [
+        "GET /readyz"
+      ]
+    },
+    "J_admin_admin_overview": {
+      "name": "GET /admin/overview",
+      "entries": [
+        {
+          "name": "admin_overview",
+          "file": "backend/app/routers/admin.py"
+        }
+      ],
+      "route": [
+        "GET /admin/overview"
+      ]
+    },
+    "J_attendance_get_attendance": {
+      "name": "GET /{session_id}/attendance",
+      "entries": [
+        {
+          "name": "get_attendance",
+          "file": "backend/app/routers/attendance.py"
+        }
+      ],
+      "route": [
+        "GET /{session_id}/attendance"
+      ]
+    },
+    "J_attendance_set_attendance": {
+      "name": "PUT /{session_id}/attendance",
+      "entries": [
+        {
+          "name": "set_attendance",
+          "file": "backend/app/routers/attendance.py"
+        }
+      ],
+      "route": [
+        "PUT /{session_id}/attendance"
+      ]
+    },
+    "J_attendance_set_attendance_me": {
+      "name": "POST /{session_id}/attendance/me",
+      "entries": [
+        {
+          "name": "set_attendance_me",
+          "file": "backend/app/routers/attendance.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/attendance/me"
+      ]
+    },
+    "J_backend_app_routers_auth_providers": {
+      "name": "GET /providers",
+      "entries": [
+        {
+          "name": "providers",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /providers"
+      ]
+    },
+    "J_auth_magic_link_request": {
+      "name": "POST /magic-link/request",
+      "entries": [
+        {
+          "name": "magic_link_request",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "POST /magic-link/request"
+      ]
+    },
+    "J_auth_magic_link_verify": {
+      "name": "GET /magic-link/verify",
+      "entries": [
+        {
+          "name": "magic_link_verify",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /magic-link/verify"
+      ]
+    },
+    "J_backend_app_routers_auth_login": {
+      "name": "GET /login/{provider_name}",
+      "entries": [
+        {
+          "name": "login",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /login/{provider_name}"
+      ]
+    },
+    "J_backend_app_routers_auth_callback": {
+      "name": "GET /callback/{provider_name}",
+      "entries": [
+        {
+          "name": "callback",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /callback/{provider_name}"
+      ]
+    },
+    "J_backend_app_routers_auth_logout": {
+      "name": "POST /logout",
+      "entries": [
+        {
+          "name": "logout",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "POST /logout"
+      ]
+    },
+    "J_backend_app_routers_auth_me": {
+      "name": "GET /me",
+      "entries": [
+        {
+          "name": "me",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /me"
+      ]
+    },
+    "J_auth_update_me": {
+      "name": "PATCH /me",
+      "entries": [
+        {
+          "name": "update_me",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "PATCH /me"
+      ]
+    },
+    "J_auth_list_my_sessions": {
+      "name": "GET /sessions",
+      "entries": [
+        {
+          "name": "list_my_sessions",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /sessions"
+      ]
+    },
+    "J_auth_revoke_my_session": {
+      "name": "DELETE /sessions/{session_id}",
+      "entries": [
+        {
+          "name": "revoke_my_session",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "DELETE /sessions/{session_id}"
+      ]
+    },
+    "J_auth_upload_avatar": {
+      "name": "POST /me/avatar",
+      "entries": [
+        {
+          "name": "upload_avatar",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "POST /me/avatar"
+      ]
+    },
+    "J_auth_get_my_avatar": {
+      "name": "GET /me/avatar/file",
+      "entries": [
+        {
+          "name": "get_my_avatar",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /me/avatar/file"
+      ]
+    },
+    "J_auth_delete_avatar": {
+      "name": "DELETE /me/avatar",
+      "entries": [
+        {
+          "name": "delete_avatar",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "DELETE /me/avatar"
+      ]
+    },
+    "J_battle_map_get_battle_map": {
+      "name": "GET /{session_id}/battle-map",
+      "entries": [
+        {
+          "name": "get_battle_map",
+          "file": "backend/app/routers/battle_map.py"
+        }
+      ],
+      "route": [
+        "GET /{session_id}/battle-map"
+      ]
+    },
+    "J_battle_map_patch_battle_map_grid": {
+      "name": "PATCH /{session_id}/battle-map/grid",
+      "entries": [
+        {
+          "name": "patch_battle_map_grid",
+          "file": "backend/app/routers/battle_map.py"
+        }
+      ],
+      "route": [
+        "PATCH /{session_id}/battle-map/grid"
+      ]
+    },
+    "J_battle_map_add_battle_token": {
+      "name": "POST /{session_id}/battle-map/tokens",
+      "entries": [
+        {
+          "name": "add_battle_token",
+          "file": "backend/app/routers/battle_map.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/battle-map/tokens"
+      ]
+    },
+    "J_battle_map_patch_battle_token": {
+      "name": "PATCH /{session_id}/battle-map/tokens/{token_id}",
+      "entries": [
+        {
+          "name": "patch_battle_token",
+          "file": "backend/app/routers/battle_map.py"
+        }
+      ],
+      "route": [
+        "PATCH /{session_id}/battle-map/tokens/{token_id}"
+      ]
+    },
+    "J_battle_map_delete_battle_token": {
+      "name": "DELETE /{session_id}/battle-map/tokens/{token_id}",
+      "entries": [
+        {
+          "name": "delete_battle_token",
+          "file": "backend/app/routers/battle_map.py"
+        }
+      ],
+      "route": [
+        "DELETE /{session_id}/battle-map/tokens/{token_id}"
+      ]
+    },
+    "J_backend_app_routers_campaigns_list_campaigns": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_campaigns",
+          "file": "backend/app/routers/campaigns.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_campaigns_create_campaign": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_campaign",
+          "file": "backend/app/routers/campaigns.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_backend_app_routers_campaigns_get_campaign": {
+      "name": "GET /{campaign_id}",
+      "entries": [
+        {
+          "name": "get_campaign",
+          "file": "backend/app/routers/campaigns.py"
+        }
+      ],
+      "route": [
+        "GET /{campaign_id}"
+      ]
+    },
+    "J_backend_app_routers_campaigns_update_campaign": {
+      "name": "PATCH /{campaign_id}",
+      "entries": [
+        {
+          "name": "update_campaign",
+          "file": "backend/app/routers/campaigns.py"
+        }
+      ],
+      "route": [
+        "PATCH /{campaign_id}"
+      ]
+    },
+    "J_backend_app_routers_campaigns_delete_campaign": {
+      "name": "DELETE /{campaign_id}",
+      "entries": [
+        {
+          "name": "delete_campaign",
+          "file": "backend/app/routers/campaigns.py"
+        }
+      ],
+      "route": [
+        "DELETE /{campaign_id}"
+      ]
+    },
+    "J_campaigns_restore_campaign": {
+      "name": "POST /{campaign_id}/restore",
+      "entries": [
+        {
+          "name": "restore_campaign",
+          "file": "backend/app/routers/campaigns.py"
+        }
+      ],
+      "route": [
+        "POST /{campaign_id}/restore"
+      ]
+    },
+    "J_character_pools_list_character_pools": {
+      "name": "list_character_pools",
+      "entries": [
+        {
+          "name": "list_character_pools",
+          "file": "backend/app/routers/character_pools.py"
+        }
+      ],
+      "route": [
+        "GET ?"
+      ]
+    },
+    "J_character_pools_get_character_pool": {
+      "name": "GET /{pool_key}",
+      "entries": [
+        {
+          "name": "get_character_pool",
+          "file": "backend/app/routers/character_pools.py"
+        }
+      ],
+      "route": [
+        "GET /{pool_key}"
+      ]
+    },
+    "J_backend_app_routers_characters_list_characters": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_characters",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_characters_create_character": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_character",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_characters_generate_random_npc": {
+      "name": "POST /generate-random",
+      "entries": [
+        {
+          "name": "generate_random_npc",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "POST /generate-random"
+      ]
+    },
+    "J_backend_app_routers_characters_search_characters": {
+      "name": "GET /search",
+      "entries": [
+        {
+          "name": "search_characters",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "GET /search"
+      ]
+    },
+    "J_backend_app_routers_characters_get_companions": {
+      "name": "GET /{character_id}/companions",
+      "entries": [
+        {
+          "name": "get_companions",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "GET /{character_id}/companions"
+      ]
+    },
+    "J_backend_app_routers_characters_get_known_npcs": {
+      "name": "GET /{character_id}/known-npcs",
+      "entries": [
+        {
+          "name": "get_known_npcs",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "GET /{character_id}/known-npcs"
+      ]
+    },
+    "J_backend_app_routers_characters_get_character": {
+      "name": "GET /{character_id}",
+      "entries": [
+        {
+          "name": "get_character",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "GET /{character_id}"
+      ]
+    },
+    "J_backend_app_routers_characters_update_character": {
+      "name": "PATCH /{character_id}",
+      "entries": [
+        {
+          "name": "update_character",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "PATCH /{character_id}"
+      ]
+    },
+    "J_backend_app_routers_characters_delete_character": {
+      "name": "DELETE /{character_id}",
+      "entries": [
+        {
+          "name": "delete_character",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "DELETE /{character_id}"
+      ]
+    },
+    "J_characters_restore_character": {
+      "name": "POST /{character_id}/restore",
+      "entries": [
+        {
+          "name": "restore_character",
+          "file": "backend/app/routers/characters.py"
+        }
+      ],
+      "route": [
+        "POST /{character_id}/restore"
+      ]
+    },
+    "J_clocks_list_clocks": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_clocks",
+          "file": "backend/app/routers/clocks.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_clocks_create_clock": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_clock",
+          "file": "backend/app/routers/clocks.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_clocks_get_clock": {
+      "name": "GET /{clock_id}",
+      "entries": [
+        {
+          "name": "get_clock",
+          "file": "backend/app/routers/clocks.py"
+        }
+      ],
+      "route": [
+        "GET /{clock_id}"
+      ]
+    },
+    "J_clocks_update_clock": {
+      "name": "PATCH /{clock_id}",
+      "entries": [
+        {
+          "name": "update_clock",
+          "file": "backend/app/routers/clocks.py"
+        }
+      ],
+      "route": [
+        "PATCH /{clock_id}"
+      ]
+    },
+    "J_clocks_delete_clock": {
+      "name": "DELETE /{clock_id}",
+      "entries": [
+        {
+          "name": "delete_clock",
+          "file": "backend/app/routers/clocks.py"
+        }
+      ],
+      "route": [
+        "DELETE /{clock_id}"
+      ]
+    },
+    "J_clocks_restore_clock": {
+      "name": "POST /{clock_id}/restore",
+      "entries": [
+        {
+          "name": "restore_clock",
+          "file": "backend/app/routers/clocks.py"
+        }
+      ],
+      "route": [
+        "POST /{clock_id}/restore"
+      ]
+    },
+    "J_backend_app_routers_darkness_points_get_darkness_points": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "get_darkness_points",
+          "file": "backend/app/routers/darkness_points.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_darkness_points_add_darkness_point": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "add_darkness_point",
+          "file": "backend/app/routers/darkness_points.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_backend_app_routers_darkness_points_delete_darkness_point": {
+      "name": "DELETE /{entry_id}",
+      "entries": [
+        {
+          "name": "delete_darkness_point",
+          "file": "backend/app/routers/darkness_points.py"
+        }
+      ],
+      "route": [
+        "DELETE /{entry_id}"
+      ]
+    },
+    "J_darkness_points_spend_darkness_point": {
+      "name": "POST /spend",
+      "entries": [
+        {
+          "name": "spend_darkness_point",
+          "file": "backend/app/routers/darkness_points.py"
+        }
+      ],
+      "route": [
+        "POST /spend"
+      ]
+    },
+    "J_darkness_points_gain_darkness_point": {
+      "name": "POST /gain",
+      "entries": [
+        {
+          "name": "gain_darkness_point",
+          "file": "backend/app/routers/darkness_points.py"
+        }
+      ],
+      "route": [
+        "POST /gain"
+      ]
+    },
+    "J_darkness_points_restore_darkness_point": {
+      "name": "POST /{entry_id}/restore",
+      "entries": [
+        {
+          "name": "restore_darkness_point",
+          "file": "backend/app/routers/darkness_points.py"
+        }
+      ],
+      "route": [
+        "POST /{entry_id}/restore"
+      ]
+    },
+    "J_dice_events_create_dice_event": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_dice_event",
+          "file": "backend/app/routers/dice_events.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_dice_events_create_server_roll": {
+      "name": "POST /server",
+      "entries": [
+        {
+          "name": "create_server_roll",
+          "file": "backend/app/routers/dice_events.py"
+        }
+      ],
+      "route": [
+        "POST /server"
+      ]
+    },
+    "J_dice_events_list_dice_events": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_dice_events",
+          "file": "backend/app/routers/dice_events.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_dice_events_stream_dice_events": {
+      "name": "GET /stream",
+      "entries": [
+        {
+          "name": "stream_dice_events",
+          "file": "backend/app/routers/dice_events.py"
+        }
+      ],
+      "route": [
+        "GET /stream"
+      ]
+    },
+    "J_backend_app_routers_events_list_events": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_events",
+          "file": "backend/app/routers/events.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_events_create_event": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_event",
+          "file": "backend/app/routers/events.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_backend_app_routers_events_get_event": {
+      "name": "GET /{event_id}",
+      "entries": [
+        {
+          "name": "get_event",
+          "file": "backend/app/routers/events.py"
+        }
+      ],
+      "route": [
+        "GET /{event_id}"
+      ]
+    },
+    "J_backend_app_routers_events_update_event": {
+      "name": "PATCH /{event_id}",
+      "entries": [
+        {
+          "name": "update_event",
+          "file": "backend/app/routers/events.py"
+        }
+      ],
+      "route": [
+        "PATCH /{event_id}"
+      ]
+    },
+    "J_backend_app_routers_events_delete_event": {
+      "name": "DELETE /{event_id}",
+      "entries": [
+        {
+          "name": "delete_event",
+          "file": "backend/app/routers/events.py"
+        }
+      ],
+      "route": [
+        "DELETE /{event_id}"
+      ]
+    },
+    "J_events_restore_event": {
+      "name": "POST /{event_id}/restore",
+      "entries": [
+        {
+          "name": "restore_event",
+          "file": "backend/app/routers/events.py"
+        }
+      ],
+      "route": [
+        "POST /{event_id}/restore"
+      ]
+    },
+    "J_factions_list_factions": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_factions",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_factions_create_faction": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_faction",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_factions_get_faction": {
+      "name": "GET /{faction_id}",
+      "entries": [
+        {
+          "name": "get_faction",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "GET /{faction_id}"
+      ]
+    },
+    "J_factions_update_faction": {
+      "name": "PATCH /{faction_id}",
+      "entries": [
+        {
+          "name": "update_faction",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "PATCH /{faction_id}"
+      ]
+    },
+    "J_factions_delete_faction": {
+      "name": "DELETE /{faction_id}",
+      "entries": [
+        {
+          "name": "delete_faction",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "DELETE /{faction_id}"
+      ]
+    },
+    "J_factions_restore_faction": {
+      "name": "POST /{faction_id}/restore",
+      "entries": [
+        {
+          "name": "restore_faction",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "POST /{faction_id}/restore"
+      ]
+    },
+    "J_factions_list_reputation_entries": {
+      "name": "GET /{faction_id}/reputation-entries",
+      "entries": [
+        {
+          "name": "list_reputation_entries",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "GET /{faction_id}/reputation-entries"
+      ]
+    },
+    "J_factions_create_reputation_entry": {
+      "name": "POST /{faction_id}/reputation-entries",
+      "entries": [
+        {
+          "name": "create_reputation_entry",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "POST /{faction_id}/reputation-entries"
+      ]
+    },
+    "J_factions_discover_reputation_entry": {
+      "name": "POST /{faction_id}/reputation-entries/{entry_id}/discover",
+      "entries": [
+        {
+          "name": "discover_reputation_entry",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "POST /{faction_id}/reputation-entries/{entry_id}/discover"
+      ]
+    },
+    "J_factions_advance_pressure_clocks": {
+      "name": "POST /pressure/advance",
+      "entries": [
+        {
+          "name": "advance_pressure_clocks",
+          "file": "backend/app/routers/factions.py"
+        }
+      ],
+      "route": [
+        "POST /pressure/advance"
+      ]
+    },
+    "J_initiative_get_initiative": {
+      "name": "GET /{session_id}/initiative",
+      "entries": [
+        {
+          "name": "get_initiative",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "GET /{session_id}/initiative"
+      ]
+    },
+    "J_initiative_add_initiative_entry": {
+      "name": "POST /{session_id}/initiative",
+      "entries": [
+        {
+          "name": "add_initiative_entry",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/initiative"
+      ]
+    },
+    "J_initiative_patch_initiative_entry": {
+      "name": "PATCH /{session_id}/initiative/{entry_id}",
+      "entries": [
+        {
+          "name": "patch_initiative_entry",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "PATCH /{session_id}/initiative/{entry_id}"
+      ]
+    },
+    "J_initiative_delete_initiative_entry": {
+      "name": "DELETE /{session_id}/initiative/{entry_id}",
+      "entries": [
+        {
+          "name": "delete_initiative_entry",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "DELETE /{session_id}/initiative/{entry_id}"
+      ]
+    },
+    "J_initiative_reorder_initiative": {
+      "name": "POST /{session_id}/initiative/reorder",
+      "entries": [
+        {
+          "name": "reorder_initiative",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/initiative/reorder"
+      ]
+    },
+    "J_initiative_advance_initiative": {
+      "name": "POST /{session_id}/initiative/advance",
+      "entries": [
+        {
+          "name": "advance_initiative",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/initiative/advance"
+      ]
+    },
+    "J_initiative_set_active_initiative": {
+      "name": "POST /{session_id}/initiative/set-active",
+      "entries": [
+        {
+          "name": "set_active_initiative",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/initiative/set-active"
+      ]
+    },
+    "J_initiative_bulk_add_party_initiative": {
+      "name": "POST /{session_id}/initiative/bulk-add-party",
+      "entries": [
+        {
+          "name": "bulk_add_party_initiative",
+          "file": "backend/app/routers/initiative.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/initiative/bulk-add-party"
+      ]
+    },
+    "J_backend_app_routers_inventory_list_inventory": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_inventory",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_inventory_create_item": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_item",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_backend_app_routers_inventory_get_item": {
+      "name": "GET /{item_id}",
+      "entries": [
+        {
+          "name": "get_item",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "GET /{item_id}"
+      ]
+    },
+    "J_backend_app_routers_inventory_update_item": {
+      "name": "PATCH /{item_id}",
+      "entries": [
+        {
+          "name": "update_item",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "PATCH /{item_id}"
+      ]
+    },
+    "J_backend_app_routers_inventory_delete_item": {
+      "name": "DELETE /{item_id}",
+      "entries": [
+        {
+          "name": "delete_item",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "DELETE /{item_id}"
+      ]
+    },
+    "J_inventory_restore_item": {
+      "name": "POST /{item_id}/restore",
+      "entries": [
+        {
+          "name": "restore_item",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "POST /{item_id}/restore"
+      ]
+    },
+    "J_inventory_generate_provenance": {
+      "name": "POST /{item_id}/provenance/generate",
+      "entries": [
+        {
+          "name": "generate_provenance",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "POST /{item_id}/provenance/generate"
+      ]
+    },
+    "J_inventory_reroll_provenance_hook": {
+      "name": "POST /{item_id}/provenance/reroll-hook",
+      "entries": [
+        {
+          "name": "reroll_provenance_hook",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "POST /{item_id}/provenance/reroll-hook"
+      ]
+    },
+    "J_inventory_strip_provenance": {
+      "name": "DELETE /{item_id}/provenance",
+      "entries": [
+        {
+          "name": "strip_provenance",
+          "file": "backend/app/routers/inventory.py"
+        }
+      ],
+      "route": [
+        "DELETE /{item_id}/provenance"
+      ]
+    },
+    "J_backend_app_routers_locations_list_locations": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_locations",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_locations_create_location": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_backend_app_routers_locations_get_location": {
+      "name": "GET /{location_id}",
+      "entries": [
+        {
+          "name": "get_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "GET /{location_id}"
+      ]
+    },
+    "J_backend_app_routers_locations_update_location": {
+      "name": "PATCH /{location_id}",
+      "entries": [
+        {
+          "name": "update_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "PATCH /{location_id}"
+      ]
+    },
+    "J_backend_app_routers_locations_delete_location": {
+      "name": "DELETE /{location_id}",
+      "entries": [
+        {
+          "name": "delete_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "DELETE /{location_id}"
+      ]
+    },
+    "J_locations_restore_location": {
+      "name": "POST /{location_id}/restore",
+      "entries": [
+        {
+          "name": "restore_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "POST /{location_id}/restore"
+      ]
+    },
+    "J_loot_roll": {
+      "name": "POST /roll",
+      "entries": [
+        {
+          "name": "roll",
+          "file": "backend/app/routers/loot.py"
+        }
+      ],
+      "route": [
+        "POST /roll"
+      ]
+    },
+    "J_loot_collection": {
+      "name": "GET /collection",
+      "entries": [
+        {
+          "name": "collection",
+          "file": "backend/app/routers/loot.py"
+        }
+      ],
+      "route": [
+        "GET /collection"
+      ]
+    },
+    "J_loot_catalog": {
+      "name": "GET /catalog",
+      "entries": [
+        {
+          "name": "catalog",
+          "file": "backend/app/routers/loot.py"
+        }
+      ],
+      "route": [
+        "GET /catalog"
+      ]
+    },
+    "J_backend_app_routers_media_list_media": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_media",
+          "file": "backend/app/routers/media.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_media_upload_media": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "upload_media",
+          "file": "backend/app/routers/media.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_backend_app_routers_media_download_media": {
+      "name": "GET /{media_id}/download",
+      "entries": [
+        {
+          "name": "download_media",
+          "file": "backend/app/routers/media.py"
+        }
+      ],
+      "route": [
+        "GET /{media_id}/download"
+      ]
+    },
+    "J_backend_app_routers_media_update_media": {
+      "name": "PATCH /{media_id}",
+      "entries": [
+        {
+          "name": "update_media",
+          "file": "backend/app/routers/media.py"
+        }
+      ],
+      "route": [
+        "PATCH /{media_id}"
+      ]
+    },
+    "J_backend_app_routers_media_delete_media": {
+      "name": "DELETE /{media_id}",
+      "entries": [
+        {
+          "name": "delete_media",
+          "file": "backend/app/routers/media.py"
+        }
+      ],
+      "route": [
+        "DELETE /{media_id}"
+      ]
+    },
+    "J_media_restore_media": {
+      "name": "POST /{media_id}/restore",
+      "entries": [
+        {
+          "name": "restore_media",
+          "file": "backend/app/routers/media.py"
+        }
+      ],
+      "route": [
+        "POST /{media_id}/restore"
+      ]
+    },
+    "J_backend_app_routers_members_list_members": {
+      "name": "GET /campaigns/{campaign_id}/members",
+      "entries": [
+        {
+          "name": "list_members",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "GET /campaigns/{campaign_id}/members"
+      ]
+    },
+    "J_members_update_my_membership": {
+      "name": "PATCH /campaigns/{campaign_id}/members/me",
+      "entries": [
+        {
+          "name": "update_my_membership",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "PATCH /campaigns/{campaign_id}/members/me"
+      ]
+    },
+    "J_backend_app_routers_members_update_member": {
+      "name": "PATCH /campaigns/{campaign_id}/members/{user_id}",
+      "entries": [
+        {
+          "name": "update_member",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "PATCH /campaigns/{campaign_id}/members/{user_id}"
+      ]
+    },
+    "J_backend_app_routers_members_remove_member": {
+      "name": "DELETE /campaigns/{campaign_id}/members/{user_id}",
+      "entries": [
+        {
+          "name": "remove_member",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "DELETE /campaigns/{campaign_id}/members/{user_id}"
+      ]
+    },
+    "J_backend_app_routers_members_superadmin_assign_member": {
+      "name": "POST /admin/campaigns/{campaign_id}/members",
+      "entries": [
+        {
+          "name": "superadmin_assign_member",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "POST /admin/campaigns/{campaign_id}/members"
+      ]
+    },
+    "J_members_list_invites": {
+      "name": "GET /campaigns/{campaign_id}/invites",
+      "entries": [
+        {
+          "name": "list_invites",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "GET /campaigns/{campaign_id}/invites"
+      ]
+    },
+    "J_members_revoke_invite": {
+      "name": "PATCH /campaigns/{campaign_id}/invites/{invite_id}",
+      "entries": [
+        {
+          "name": "revoke_invite",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "PATCH /campaigns/{campaign_id}/invites/{invite_id}"
+      ]
+    },
+    "J_backend_app_routers_members_create_invite": {
+      "name": "POST /campaigns/{campaign_id}/invites",
+      "entries": [
+        {
+          "name": "create_invite",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "POST /campaigns/{campaign_id}/invites"
+      ]
+    },
+    "J_backend_app_routers_members_preview_invite": {
+      "name": "GET /invites/{token}",
+      "entries": [
+        {
+          "name": "preview_invite",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "GET /invites/{token}"
+      ]
+    },
+    "J_backend_app_routers_members_accept_invite": {
+      "name": "POST /invites/{token}/accept",
+      "entries": [
+        {
+          "name": "accept_invite",
+          "file": "backend/app/routers/members.py"
+        }
+      ],
+      "route": [
+        "POST /invites/{token}/accept"
+      ]
+    },
+    "J_backend_app_routers_notes_list_notes": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_notes",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_notes_list_note_tags": {
+      "name": "GET /tags",
+      "entries": [
+        {
+          "name": "list_note_tags",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "GET /tags"
+      ]
+    },
+    "J_backend_app_routers_notes_create_note": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_note",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_notes_merge_notes": {
+      "name": "POST /merge",
+      "entries": [
+        {
+          "name": "merge_notes",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "POST /merge"
+      ]
+    },
+    "J_notes_search_notes": {
+      "name": "GET /search",
+      "entries": [
+        {
+          "name": "search_notes",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "GET /search"
+      ]
+    },
+    "J_notes_get_note_backlinks": {
+      "name": "GET /{note_id}/backlinks",
+      "entries": [
+        {
+          "name": "get_note_backlinks",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "GET /{note_id}/backlinks"
+      ]
+    },
+    "J_backend_app_routers_notes_get_note": {
+      "name": "GET /{note_id}",
+      "entries": [
+        {
+          "name": "get_note",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "GET /{note_id}"
+      ]
+    },
+    "J_backend_app_routers_notes_update_note": {
+      "name": "PATCH /{note_id}",
+      "entries": [
+        {
+          "name": "update_note",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "PATCH /{note_id}"
+      ]
+    },
+    "J_backend_app_routers_notes_delete_note": {
+      "name": "DELETE /{note_id}",
+      "entries": [
+        {
+          "name": "delete_note",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "DELETE /{note_id}"
+      ]
+    },
+    "J_notes_restore_note": {
+      "name": "POST /{note_id}/restore",
+      "entries": [
+        {
+          "name": "restore_note",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "POST /{note_id}/restore"
+      ]
+    },
+    "J_notes_reveal_note": {
+      "name": "POST /{note_id}/reveal",
+      "entries": [
+        {
+          "name": "reveal_note",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "POST /{note_id}/reveal"
+      ]
+    },
+    "J_notes_get_note_privacy_history": {
+      "name": "GET /{note_id}/privacy-history",
+      "entries": [
+        {
+          "name": "get_note_privacy_history",
+          "file": "backend/app/routers/notes.py"
+        }
+      ],
+      "route": [
+        "GET /{note_id}/privacy-history"
+      ]
+    },
+    "J_backend_app_routers_relationships_list_relationships": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_relationships",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_relationships_create_relationship": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_relationship",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_backend_app_routers_relationships_get_relationship": {
+      "name": "GET /{relationship_id}",
+      "entries": [
+        {
+          "name": "get_relationship",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "GET /{relationship_id}"
+      ]
+    },
+    "J_backend_app_routers_relationships_update_relationship": {
+      "name": "PATCH /{relationship_id}",
+      "entries": [
+        {
+          "name": "update_relationship",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "PATCH /{relationship_id}"
+      ]
+    },
+    "J_backend_app_routers_relationships_delete_relationship": {
+      "name": "DELETE /{relationship_id}",
+      "entries": [
+        {
+          "name": "delete_relationship",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "DELETE /{relationship_id}"
+      ]
+    },
+    "J_relationships_restore_relationship": {
+      "name": "POST /{relationship_id}/restore",
+      "entries": [
+        {
+          "name": "restore_relationship",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "POST /{relationship_id}/restore"
+      ]
+    },
+    "J_relationships_restore_entry": {
+      "name": "POST /{relationship_id}/entries/{entry_id}/restore",
+      "entries": [
+        {
+          "name": "restore_entry",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "POST /{relationship_id}/entries/{entry_id}/restore"
+      ]
+    },
+    "J_backend_app_routers_relationships_list_entries": {
+      "name": "GET /{relationship_id}/entries",
+      "entries": [
+        {
+          "name": "list_entries",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "GET /{relationship_id}/entries"
+      ]
+    },
+    "J_backend_app_routers_relationships_create_entry": {
+      "name": "POST /{relationship_id}/entries",
+      "entries": [
+        {
+          "name": "create_entry",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "POST /{relationship_id}/entries"
+      ]
+    },
+    "J_backend_app_routers_relationships_update_entry": {
+      "name": "PATCH /{relationship_id}/entries/{entry_id}",
+      "entries": [
+        {
+          "name": "update_entry",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "PATCH /{relationship_id}/entries/{entry_id}"
+      ]
+    },
+    "J_backend_app_routers_relationships_delete_entry": {
+      "name": "DELETE /{relationship_id}/entries/{entry_id}",
+      "entries": [
+        {
+          "name": "delete_entry",
+          "file": "backend/app/routers/relationships.py"
+        }
+      ],
+      "route": [
+        "DELETE /{relationship_id}/entries/{entry_id}"
+      ]
+    },
+    "J_resource_pools_list_pools": {
+      "name": "list_pools",
+      "entries": [
+        {
+          "name": "list_pools",
+          "file": "backend/app/routers/resource_pools.py"
+        }
+      ],
+      "route": [
+        "GET ?"
+      ]
+    },
+    "J_resource_pools_get_pool": {
+      "name": "GET /{pool_key}",
+      "entries": [
+        {
+          "name": "get_pool",
+          "file": "backend/app/routers/resource_pools.py"
+        }
+      ],
+      "route": [
+        "GET /{pool_key}"
+      ]
+    },
+    "J_resource_pools_add_pool_entry": {
+      "name": "POST /{pool_key}",
+      "entries": [
+        {
+          "name": "add_pool_entry",
+          "file": "backend/app/routers/resource_pools.py"
+        }
+      ],
+      "route": [
+        "POST /{pool_key}"
+      ]
+    },
+    "J_resource_pools_spend_pool": {
+      "name": "POST /{pool_key}/spend",
+      "entries": [
+        {
+          "name": "spend_pool",
+          "file": "backend/app/routers/resource_pools.py"
+        }
+      ],
+      "route": [
+        "POST /{pool_key}/spend"
+      ]
+    },
+    "J_resource_pools_delete_pool_entry": {
+      "name": "DELETE /{pool_key}/{entry_id}",
+      "entries": [
+        {
+          "name": "delete_pool_entry",
+          "file": "backend/app/routers/resource_pools.py"
+        }
+      ],
+      "route": [
+        "DELETE /{pool_key}/{entry_id}"
+      ]
+    },
+    "J_resource_pools_restore_pool_entry": {
+      "name": "POST /{pool_key}/{entry_id}/restore",
+      "entries": [
+        {
+          "name": "restore_pool_entry",
+          "file": "backend/app/routers/resource_pools.py"
+        }
+      ],
+      "route": [
+        "POST /{pool_key}/{entry_id}/restore"
+      ]
+    },
+    "J_rulebooks_list_rulebooks": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_rulebooks",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_rulebooks_get_rulebook": {
+      "name": "GET /{rulebook_slug}",
+      "entries": [
+        {
+          "name": "get_rulebook",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}"
+      ]
+    },
+    "J_rulebooks_list_sections": {
+      "name": "GET /{rulebook_slug}/sections",
+      "entries": [
+        {
+          "name": "list_sections",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/sections"
+      ]
+    },
+    "J_rulebooks_get_section": {
+      "name": "GET /{rulebook_slug}/sections/{section_slug}",
+      "entries": [
+        {
+          "name": "get_section",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/sections/{section_slug}"
+      ]
+    },
+    "J_rulebooks_get_section_tables": {
+      "name": "GET /{rulebook_slug}/sections/{section_slug}/tables",
+      "entries": [
+        {
+          "name": "get_section_tables",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/sections/{section_slug}/tables"
+      ]
+    },
+    "J_rulebooks_search_sections": {
+      "name": "GET /{rulebook_slug}/search",
+      "entries": [
+        {
+          "name": "search_sections",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/search"
+      ]
+    },
+    "J_rulebooks_list_artwork": {
+      "name": "GET /{rulebook_slug}/artwork",
+      "entries": [
+        {
+          "name": "list_artwork",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/artwork"
+      ]
+    },
+    "J_rulebooks_serve_artwork": {
+      "name": "GET /{rulebook_slug}/artwork/{filename}",
+      "entries": [
+        {
+          "name": "serve_artwork",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/artwork/{filename}"
+      ]
+    },
+    "J_rulebooks_upload_rulebook_pdf": {
+      "name": "POST /upload",
+      "entries": [
+        {
+          "name": "upload_rulebook_pdf",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "POST /upload"
+      ]
+    },
+    "J_rulebooks_delete_rulebook": {
+      "name": "DELETE /{rulebook_slug}",
+      "entries": [
+        {
+          "name": "delete_rulebook",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "DELETE /{rulebook_slug}"
+      ]
+    },
+    "J_search_search_campaign": {
+      "name": "GET /search",
+      "entries": [
+        {
+          "name": "search_campaign",
+          "file": "backend/app/routers/search.py"
+        }
+      ],
+      "route": [
+        "GET /search"
+      ]
+    },
+    "J_session_events_stream_session_events": {
+      "name": "GET /{session_id}/events",
+      "entries": [
+        {
+          "name": "stream_session_events",
+          "file": "backend/app/routers/session_events.py"
+        }
+      ],
+      "route": [
+        "GET /{session_id}/events"
+      ]
+    },
+    "J_backend_app_routers_sessions_list_sessions": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_sessions",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_backend_app_routers_sessions_create_session": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_session",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_sessions_get_campaign_timeline": {
+      "name": "GET /timeline",
+      "entries": [
+        {
+          "name": "get_campaign_timeline",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "GET /timeline"
+      ]
+    },
+    "J_backend_app_routers_sessions_get_session": {
+      "name": "GET /{session_id}",
+      "entries": [
+        {
+          "name": "get_session",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "GET /{session_id}"
+      ]
+    },
+    "J_backend_app_routers_sessions_update_session": {
+      "name": "PATCH /{session_id}",
+      "entries": [
+        {
+          "name": "update_session",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "PATCH /{session_id}"
+      ]
+    },
+    "J_backend_app_routers_sessions_activate_session": {
+      "name": "POST /{session_id}/activate",
+      "entries": [
+        {
+          "name": "activate_session",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/activate"
+      ]
+    },
+    "J_backend_app_routers_sessions_delete_session": {
+      "name": "DELETE /{session_id}",
+      "entries": [
+        {
+          "name": "delete_session",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "DELETE /{session_id}"
+      ]
+    },
+    "J_sessions_restore_session": {
+      "name": "POST /{session_id}/restore",
+      "entries": [
+        {
+          "name": "restore_session",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/restore"
+      ]
+    },
+    "J_sessions_get_session_recap": {
+      "name": "GET /{session_id}/recap",
+      "entries": [
+        {
+          "name": "get_session_recap",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "GET /{session_id}/recap"
+      ]
+    },
+    "J_sessions_list_session_artifacts": {
+      "name": "GET /{session_id}/artifacts",
+      "entries": [
+        {
+          "name": "list_session_artifacts",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "GET /{session_id}/artifacts"
+      ]
+    },
+    "J_sessions_generate_session_artifact": {
+      "name": "POST /{session_id}/artifacts",
+      "entries": [
+        {
+          "name": "generate_session_artifact",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "POST /{session_id}/artifacts"
+      ]
+    },
+    "J_sessions_delete_session_artifact": {
+      "name": "DELETE /{session_id}/artifacts/{artifact_id}",
+      "entries": [
+        {
+          "name": "delete_session_artifact",
+          "file": "backend/app/routers/sessions.py"
+        }
+      ],
+      "route": [
+        "DELETE /{session_id}/artifacts/{artifact_id}"
+      ]
+    },
+    "J_share_share_entry": {
+      "name": "GET /{token}",
+      "entries": [
+        {
+          "name": "share_entry",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "GET /{token}"
+      ]
+    },
+    "J_share_share_characters": {
+      "name": "GET /{token}/characters",
+      "entries": [
+        {
+          "name": "share_characters",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "GET /{token}/characters"
+      ]
+    },
+    "J_share_share_sessions": {
+      "name": "GET /{token}/sessions",
+      "entries": [
+        {
+          "name": "share_sessions",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "GET /{token}/sessions"
+      ]
+    },
+    "J_share_share_notes": {
+      "name": "GET /{token}/notes",
+      "entries": [
+        {
+          "name": "share_notes",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "GET /{token}/notes"
+      ]
+    },
+    "J_share_share_factions": {
+      "name": "GET /{token}/factions",
+      "entries": [
+        {
+          "name": "share_factions",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "GET /{token}/factions"
+      ]
+    },
+    "J_share_share_locations": {
+      "name": "GET /{token}/locations",
+      "entries": [
+        {
+          "name": "share_locations",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "GET /{token}/locations"
+      ]
+    },
+    "J_share_list_links": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_links",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_share_create_link": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_link",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_share_revoke_link": {
+      "name": "DELETE /{link_id}",
+      "entries": [
+        {
+          "name": "revoke_link",
+          "file": "backend/app/routers/share.py"
+        }
+      ],
+      "route": [
+        "DELETE /{link_id}"
+      ]
+    },
+    "J_shared_assets_list_shared_assets": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_shared_assets",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ]
+    },
+    "J_shared_assets_create_shared_asset": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ]
+    },
+    "J_shared_assets_get_shared_asset": {
+      "name": "GET /{asset_id}",
+      "entries": [
+        {
+          "name": "get_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "GET /{asset_id}"
+      ]
+    },
+    "J_shared_assets_update_shared_asset": {
+      "name": "PATCH /{asset_id}",
+      "entries": [
+        {
+          "name": "update_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "PATCH /{asset_id}"
+      ]
+    },
+    "J_shared_assets_delete_shared_asset": {
+      "name": "DELETE /{asset_id}",
+      "entries": [
+        {
+          "name": "delete_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "DELETE /{asset_id}"
+      ]
+    },
+    "J_shared_assets_restore_shared_asset": {
+      "name": "POST /{asset_id}/restore",
+      "entries": [
+        {
+          "name": "restore_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "POST /{asset_id}/restore"
+      ]
+    },
+    "J_solo_list_scenes": {
+      "name": "GET /scenes",
+      "entries": [
+        {
+          "name": "list_scenes",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /scenes"
+      ]
+    },
+    "J_solo_create_scene": {
+      "name": "POST /scenes",
+      "entries": [
+        {
+          "name": "create_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /scenes"
+      ]
+    },
+    "J_solo_get_scene": {
+      "name": "GET /scenes/{scene_id}",
+      "entries": [
+        {
+          "name": "get_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /scenes/{scene_id}"
+      ]
+    },
+    "J_solo_update_scene": {
+      "name": "PATCH /scenes/{scene_id}",
+      "entries": [
+        {
+          "name": "update_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "PATCH /scenes/{scene_id}"
+      ]
+    },
+    "J_solo_delete_scene": {
+      "name": "DELETE /scenes/{scene_id}",
+      "entries": [
+        {
+          "name": "delete_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "DELETE /scenes/{scene_id}"
+      ]
+    },
+    "J_solo_restore_scene": {
+      "name": "POST /scenes/{scene_id}/restore",
+      "entries": [
+        {
+          "name": "restore_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /scenes/{scene_id}/restore"
+      ]
+    },
+    "J_solo_seed_scenes": {
+      "name": "POST /scenes/seed-starter",
+      "entries": [
+        {
+          "name": "seed_scenes",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /scenes/seed-starter"
+      ]
+    },
+    "J_solo_list_runs": {
+      "name": "GET /runs",
+      "entries": [
+        {
+          "name": "list_runs",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /runs"
+      ]
+    },
+    "J_solo_create_run": {
+      "name": "POST /runs",
+      "entries": [
+        {
+          "name": "create_run",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /runs"
+      ]
+    },
+    "J_solo_get_run": {
+      "name": "GET /runs/{run_id}",
+      "entries": [
+        {
+          "name": "get_run",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /runs/{run_id}"
+      ]
+    },
+    "J_solo_step_run": {
+      "name": "POST /runs/{run_id}/step",
+      "entries": [
+        {
+          "name": "step_run",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /runs/{run_id}/step"
+      ]
+    },
+    "J_solo_delete_run": {
+      "name": "DELETE /runs/{run_id}",
+      "entries": [
+        {
+          "name": "delete_run",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "DELETE /runs/{run_id}"
+      ]
+    },
+    "J_system_packs_list_system_packs": {
+      "name": "list_system_packs",
+      "entries": [
+        {
+          "name": "list_system_packs",
+          "file": "backend/app/routers/system_packs.py"
+        }
+      ],
+      "route": [
+        "GET ?"
+      ]
+    },
+    "J_system_packs_get_system_pack": {
+      "name": "GET /{pack_id}",
+      "entries": [
+        {
+          "name": "get_system_pack",
+          "file": "backend/app/routers/system_packs.py"
+        }
+      ],
+      "route": [
+        "GET /{pack_id}"
+      ]
+    },
+    "J_backend_app_routers_transcription_start_transcription": {
+      "name": "POST /start",
+      "entries": [
+        {
+          "name": "start_transcription",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "POST /start"
+      ]
+    },
+    "J_backend_app_routers_transcription_stop_transcription": {
+      "name": "POST /stop",
+      "entries": [
+        {
+          "name": "stop_transcription",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "POST /stop"
+      ]
+    },
+    "J_backend_app_routers_transcription_get_status": {
+      "name": "GET /status",
+      "entries": [
+        {
+          "name": "get_status",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "GET /status"
+      ]
+    },
+    "J_backend_app_routers_transcription_stream_transcription": {
+      "name": "GET /stream",
+      "entries": [
+        {
+          "name": "stream_transcription",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "GET /stream"
+      ]
+    },
+    "J_backend_app_routers_transcription_list_chunks": {
+      "name": "GET /chunks",
+      "entries": [
+        {
+          "name": "list_chunks",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "GET /chunks"
+      ]
+    },
+    "J_backend_app_routers_transcription_delete_chunk": {
+      "name": "DELETE /chunks/{chunk_id}",
+      "entries": [
+        {
+          "name": "delete_chunk",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "DELETE /chunks/{chunk_id}"
+      ]
+    },
+    "J_backend_app_routers_transcription_list_notes": {
+      "name": "GET /notes",
+      "entries": [
+        {
+          "name": "list_notes",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "GET /notes"
+      ]
+    },
+    "J_transcription_export_notes_markdown": {
+      "name": "GET /export",
+      "entries": [
+        {
+          "name": "export_notes_markdown",
+          "file": "backend/app/routers/transcription.py"
+        }
+      ],
+      "route": [
+        "GET /export"
+      ]
+    },
+    "J_trash_bulk_action": {
+      "name": "POST /campaigns/{campaign_id}/trash/bulk-action",
+      "entries": [
+        {
+          "name": "bulk_action",
+          "file": "backend/app/routers/trash.py"
+        }
+      ],
+      "route": [
+        "POST /campaigns/{campaign_id}/trash/bulk-action"
+      ]
+    }
+  },
+  "codegraph_schema_version": 8,
+  "spot_checks": {
+    "Button": {
+      "min_caller_edges": 185,
+      "file": "frontend/src/components/ui/button.tsx"
+    },
+    "fetchApi": {
+      "min_caller_edges": 175,
+      "file": "frontend/src/api/client.ts"
+    }
+  },
+  "spot_check_candidates": [
+    {
+      "name": "Button",
+      "file": "frontend/src/components/ui/button.tsx",
+      "fan_in": 232,
+      "caller_churn": 2.09,
+      "score": 75.08,
+      "min_caller_edges": 185
+    },
+    {
+      "name": "fetchApi",
+      "file": "frontend/src/api/client.ts",
+      "fan_in": 219,
+      "caller_churn": 2.62,
+      "score": 60.5,
+      "min_caller_edges": 175
+    },
+    {
+      "name": "Input",
+      "file": "frontend/src/components/ui/input.tsx",
+      "fan_in": 110,
+      "caller_churn": 1.93,
+      "score": 37.54,
+      "min_caller_edges": 88
+    },
+    {
+      "name": "cn",
+      "file": "frontend/src/lib/utils.ts",
+      "fan_in": 110,
+      "caller_churn": 2.1,
+      "score": 35.48,
+      "min_caller_edges": 88
+    },
+    {
+      "name": "Badge",
+      "file": "frontend/src/components/ui/badge.tsx",
+      "fan_in": 101,
+      "caller_churn": 2.5,
+      "score": 28.86,
+      "min_caller_edges": 80
+    },
+    {
+      "name": "Label",
+      "file": "frontend/src/components/ui/label.tsx",
+      "fan_in": 80,
+      "caller_churn": 2.2,
+      "score": 25.0,
+      "min_caller_edges": 64
+    },
+    {
+      "name": "DialogContent",
+      "file": "frontend/src/components/ui/dialog.tsx",
+      "fan_in": 64,
+      "caller_churn": 2.22,
+      "score": 19.88,
+      "min_caller_edges": 51
+    },
+    {
+      "name": "Skeleton",
+      "file": "frontend/src/components/ui/skeleton.tsx",
+      "fan_in": 88,
+      "caller_churn": 3.52,
+      "score": 19.47,
+      "min_caller_edges": 70
+    }
+  ],
+  "spot_check_basis": "caller-file churn over the last 500 commits, then fan-in",
+  "blind_spots": [
+    "background jobs and schedulers (no decorator marks them \u2014 honeyslate's J8 is this class)",
+    "CLI entry points and management commands",
+    "event, queue, and webhook consumers registered by callback rather than decorator",
+    "ASGI/WSGI middleware and lifespan hooks",
+    "440 TypeScript/JavaScript file(s) scanned for Next.js route handlers, server actions and page components ONLY",
+    "Express, Fastify, Hono, tRPC and other non-Next.js routers \u2014 only Next.js app-router conventions are recognised",
+    "`middleware.ts`, `generateStaticParams`, and route handlers outside the `app/` directory (the pages router's `pages/api/*`)",
+    "client-side navigation: a journey reachable only through in-browser routing has no server entry point to register",
+    "`export default function () {}` \u2014 an anonymous default export has no symbol name to resolve, so those pages are omitted rather than drafted"
+  ],
+  "unresolved_candidates": [
+    {
+      "handler": "health",
+      "file": "deployment-staging/appsource/backend/app/main.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/health"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "providers",
+      "file": "deployment-staging/appsource/backend/app/routers/auth.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/providers"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "login",
+      "file": "deployment-staging/appsource/backend/app/routers/auth.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/login/{provider_name}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "callback",
+      "file": "deployment-staging/appsource/backend/app/routers/auth.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/callback/{provider_name}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "logout",
+      "file": "deployment-staging/appsource/backend/app/routers/auth.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/logout"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "me",
+      "file": "deployment-staging/appsource/backend/app/routers/auth.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/me"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_campaigns",
+      "file": "deployment-staging/appsource/backend/app/routers/campaigns.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_campaign",
+      "file": "deployment-staging/appsource/backend/app/routers/campaigns.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_campaign",
+      "file": "deployment-staging/appsource/backend/app/routers/campaigns.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{campaign_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_campaign",
+      "file": "deployment-staging/appsource/backend/app/routers/campaigns.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{campaign_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_campaign",
+      "file": "deployment-staging/appsource/backend/app/routers/campaigns.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{campaign_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_characters",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_character",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "search_characters",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/search"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_companions",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{character_id}/companions"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_known_npcs",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{character_id}/known-npcs"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_character",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{character_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_character",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{character_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_character",
+      "file": "deployment-staging/appsource/backend/app/routers/characters.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{character_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_darkness_points",
+      "file": "deployment-staging/appsource/backend/app/routers/darkness_points.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "add_darkness_point",
+      "file": "deployment-staging/appsource/backend/app/routers/darkness_points.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_darkness_point",
+      "file": "deployment-staging/appsource/backend/app/routers/darkness_points.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{entry_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_events",
+      "file": "deployment-staging/appsource/backend/app/routers/events.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_event",
+      "file": "deployment-staging/appsource/backend/app/routers/events.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_event",
+      "file": "deployment-staging/appsource/backend/app/routers/events.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{event_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_event",
+      "file": "deployment-staging/appsource/backend/app/routers/events.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{event_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_event",
+      "file": "deployment-staging/appsource/backend/app/routers/events.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{event_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_inventory",
+      "file": "deployment-staging/appsource/backend/app/routers/inventory.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_item",
+      "file": "deployment-staging/appsource/backend/app/routers/inventory.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_item",
+      "file": "deployment-staging/appsource/backend/app/routers/inventory.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{item_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_item",
+      "file": "deployment-staging/appsource/backend/app/routers/inventory.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{item_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_item",
+      "file": "deployment-staging/appsource/backend/app/routers/inventory.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{item_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_locations",
+      "file": "deployment-staging/appsource/backend/app/routers/locations.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_location",
+      "file": "deployment-staging/appsource/backend/app/routers/locations.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_location",
+      "file": "deployment-staging/appsource/backend/app/routers/locations.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{location_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_location",
+      "file": "deployment-staging/appsource/backend/app/routers/locations.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{location_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_location",
+      "file": "deployment-staging/appsource/backend/app/routers/locations.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{location_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_media",
+      "file": "deployment-staging/appsource/backend/app/routers/media.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "upload_media",
+      "file": "deployment-staging/appsource/backend/app/routers/media.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "download_media",
+      "file": "deployment-staging/appsource/backend/app/routers/media.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{media_id}/download"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_media",
+      "file": "deployment-staging/appsource/backend/app/routers/media.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{media_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_media",
+      "file": "deployment-staging/appsource/backend/app/routers/media.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{media_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_members",
+      "file": "deployment-staging/appsource/backend/app/routers/members.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/campaigns/{campaign_id}/members"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_member",
+      "file": "deployment-staging/appsource/backend/app/routers/members.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/campaigns/{campaign_id}/members/{user_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "remove_member",
+      "file": "deployment-staging/appsource/backend/app/routers/members.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/campaigns/{campaign_id}/members/{user_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "superadmin_assign_member",
+      "file": "deployment-staging/appsource/backend/app/routers/members.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/admin/campaigns/{campaign_id}/members"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_invite",
+      "file": "deployment-staging/appsource/backend/app/routers/members.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/campaigns/{campaign_id}/invites"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "preview_invite",
+      "file": "deployment-staging/appsource/backend/app/routers/members.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/invites/{token}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "accept_invite",
+      "file": "deployment-staging/appsource/backend/app/routers/members.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/invites/{token}/accept"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_notes",
+      "file": "deployment-staging/appsource/backend/app/routers/notes.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_note",
+      "file": "deployment-staging/appsource/backend/app/routers/notes.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_note",
+      "file": "deployment-staging/appsource/backend/app/routers/notes.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{note_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_note",
+      "file": "deployment-staging/appsource/backend/app/routers/notes.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{note_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_note",
+      "file": "deployment-staging/appsource/backend/app/routers/notes.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{note_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_relationships",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_relationship",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_relationship",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{relationship_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_relationship",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{relationship_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_relationship",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{relationship_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_entries",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{relationship_id}/entries"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_entry",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/{relationship_id}/entries"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_entry",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{relationship_id}/entries/{entry_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_entry",
+      "file": "deployment-staging/appsource/backend/app/routers/relationships.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{relationship_id}/entries/{entry_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_rulebook",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "search_sections",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/search"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_sections",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/sections"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_section",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/sections/{slug}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_section_tables",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/sections/{slug}/tables"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_artwork",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/artwork"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "serve_artwork",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/artwork/{filename}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "upload_rulebook_pdf",
+      "file": "deployment-staging/appsource/backend/app/routers/rulebook.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/upload"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_sessions",
+      "file": "deployment-staging/appsource/backend/app/routers/sessions.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "create_session",
+      "file": "deployment-staging/appsource/backend/app/routers/sessions.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_session",
+      "file": "deployment-staging/appsource/backend/app/routers/sessions.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/{session_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "update_session",
+      "file": "deployment-staging/appsource/backend/app/routers/sessions.py",
+      "routes": [
+        {
+          "method": "PATCH",
+          "path": "/{session_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "activate_session",
+      "file": "deployment-staging/appsource/backend/app/routers/sessions.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/{session_id}/activate"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_session",
+      "file": "deployment-staging/appsource/backend/app/routers/sessions.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/{session_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "start_transcription",
+      "file": "deployment-staging/appsource/backend/app/routers/transcription.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/start"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "stop_transcription",
+      "file": "deployment-staging/appsource/backend/app/routers/transcription.py",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/stop"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "get_status",
+      "file": "deployment-staging/appsource/backend/app/routers/transcription.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/status"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "stream_transcription",
+      "file": "deployment-staging/appsource/backend/app/routers/transcription.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/stream"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_chunks",
+      "file": "deployment-staging/appsource/backend/app/routers/transcription.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/chunks"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "delete_chunk",
+      "file": "deployment-staging/appsource/backend/app/routers/transcription.py",
+      "routes": [
+        {
+          "method": "DELETE",
+          "path": "/chunks/{chunk_id}"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    },
+    {
+      "handler": "list_notes",
+      "file": "deployment-staging/appsource/backend/app/routers/transcription.py",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/notes"
+        }
+      ],
+      "reason": "no node in the index for this symbol \u2014 the index predates the file, or `codegraph index` has not been run"
+    }
+  ]
+}

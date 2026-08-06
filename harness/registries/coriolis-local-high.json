@@ -1,0 +1,306 @@
+{
+  "target": "coriolis-local",
+  "note": "the 22 handlers depending on the MOST shared-core nodes \u2014 a registry grown ALONG the shared symbol paths. Derived mechanically by harness/couple.py from a testgraph.propose draft of 207 handlers (207 resolvable); shared core = nodes in >= 50% of footprints (77 nodes). Selection rule pre-registered before the sweep ran \u2014 see ~/.claude/plans/testgraph-20plus-journey-falsification.md. UNAPPROVED: a measurement artifact, not a product registry.",
+  "approved": false,
+  "proposed_by": "harness/couple.py",
+  "codegraph_schema_version": 8,
+  "journeys": {
+    "J1": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ],
+      "drafted_as": "J_backend_app_routers_locations_create_location"
+    },
+    "J2": {
+      "name": "GET /{location_id}",
+      "entries": [
+        {
+          "name": "get_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "GET /{location_id}"
+      ],
+      "drafted_as": "J_backend_app_routers_locations_get_location"
+    },
+    "J3": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_locations",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ],
+      "drafted_as": "J_backend_app_routers_locations_list_locations"
+    },
+    "J4": {
+      "name": "POST /{location_id}/restore",
+      "entries": [
+        {
+          "name": "restore_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "POST /{location_id}/restore"
+      ],
+      "drafted_as": "J_locations_restore_location"
+    },
+    "J5": {
+      "name": "DELETE /{location_id}",
+      "entries": [
+        {
+          "name": "delete_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "DELETE /{location_id}"
+      ],
+      "drafted_as": "J_backend_app_routers_locations_delete_location"
+    },
+    "J6": {
+      "name": "PATCH /{location_id}",
+      "entries": [
+        {
+          "name": "update_location",
+          "file": "backend/app/routers/locations.py"
+        }
+      ],
+      "route": [
+        "PATCH /{location_id}"
+      ],
+      "drafted_as": "J_backend_app_routers_locations_update_location"
+    },
+    "J7": {
+      "name": "POST /",
+      "entries": [
+        {
+          "name": "create_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "POST /"
+      ],
+      "drafted_as": "J_shared_assets_create_shared_asset"
+    },
+    "J8": {
+      "name": "GET /{asset_id}",
+      "entries": [
+        {
+          "name": "get_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "GET /{asset_id}"
+      ],
+      "drafted_as": "J_shared_assets_get_shared_asset"
+    },
+    "J9": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_shared_assets",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ],
+      "drafted_as": "J_shared_assets_list_shared_assets"
+    },
+    "J10": {
+      "name": "POST /{asset_id}/restore",
+      "entries": [
+        {
+          "name": "restore_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "POST /{asset_id}/restore"
+      ],
+      "drafted_as": "J_shared_assets_restore_shared_asset"
+    },
+    "J11": {
+      "name": "POST /scenes/seed-starter",
+      "entries": [
+        {
+          "name": "seed_scenes",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /scenes/seed-starter"
+      ],
+      "drafted_as": "J_solo_seed_scenes"
+    },
+    "J12": {
+      "name": "DELETE /{asset_id}",
+      "entries": [
+        {
+          "name": "delete_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "DELETE /{asset_id}"
+      ],
+      "drafted_as": "J_shared_assets_delete_shared_asset"
+    },
+    "J13": {
+      "name": "PATCH /{asset_id}",
+      "entries": [
+        {
+          "name": "update_shared_asset",
+          "file": "backend/app/routers/shared_assets.py"
+        }
+      ],
+      "route": [
+        "PATCH /{asset_id}"
+      ],
+      "drafted_as": "J_shared_assets_update_shared_asset"
+    },
+    "J14": {
+      "name": "GET /runs/{run_id}",
+      "entries": [
+        {
+          "name": "get_run",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /runs/{run_id}"
+      ],
+      "drafted_as": "J_solo_get_run"
+    },
+    "J15": {
+      "name": "GET /scenes/{scene_id}",
+      "entries": [
+        {
+          "name": "get_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /scenes/{scene_id}"
+      ],
+      "drafted_as": "J_solo_get_scene"
+    },
+    "J16": {
+      "name": "GET /runs",
+      "entries": [
+        {
+          "name": "list_runs",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /runs"
+      ],
+      "drafted_as": "J_solo_list_runs"
+    },
+    "J17": {
+      "name": "GET /scenes",
+      "entries": [
+        {
+          "name": "list_scenes",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "GET /scenes"
+      ],
+      "drafted_as": "J_solo_list_scenes"
+    },
+    "J18": {
+      "name": "POST /scenes/{scene_id}/restore",
+      "entries": [
+        {
+          "name": "restore_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /scenes/{scene_id}/restore"
+      ],
+      "drafted_as": "J_solo_restore_scene"
+    },
+    "J19": {
+      "name": "POST /scenes",
+      "entries": [
+        {
+          "name": "create_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "POST /scenes"
+      ],
+      "drafted_as": "J_solo_create_scene"
+    },
+    "J20": {
+      "name": "DELETE /runs/{run_id}",
+      "entries": [
+        {
+          "name": "delete_run",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "DELETE /runs/{run_id}"
+      ],
+      "drafted_as": "J_solo_delete_run"
+    },
+    "J21": {
+      "name": "DELETE /scenes/{scene_id}",
+      "entries": [
+        {
+          "name": "delete_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "DELETE /scenes/{scene_id}"
+      ],
+      "drafted_as": "J_solo_delete_scene"
+    },
+    "J22": {
+      "name": "PATCH /scenes/{scene_id}",
+      "entries": [
+        {
+          "name": "update_scene",
+          "file": "backend/app/routers/solo.py"
+        }
+      ],
+      "route": [
+        "PATCH /scenes/{scene_id}"
+      ],
+      "drafted_as": "J_solo_update_scene"
+    }
+  },
+  "spot_checks": {
+    "Button": {
+      "min_caller_edges": 185,
+      "file": "frontend/src/components/ui/button.tsx"
+    },
+    "fetchApi": {
+      "min_caller_edges": 175,
+      "file": "frontend/src/api/client.ts"
+    }
+  },
+  "spot_check_basis": "caller-file churn over the last 500 commits, then fan-in"
+}

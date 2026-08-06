@@ -1,0 +1,306 @@
+{
+  "target": "coriolis-local",
+  "note": "the 22 handlers depending on the FEWEST shared-core nodes \u2014 the signedintake condition (isolated journeys) at the same registry size. Derived mechanically by harness/couple.py from a testgraph.propose draft of 207 handlers (207 resolvable); shared core = nodes in >= 50% of footprints (77 nodes). Selection rule pre-registered before the sweep ran \u2014 see ~/.claude/plans/testgraph-20plus-journey-falsification.md. UNAPPROVED: a measurement artifact, not a product registry.",
+  "approved": false,
+  "proposed_by": "harness/couple.py",
+  "codegraph_schema_version": 8,
+  "journeys": {
+    "J1": {
+      "name": "list_system_packs",
+      "entries": [
+        {
+          "name": "list_system_packs",
+          "file": "backend/app/routers/system_packs.py"
+        }
+      ],
+      "route": [
+        "GET ?"
+      ],
+      "drafted_as": "J_system_packs_list_system_packs"
+    },
+    "J2": {
+      "name": "GET /{pack_id}",
+      "entries": [
+        {
+          "name": "get_system_pack",
+          "file": "backend/app/routers/system_packs.py"
+        }
+      ],
+      "route": [
+        "GET /{pack_id}"
+      ],
+      "drafted_as": "J_system_packs_get_system_pack"
+    },
+    "J3": {
+      "name": "GET /admin/overview",
+      "entries": [
+        {
+          "name": "admin_overview",
+          "file": "backend/app/routers/admin.py"
+        }
+      ],
+      "route": [
+        "GET /admin/overview"
+      ],
+      "drafted_as": "J_admin_admin_overview"
+    },
+    "J4": {
+      "name": "GET /catalog",
+      "entries": [
+        {
+          "name": "catalog",
+          "file": "backend/app/routers/loot.py"
+        }
+      ],
+      "route": [
+        "GET /catalog"
+      ],
+      "drafted_as": "J_loot_catalog"
+    },
+    "J5": {
+      "name": "GET /collection",
+      "entries": [
+        {
+          "name": "collection",
+          "file": "backend/app/routers/loot.py"
+        }
+      ],
+      "route": [
+        "GET /collection"
+      ],
+      "drafted_as": "J_loot_collection"
+    },
+    "J6": {
+      "name": "POST /roll",
+      "entries": [
+        {
+          "name": "roll",
+          "file": "backend/app/routers/loot.py"
+        }
+      ],
+      "route": [
+        "POST /roll"
+      ],
+      "drafted_as": "J_loot_roll"
+    },
+    "J7": {
+      "name": "GET /{rulebook_slug}",
+      "entries": [
+        {
+          "name": "get_rulebook",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}"
+      ],
+      "drafted_as": "J_rulebooks_get_rulebook"
+    },
+    "J8": {
+      "name": "GET /{rulebook_slug}/artwork",
+      "entries": [
+        {
+          "name": "list_artwork",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/artwork"
+      ],
+      "drafted_as": "J_rulebooks_list_artwork"
+    },
+    "J9": {
+      "name": "GET /",
+      "entries": [
+        {
+          "name": "list_rulebooks",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /"
+      ],
+      "drafted_as": "J_rulebooks_list_rulebooks"
+    },
+    "J10": {
+      "name": "GET /me/avatar/file",
+      "entries": [
+        {
+          "name": "get_my_avatar",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /me/avatar/file"
+      ],
+      "drafted_as": "J_auth_get_my_avatar"
+    },
+    "J11": {
+      "name": "GET /providers",
+      "entries": [
+        {
+          "name": "providers",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /providers"
+      ],
+      "drafted_as": "J_backend_app_routers_auth_providers"
+    },
+    "J12": {
+      "name": "GET /{rulebook_slug}/sections/{section_slug}",
+      "entries": [
+        {
+          "name": "get_section",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/sections/{section_slug}"
+      ],
+      "drafted_as": "J_rulebooks_get_section"
+    },
+    "J13": {
+      "name": "GET /{rulebook_slug}/sections",
+      "entries": [
+        {
+          "name": "list_sections",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/sections"
+      ],
+      "drafted_as": "J_rulebooks_list_sections"
+    },
+    "J14": {
+      "name": "GET /{rulebook_slug}/artwork/{filename}",
+      "entries": [
+        {
+          "name": "serve_artwork",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/artwork/{filename}"
+      ],
+      "drafted_as": "J_rulebooks_serve_artwork"
+    },
+    "J15": {
+      "name": "GET /login/{provider_name}",
+      "entries": [
+        {
+          "name": "login",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /login/{provider_name}"
+      ],
+      "drafted_as": "J_backend_app_routers_auth_login"
+    },
+    "J16": {
+      "name": "GET /{rulebook_slug}/search",
+      "entries": [
+        {
+          "name": "search_sections",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/search"
+      ],
+      "drafted_as": "J_rulebooks_search_sections"
+    },
+    "J17": {
+      "name": "DELETE /me/avatar",
+      "entries": [
+        {
+          "name": "delete_avatar",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "DELETE /me/avatar"
+      ],
+      "drafted_as": "J_auth_delete_avatar"
+    },
+    "J18": {
+      "name": "GET /sessions",
+      "entries": [
+        {
+          "name": "list_my_sessions",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "GET /sessions"
+      ],
+      "drafted_as": "J_auth_list_my_sessions"
+    },
+    "J19": {
+      "name": "DELETE /sessions/{session_id}",
+      "entries": [
+        {
+          "name": "revoke_my_session",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "DELETE /sessions/{session_id}"
+      ],
+      "drafted_as": "J_auth_revoke_my_session"
+    },
+    "J20": {
+      "name": "POST /logout",
+      "entries": [
+        {
+          "name": "logout",
+          "file": "backend/app/routers/auth.py"
+        }
+      ],
+      "route": [
+        "POST /logout"
+      ],
+      "drafted_as": "J_backend_app_routers_auth_logout"
+    },
+    "J21": {
+      "name": "DELETE /{rulebook_slug}",
+      "entries": [
+        {
+          "name": "delete_rulebook",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "DELETE /{rulebook_slug}"
+      ],
+      "drafted_as": "J_rulebooks_delete_rulebook"
+    },
+    "J22": {
+      "name": "GET /{rulebook_slug}/sections/{section_slug}/tables",
+      "entries": [
+        {
+          "name": "get_section_tables",
+          "file": "backend/app/routers/rulebooks.py"
+        }
+      ],
+      "route": [
+        "GET /{rulebook_slug}/sections/{section_slug}/tables"
+      ],
+      "drafted_as": "J_rulebooks_get_section_tables"
+    }
+  },
+  "spot_checks": {
+    "Button": {
+      "min_caller_edges": 185,
+      "file": "frontend/src/components/ui/button.tsx"
+    },
+    "fetchApi": {
+      "min_caller_edges": 175,
+      "file": "frontend/src/api/client.ts"
+    }
+  },
+  "spot_check_basis": "caller-file churn over the last 500 commits, then fan-in"
+}
