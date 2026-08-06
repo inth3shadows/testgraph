@@ -72,6 +72,11 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
 - `testgraph/propose.py` — drafts a registry for a repo that has none: ast scan
   for route-decorated handlers, index resolution, spot-check derivation, declared
   blind spots. Writes `approved: false`.
+- `testgraph/ledger.py` — the append-only `selection`/`outcome` store and the
+  `caught`/`missed`/`unjudged` join over it. Never raises; a torn line is skipped
+  rather than fatal.
+- `testgraph/record.py` — the `outcome` writer and the `--summary` /
+  `--export-kb` readers. Refuses a journey id the registry does not know.
 - `journeys/honeyslate.json` — 8 journeys (submit, browse, edit, reschedule,
   comments, auth, gcal sync, scheduler) + `spot_checks` floors for the guard.
 - `harness/accuracy.py` — checks each labeled commit out in an isolated worktree
@@ -109,8 +114,8 @@ No service to deploy — a CLI run against a target repo's index. The **live**
 consumer is `hooks/pre-push`, installed by `hooks/install.sh` into the shared
 hooks dir (`git rev-parse --git-common-dir`/hooks) of every repo with an approved
 registry, so one install covers all of that repo's worktrees. It runs
-`python3 -m testgraph.hook`, which renders a push-sized summary and appends to
-`~/.local/share/testgraph/invocations.jsonl`.
+`python3 -m testgraph.hook`, which renders a push-sized summary and appends a
+`selection` row to `~/.local/share/testgraph/ledger.jsonl`.
 
 Two properties are load-bearing and neither is about selection quality:
 
@@ -146,8 +151,8 @@ decision rule, is `~/.claude/plans/testgraph-mcp-vs-map-probe.md`.
 The same probe found the thing that actually matters: those 82 calls were all
 testgraph's own development, and `Skill(testgraph-verify)` had been invoked **zero
 times** (issue #49). The pre-push hook exists to end that, and it carries its own
-scoreboard: `wc -l ~/.local/share/testgraph/invocations.jsonl`. If that number is
-still near zero a week after install, the hook failed too — and the honest
+scoreboard: the `selections` count in `testgraph.record --summary`. If that number
+is still near zero a week after install, the hook failed too — and the honest
 conclusion would be that nothing in this workflow wants a selector, not that the
 next consumer will be the one.
 
@@ -655,6 +660,75 @@ and costs:
   ledger accumulates on that cadence rather than per-commit. That is the trade for
   not building an environment; if the ledger turns out to need denser data, this
   decision is the thing to revisit first.
+
+## The results ledger (issue #10)
+
+`testgraph/ledger.py` + `testgraph/record.py`. One append-only JSONL at
+`~/.local/share/testgraph/ledger.jsonl`, two row kinds discriminated by `kind`:
+
+| kind | written by | says |
+|---|---|---|
+| `selection` | `testgraph.hook` (the pre-push consumer) | testgraph named these journeys for this commit |
+| `outcome` | `testgraph.record` (a human, or `/autorun` per the #8 decision) | this journey was run at this commit and passed/failed |
+
+Neither kind is worth much alone — a selection log answers "was the tool called",
+an outcome log answers "did the app break". The value is the join on
+`(repo, commit)`, which yields the number this project has so far *asserted*
+rather than measured: a journey that failed on a commit whose selection did not
+name it.
+
+### Three buckets for a failure, and why they must stay apart
+
+- **caught** — the selection for that commit named the journey.
+- **missed** — a selection exists for that commit and did not name it. A real
+  silent under-selection, the one failure mode a recall-first selector must not
+  have.
+- **unjudged** — no selection row for that commit at all. testgraph was never
+  asked, so this says nothing about the selector.
+
+Collapsing `unjudged` into `missed` is the easy bug and it would be badly
+misleading: every failure recorded before the hook was installed would score as a
+recall miss. `observed_recall` is therefore `caught / (caught + missed)` and is
+`None` — not `0.0` — until something is actually judged.
+
+### Storage: why local JSONL, and not the KB as #10 decided
+
+Issue #10 decided the ledger belongs in the shared `kb.*` Postgres rather than a
+local store, for three reasons. One was already false, and the decision as a whole
+is unbuildable at the write path:
+
+- **"lost to `wtclean`"** — false. `state_dir()` resolves to
+  `~/.local/share/testgraph`, outside every worktree. That was already true of
+  `invocations.jsonl`.
+- **"invisible from the work Mac"** and **"no reviewer or browsable surface"** —
+  both stand, and both are real requirements.
+- The blocker: **the KB is reachable only through an MCP server that an agent
+  drives.** There is no Python client, so `hook.py` cannot be the writer without
+  taking on a tunnel, a credential and a network round-trip inside a hook whose
+  entire contract is that it never fails a push. A KB-only ledger would have *no
+  writer at all* — which is precisely the defect #8 named ("the ledger has no
+  writer and would ship as dead schema"), relocated one layer up.
+
+Resolved as a split rather than a reversal: the local JSONL is the write path, and
+`record --summary --export-kb` emits a proposal payload an agent pushes into the
+KB. The export deliberately does **not** name a target table — KB conventions
+require `kb.read.search` first and `kb.propose.extend` over a new table, which is a
+decision that needs the KB in front of it, not a hardcoded guess in a CLI that has
+never read it.
+
+### Ranking is not wired to this yet, on purpose
+
+#10 asks for staleness and failure history to feed the next ranking. It should —
+but at the time this shipped the ledger held **zero rows**: the pre-push hook had
+not fired once since it merged. Ranking on an empty history is manufacturing a
+signal. `summarize()` therefore exposes `ready_for_ranking`, gated at
+`MIN_JUDGED_COMMITS = 20` — the size of the seeded-regression eval (#5), which is
+the smallest set that has yet said anything falsifiable about this selector, and a
+ranking signal is a weaker instrument than that eval rather than a stronger one.
+Below the threshold, `--summary` prints the distance to it.
+
+`invocations.jsonl` is still read if present, as `selection` rows, so no install
+loses its history to the rename.
 
 ## Second registry: signedintake (issue #11)
 

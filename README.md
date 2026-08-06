@@ -99,11 +99,24 @@ refreshes these indexes on commit. If a changed file's bytes still disagree with
 indexed copy afterwards, the answer degrades to `RECALL DEGRADED` and names the file
 instead of quietly trusting the wrong line numbers.
 
-Each run appends one line to `~/.local/share/testgraph/invocations.jsonl`
-(`{ts, repo, base, head, status, n_journeys, journey_ids, duration_ms, caller}`), which
-is how "is anything actually calling this?" gets answered with a number instead of a
-guess. That is the invocation log, not the results ledger — it records what the
-selector *said*, not what running the journeys then *found*.
+Each run appends one `selection` row to `~/.local/share/testgraph/ledger.jsonl`
+(`{kind, ts, repo, base, head, commit, status, n_journeys, journey_ids, duration_ms,
+caller}`), which is how "is anything actually calling this?" gets answered with a
+number instead of a guess.
+
+That is only half the ledger. The other half is what running a journey then *found*,
+written by `testgraph.record`:
+
+```bash
+python3 -m testgraph.record --repo <path> --journey J3 --outcome fail --note "…"
+python3 -m testgraph.record --repo <path> --summary
+```
+
+Joined on `(repo, commit)`, the two kinds produce the one number the project has so
+far asserted rather than measured: a journey that **failed on a commit whose selection
+did not name it** — a silent under-selection. A failure on a commit testgraph was
+never asked about is counted separately, as `unjudged`, because it says nothing about
+the selector.
 
 ## Project Structure
 
@@ -137,7 +150,7 @@ issue #49 measured. The `pre-push` hook above is the answer to that: it calls th
 selector whether or not anyone remembers to, and logs each call so the next
 increments (the results ledger, the `/verify` gate) have real runs to build on
 instead of an assumed caller. Whether it worked is a number, not an opinion —
-`wc -l ~/.local/share/testgraph/invocations.jsonl` a week from install.
+`python3 -m testgraph.record --repo <path> --summary` a week from install.
 
 **On whether this is worth it:** at 8 journeys selection avoids 57.5% of journey-runs
 on the labeled set, but bimodally — 3 of 5 commits select ≤2 journeys, 2 of 5 select

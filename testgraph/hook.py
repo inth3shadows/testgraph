@@ -16,43 +16,32 @@ Two rules follow from being a hook rather than a command:
    A reader who learns to skip the block has learned to skip the answer too.
 """
 import argparse
-import json
 import os
 import sys
 import time
 
+from . import ledger
 from . import registry as reg
 from . import select as sel
 
 MAX_JOURNEYS = 8
 MAX_WARNINGS = 3
 
-
-def state_dir():
-    return os.environ.get(
-        "TESTGRAPH_STATE_DIR",
-        os.path.join(
-            os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
-            "testgraph",
-        ),
-    )
+# Kept as an alias: `ledger` now owns where state lives, but this name is the
+# one the tests and the docs already point at.
+state_dir = ledger.state_dir
 
 
 def log_invocation(record):
-    """Append one line to the invocation log; never raise.
+    """Append this run to the ledger as a `selection` row; never raise.
 
     #49's success criterion is a non-zero invocation count after a week of
     normal work, so counting runs IS the deliverable, not telemetry decoration.
-    This records that the selector ran and what it answered. It is not the
-    results ledger of #10, which records what the journey runs then FOUND —
-    different data, and it needs a test runner this has no opinion about."""
-    try:
-        directory = state_dir()
-        os.makedirs(directory, exist_ok=True)
-        with open(os.path.join(directory, "invocations.jsonl"), "a") as f:
-            f.write(json.dumps(record, sort_keys=True) + "\n")
-    except OSError:
-        pass
+    That count now lives in `ledger.jsonl` alongside the `outcome` rows written
+    by `testgraph.record` — one store, because the number the project actually
+    wants ("a journey failed and the selection did not name it") is a JOIN
+    across the two kinds, and a join across two files is a join nobody runs."""
+    ledger.append(ledger.selection_row(record))
 
 
 def render(result, repo, more_cmd=None):
@@ -114,6 +103,10 @@ def run(repo, base, head, registry_path=None, caller="pre-push"):
         "repo": reg.repo_name(repo),
         "base": base,
         "head": head,
+        # The join key against `outcome` rows. `head` is whatever the caller
+        # said — git hands the hook a full sha, a human types "HEAD" — and two
+        # spellings of one commit join to nothing.
+        "commit": ledger.resolve_commit(repo, head),
         "caller": caller,
     }
     registry_path = registry_path or reg.resolve_for_repo(repo)
@@ -166,6 +159,7 @@ def main(argv=None):
             "repo": reg.repo_name(args.repo),
             "base": args.base,
             "head": args.head,
+            "commit": ledger.resolve_commit(args.repo, args.head),
             "caller": args.caller,
             "status": "ERROR",
             "error": f"{type(exc).__name__}: {exc}",
