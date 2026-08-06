@@ -112,11 +112,20 @@ def file_map(conn):
 def path_matches(indexed, rel):
     """Whether an index `file_path` denotes the traced relative path `rel`.
 
-    A suffix match on whole path COMPONENTS. The tolerance is deliberate and
-    still needed: the trace's relpath is taken against the traced repo's root
-    while the index's `file_path` is relative to the indexed root, and the two
-    differ whenever the harness is pointed at a subdirectory — so
-    `vendor/app/dyn.py` must still match a traced `app/dyn.py`.
+    A suffix match on whole path COMPONENTS. The tolerance is deliberate: the
+    trace's relpath is taken against the TRACED root while `file_path` is
+    relative to the INDEXED root, so when the index is rooted at a PARENT of the
+    traced root, `file_path` is longer and `vendor/app/dyn.py` must still match a
+    traced `app/dyn.py`.
+
+    The opposite direction is NOT handled and cannot be, here: if the index is
+    rooted BELOW the traced root, `file_path` is shorter than `rel` and no suffix
+    match exists, so every symbol in that journey silently resolves to nothing
+    and `traced_nodes` reads 0. That is indistinguishable from "the suite does
+    not exercise this journey". Point `--db` at an index rooted at or above the
+    traced root; `resolve_traced` reports the symbols as unresolved, and
+    `render` surfaces a nonzero `unresolved` count, but neither can name the
+    cause.
 
     What it must NOT do is match `myapp/dyn.py`, which a bare
     `indexed.endswith(rel)` does, because the boundary between components is not

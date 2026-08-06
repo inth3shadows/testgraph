@@ -184,6 +184,21 @@ def commit_of(row):
     return head if is_sha(head) else None
 
 
+def base_of(row):
+    """The push's BASE as a join key, or None. The mirror of `commit_of`.
+
+    `hook.run` records `base` as the caller SPELLED it and the resolved form in
+    `base_commit`. The baseline lookup joins against outcome rows keyed on
+    resolved shas, so accepting only a sha here is what keeps a symbolic
+    spelling from silently matching nothing — `base` is still read as a
+    fallback because git hands the hook a real sha on the ordinary path."""
+    base = row.get("base_commit")
+    if is_sha(base):
+        return base
+    base = row.get("base")
+    return base if is_sha(base) else None
+
+
 def selection_row(record):
     """Shape a `hook.run` record as a selection row."""
     row = dict(record)
@@ -277,8 +292,9 @@ def summarize(repo, rows=None, directory=None):
         # Repeated pushes of one commit: union, because a journey named by any
         # selection for that commit was named.
         entry["named"].update(r.get("journey_ids") or [])
-        if r.get("base"):
-            entry["bases"].add(r["base"])
+        base = base_of(r)
+        if base:
+            entry["bases"].add(base)
 
     # One observation per (commit, journey); the last verdict wins. Recording the
     # same failure twice — a re-run to confirm, or /autorun logging each attempt —
@@ -321,12 +337,17 @@ def summarize(repo, rows=None, directory=None):
         if isinstance(r.get("ts"), (int, float)):
             j["last_ts"] = max(j["last_ts"] or 0, r["ts"])
         entry = answered.get(commit)
-        # A `skip` says the journey was deliberately not run, so it is not
-        # evidence about anything — including how dense the history is.
-        if entry and verdict in ("pass", "fail"):
-            judged_commits.add(commit)
+        # `judged_commits` measures how DENSE the history is and gates ranking at
+        # MIN_JUDGED_COMMITS. It must count only what the score can actually use,
+        # or it diverges from `judged` and the gate opens on evidence that was
+        # excluded: 24 always-red pushes (all `unbaselined`) plus ONE real catch
+        # read as 25 judged commits and opened ranking on an observed_recall of
+        # 1.00 drawn from a single observation. A `skip` is likewise not
+        # evidence about anything — including density.
         if verdict == "pass":
             j["passes"] += 1
+            if entry:
+                judged_commits.add(commit)
             continue
         if verdict != "fail":
             continue
@@ -342,9 +363,11 @@ def summarize(repo, rows=None, directory=None):
         elif jid in entry["named"]:
             j["caught"] += 1
             caught_total += 1
+            judged_commits.add(commit)
         else:
             j["missed"] += 1
             missed_total += 1
+            judged_commits.add(commit)
 
     judged = caught_total + missed_total
     return {

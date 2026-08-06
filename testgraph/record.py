@@ -116,11 +116,31 @@ def render_summary(summary, known=None):
         f"  {summary['selections']} selection(s), {summary['outcomes']} outcome(s), "
         f"{summary['judged_commits']} judged commit(s)"
     )
+    unbaselined = sum(j["unbaselined"] for j in summary["journeys"].values())
+    unasked = sum(j["unasked"] for j in summary["journeys"].values())
     if summary["observed_recall"] is None:
-        lines.append(
-            "  observed recall: n/a — no failure has yet been recorded on a "
-            "commit that testgraph also answered for"
-        )
+        # Naming the RIGHT blocker matters more than the sentence being short.
+        # A flat "no failure on a commit testgraph answered for" is false
+        # whenever failures exist and every one of them is `unbaselined`, and it
+        # sends the reader to look for a missing selection when the actual
+        # remedy is to run journeys at the BASE of a push.
+        if unbaselined:
+            lines.append(
+                f"  observed recall: n/a — {unbaselined} failure(s) were recorded "
+                f"on commits testgraph answered for, but none had a green "
+                f"baseline at the push's base, so none can be scored. Run "
+                f"journeys BEFORE a push as well as after."
+            )
+        elif unasked:
+            lines.append(
+                f"  observed recall: n/a — {unasked} failure(s) recorded, but no "
+                f"selection answered for those commits (the tool was not asked)"
+            )
+        else:
+            lines.append(
+                "  observed recall: n/a — no failure has yet been recorded on a "
+                "commit that testgraph also answered for"
+            )
     else:
         lines.append(
             f"  observed recall: {summary['observed_recall']:.2f} "
@@ -131,7 +151,6 @@ def render_summary(summary, known=None):
             f"  ! {summary['missed']} SILENT MISS(ES) — a journey failed on a commit "
             f"whose selection did not name it"
         )
-    unbaselined = sum(j["unbaselined"] for j in summary["journeys"].values())
     if unbaselined:
         lines.append(
             f"  {unbaselined} failure(s) NOT judged — a selection answered, but "
@@ -158,10 +177,29 @@ def render_summary(summary, known=None):
             )
 
     if not summary["ready_for_ranking"]:
-        lines.append(
-            f"  ranking does NOT consult this yet: {summary['judged_commits']}/"
-            f"{summary['min_judged_commits']} judged commits"
-        )
+        # Both conditions are separately necessary, so the line must say WHICH
+        # one is unmet. Printing only the ratio rendered "25/20 judged commits"
+        # beside a not-ready verdict — a satisfied threshold offered as the
+        # explanation for the refusal, with the real blocker never named.
+        judged = summary["caught"] + summary["missed"]
+        short = summary["judged_commits"] < summary["min_judged_commits"]
+        if short and not judged:
+            why = (
+                f"{summary['judged_commits']}/{summary['min_judged_commits']} "
+                f"judged commits, and no failure has been scored yet"
+            )
+        elif short:
+            why = (
+                f"{summary['judged_commits']}/{summary['min_judged_commits']} "
+                f"judged commits"
+            )
+        else:
+            why = (
+                f"{summary['judged_commits']}/{summary['min_judged_commits']} "
+                f"judged commits is enough, but no failure has been SCORED "
+                f"(caught or missed) — recall would rest on nothing"
+            )
+        lines.append(f"  ranking does NOT consult this yet: {why}")
     return "\n".join(lines)
 
 

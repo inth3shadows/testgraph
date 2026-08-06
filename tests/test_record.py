@@ -175,10 +175,11 @@ class TheJoinTest(LedgerBase):
         self.assertEqual(s["journeys"]["J1"]["unbaselined"], 2)
 
     def test_the_baseline_gates_catches_and_misses_identically(self):
-        # Same push, same base, same green baseline — the ONLY difference is
-        # whether the selection named J1. One is a catch, the other a miss, and
-        # both are scored. Asymmetry here is what the two tests around this one
-        # exist to prevent.
+        # Two pushes, each with its own green baseline. The first names the
+        # journey that then fails (a catch); the second does not name the
+        # journey that then fails (a miss). Both are SCORED — that is the point:
+        # once a baseline exists, the bucket is decided purely by whether the
+        # selection named it, with no asymmetry left between the two outcomes.
         self._ran(sha(1), "J1", "pass")
         self._push(base=sha(1), head=sha(2), named=["J1"])
         self._ran(sha(2), "J1", "fail")
@@ -274,6 +275,24 @@ class RankingGateTest(LedgerBase):
         self._push(base=sha(500), head=sha(999), named=["J1"])
         self._ran(sha(999), "J1", "fail")
         self.assertTrue(ledger.summarize("alpha")["ready_for_ranking"])
+
+    def test_unbaselined_failures_do_not_inflate_the_density_counter(self):
+        # `judged_commits` gates ranking; `judged` (caught+missed) is what recall
+        # rests on. They had diverged: a commit counted toward density merely for
+        # carrying a selection and an outcome, INCLUDING the unbaselined failures
+        # the score excludes. So 24 always-red pushes plus one real catch read as
+        # 25 judged commits, opened the gate, and handed ranking a recall of 1.00
+        # drawn from a single observation.
+        for i in range(ledger.MIN_JUDGED_COMMITS + 4):
+            self._push(base=sha(i), head=sha(1000 + i), named=["J1"])
+            self._ran(sha(1000 + i), "J1", "fail")
+        self._ran(sha(700), "J1", "pass")
+        self._push(base=sha(700), head=sha(701), named=["J1"])
+        self._ran(sha(701), "J1", "fail")
+        s = ledger.summarize("alpha")
+        self.assertEqual((s["caught"], s["missed"]), (1, 0))
+        self.assertLess(s["judged_commits"], ledger.MIN_JUDGED_COMMITS)
+        self.assertFalse(s["ready_for_ranking"])
 
     def test_always_red_history_cannot_open_the_gate(self):
         # The same twenty pushes with no baseline anywhere. Every failure is

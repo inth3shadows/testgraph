@@ -103,10 +103,19 @@ def run(repo, base, head, registry_path=None, caller="pre-push"):
         "repo": reg.repo_name(repo),
         "base": base,
         "head": head,
-        # The join key against `outcome` rows. `head` is whatever the caller
-        # said — git hands the hook a full sha, a human types "HEAD" — and two
-        # spellings of one commit join to nothing.
+        # The join keys against `outcome` rows. `head`/`base` are whatever the
+        # caller said — git hands the hook full shas, a human types "HEAD" and
+        # "HEAD~1" — and two spellings of one commit join to nothing.
+        #
+        # `base_commit` is not decoration. The baseline check in
+        # `ledger.summarize` looks up (base, journey) in outcomes keyed on
+        # RESOLVED shas, so a symbolic base matches nothing and every failure on
+        # that push falls to `unbaselined` — pinning observed_recall at None for
+        # good, for any caller that passes a symbolic base. `head` got this
+        # treatment from the start; `base` did not, and only started mattering
+        # once the baseline gated the score.
         "commit": ledger.resolve_commit(repo, head),
+        "base_commit": ledger.resolve_commit(repo, base),
         "caller": caller,
     }
     registry_path = registry_path or reg.resolve_for_repo(repo)

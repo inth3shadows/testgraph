@@ -88,8 +88,13 @@ invisible forever, and it silently deflates the count this ledger exists to prod
 
 `--summary` reports, per journey:
 
-- **caught** — it failed and the selection for that commit named it.
-- **missed** — it failed, a selection exists for that commit, and it was not named.
+- **caught** — it failed, the selection for that push named it, **and** the
+  journey was recorded passing at that push's base. The baseline is required
+  here for the same reason it is required for **missed**: naming a journey that
+  was already red predicts nothing, so crediting it would let pre-existing
+  breakage raise observed recall and never lower it.
+- **missed** — it failed, a selection answered for that push and did not name it,
+  and the journey was recorded passing at that push's base.
   This is a real silent under-selection and is shouted, not tucked in a column.
 - **unasked** — it failed on a commit no selection answered for. testgraph was
   never asked, so this is excluded from observed recall rather than blamed on it.

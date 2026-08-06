@@ -757,6 +757,32 @@ did. Twenty `unbaselined` failures now correctly leave the gate shut, and
 You only get to **credit** the selector when there was something to regress
 from, for the same reason you only get to blame it then.
 
+**Two things the widened `unbaselined` bucket then collided with, both found in
+review of the fix itself.**
+
+*The density counter and the score had diverged.* `ready_for_ranking` is
+`judged_commits >= 20 AND judged > 0`, but `judged_commits` counted any commit
+carrying a selection plus a pass/fail — including the `unbaselined` failures
+`judged` now excludes. Twenty-four always-red pushes plus **one** properly
+baselined catch read as `judged_commits: 25, caught: 1, ready: True,
+observed_recall: 1.00`: the gate opened and handed ranking a recall drawn from a
+single observation. A commit now counts toward density only if it carries a
+`pass` a selection answered for, or a failure that was actually **scored**.
+
+*`base` was never resolved.* `hook.run` normalises `head` into `commit` through
+`resolve_commit` — with a comment explaining that two spellings of one commit
+join to nothing — and stored `base` **verbatim** on the line above. That was
+harmless until the baseline started gating the score: the lookup joins against
+outcome rows keyed on resolved shas, so `--base HEAD~1` matched nothing, every
+failure on that push fell to `unbaselined`, and `observed_recall` was pinned at
+`None` for any caller passing a symbolic base. `base_commit` now carries the
+resolved form; `base` is kept as spelled, because that is what the rendered
+output should show.
+
+The pattern in both: a change to what a bucket MEANS has to be chased into every
+counter and every sentence that reads it. Neither of these was in the diff that
+introduced the rule.
+
 Two smaller rules follow from the same principle. Observations are deduplicated
 on `(commit, journey)`, last verdict wins, so re-recording one failure does not
 multiply the headline count. And the commit key must be a 40-hex sha:
