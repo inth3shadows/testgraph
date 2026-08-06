@@ -211,8 +211,9 @@ def summarize(repo, rows=None, directory=None):
 
     Four buckets for a failure, and keeping them apart is the whole point:
 
-      caught      — the selection for that push named this journey. The selector
-                    earned its keep.
+      caught      — the selection ANSWERED for that push and named this journey,
+                    and the journey was known-good at the push's base. The
+                    selector earned its keep.
       missed      — the selection ANSWERED for that push and did not name it, and
                     the journey was known-good at the push's base. A real silent
                     under-selection.
@@ -220,6 +221,22 @@ def summarize(repo, rows=None, directory=None):
                     asked, so this says nothing about it.
       unbaselined — a selection answered, but nothing records the journey passing
                     at that push's BASE, so the breakage may predate the push.
+
+    The green baseline gates `caught` and `missed` IDENTICALLY, and that symmetry
+    is load-bearing. Requiring it for `missed` alone — the state this function
+    shipped in — made pre-existing breakage able to raise `observed_recall` and
+    never able to lower it. A journey that was never green scored `caught` on
+    every push whose selection happened to name it, which is a perfect score for
+    zero information: the journey was already red, so naming it predicted
+    nothing. The same history with a selector that named nothing was excluded
+    from scoring entirely as `unbaselined`. Two pushes of an always-red journey
+    read 2 caught / 0 missed / recall 1.00 one way and 0/0/None the other.
+
+    That is the same defect as the two the DELTA-vs-STATE fix closed, pointed the
+    other way: a row that says nothing about the selector counted as evidence —
+    there, against it; here, for it. You only get to CREDIT the selector when
+    there was something to regress from, for the same reason you only get to
+    blame it then.
 
     `unbaselined` is the bucket that keeps the number honest, and it is the one
     that was missing. A `selection` row answers "what could base..head break" — a
@@ -316,14 +333,18 @@ def summarize(repo, rows=None, directory=None):
         j["failures"] += 1
         if not entry:
             j["unasked"] += 1
+        # The baseline is checked BEFORE caught-vs-missed, not as the fallback
+        # after it. As a fallback it gated only `missed`, so an always-red
+        # journey could bank a `caught` on every push that named it while the
+        # same history with a blind selector was excluded from the score.
+        elif not any((base, jid) in passed_at for base in entry["bases"]):
+            j["unbaselined"] += 1
         elif jid in entry["named"]:
             j["caught"] += 1
             caught_total += 1
-        elif any((base, jid) in passed_at for base in entry["bases"]):
+        else:
             j["missed"] += 1
             missed_total += 1
-        else:
-            j["unbaselined"] += 1
 
     judged = caught_total + missed_total
     return {

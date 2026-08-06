@@ -160,6 +160,28 @@ class ResolutionTest(unittest.TestCase):
         self.assertEqual(ids, set())
         self.assertEqual(missing, [("vendor/svc.py", "mid")])
 
+    def test_a_directory_that_merely_ends_in_the_traced_path_is_not_a_match(self):
+        # The narrowing above was a bare `endswith`, which has no path boundary:
+        # 'myapp/svc.py'.endswith('app/svc.py') is True. So it leaked at exactly
+        # the case it exists to stop — binding a traced symbol to a same-named
+        # node in an unrelated directory, silently and with no symptom.
+        other = build_index()
+        other.execute("UPDATE nodes SET file_path = 'myapp/svc.py' WHERE id = 'f:mid'")
+        ids, missing = gt.resolve_traced(other, [("app/svc.py", "mid")])
+        self.assertEqual(ids, set())
+        self.assertEqual(missing, [("app/svc.py", "mid")])
+
+    def test_a_longer_indexed_root_still_matches_on_component_boundaries(self):
+        # The tolerance this keeps: the trace's relpath is taken against the
+        # traced repo's root while file_path is relative to the INDEXED root, so
+        # a harness pointed at a subdirectory must still match. Component
+        # boundary respected, prefix length irrelevant.
+        other = build_index()
+        other.execute("UPDATE nodes SET file_path = 'vendor/app/svc.py' WHERE id = 'f:mid'")
+        ids, missing = gt.resolve_traced(other, [("app/svc.py", "mid")])
+        self.assertEqual(ids, {"f:mid"})
+        self.assertEqual(missing, [])
+
     def test_two_indexes_in_one_process_do_not_share_a_file_cache(self):
         other = build_index()
         other.execute("UPDATE nodes SET file_path = 'elsewhere/svc.py' WHERE id = 'f:mid'")

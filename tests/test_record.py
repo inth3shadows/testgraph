@@ -82,8 +82,14 @@ class LedgerBase(unittest.TestCase):
         )
 
     def _push(self, base, head, named, repo="alpha"):
-        """A push whose selection answered, with a green baseline recorded at its
-        base — the shape a failure has to have before the selector can be blamed."""
+        """A push whose selection ANSWERED. It records no baseline — callers that
+        need one write the `pass` at `base` themselves.
+
+        The docstring used to claim it recorded a green baseline, which it never
+        did. That was not cosmetic: it made `RankingGateTest` read as twenty
+        properly-baselined judged failures when it was twenty always-red
+        commits with no baseline anywhere, and that test was the thing standing
+        behind the ranking gate."""
         self._select(head, named, base=base, repo=repo)
 
 
@@ -146,6 +152,42 @@ class TheJoinTest(LedgerBase):
         self.assertEqual((s["caught"], s["missed"]), (0, 0))
         self.assertIsNone(s["observed_recall"])
         self.assertEqual(s["journeys"]["J2"]["unasked"], 1)
+
+    def test_a_catch_with_no_green_baseline_is_not_credited_to_the_selector(self):
+        # The mirror of the test below, and the defect it pins is the same one
+        # pointed the other way: a row that says nothing about the selector
+        # counted as evidence — there against it, here FOR it.
+        #
+        # J1 is red from the first push and never recorded green. Two pushes
+        # touch code reaching it and the selection names it both times. Naming an
+        # already-red journey predicts nothing, so crediting it made pre-existing
+        # breakage able to raise observed_recall and never able to lower it: this
+        # history scored 2 caught / 0 missed / recall 1.00, while the identical
+        # history with a selector that named NOTHING was excluded from scoring
+        # entirely. A perfect score for zero information.
+        self._push(base=sha(1), head=sha(2), named=["J1"])
+        self._ran(sha(2), "J1", "fail")
+        self._push(base=sha(2), head=sha(3), named=["J1"])
+        self._ran(sha(3), "J1", "fail")
+        s = ledger.summarize("alpha")
+        self.assertEqual((s["caught"], s["missed"]), (0, 0))
+        self.assertIsNone(s["observed_recall"])
+        self.assertEqual(s["journeys"]["J1"]["unbaselined"], 2)
+
+    def test_the_baseline_gates_catches_and_misses_identically(self):
+        # Same push, same base, same green baseline — the ONLY difference is
+        # whether the selection named J1. One is a catch, the other a miss, and
+        # both are scored. Asymmetry here is what the two tests around this one
+        # exist to prevent.
+        self._ran(sha(1), "J1", "pass")
+        self._push(base=sha(1), head=sha(2), named=["J1"])
+        self._ran(sha(2), "J1", "fail")
+        self._ran(sha(3), "J2", "pass")
+        self._push(base=sha(3), head=sha(4), named=["J1"])
+        self._ran(sha(4), "J2", "fail")
+        s = ledger.summarize("alpha")
+        self.assertEqual((s["caught"], s["missed"]), (1, 1))
+        self.assertEqual(s["observed_recall"], 0.5)
 
     def test_a_failure_with_no_green_baseline_is_not_blamed_on_the_selector(self):
         # The trace that used to score a false miss: A..B breaks J3 and the
@@ -219,13 +261,30 @@ class TheJoinTest(LedgerBase):
 
 class RankingGateTest(LedgerBase):
     def test_ranking_stays_off_until_enough_commits_are_judged(self):
+        # Each push needs its own green baseline. Without one these are twenty
+        # observations of an always-red journey, which is not judged evidence at
+        # all — see test_always_red_history_cannot_open_the_gate below, which is
+        # what this fixture accidentally used to be.
         for i in range(ledger.MIN_JUDGED_COMMITS - 1):
+            self._ran(sha(i), "J1", "pass")
             self._push(base=sha(i), head=sha(1000 + i), named=["J1"])
             self._ran(sha(1000 + i), "J1", "fail")
         self.assertFalse(ledger.summarize("alpha")["ready_for_ranking"])
+        self._ran(sha(500), "J1", "pass")
         self._push(base=sha(500), head=sha(999), named=["J1"])
         self._ran(sha(999), "J1", "fail")
         self.assertTrue(ledger.summarize("alpha")["ready_for_ranking"])
+
+    def test_always_red_history_cannot_open_the_gate(self):
+        # The same twenty pushes with no baseline anywhere. Every failure is
+        # `unbaselined`, so nothing is judged and the gate stays shut. This is
+        # the state the fixture above was silently in.
+        for i in range(ledger.MIN_JUDGED_COMMITS + 5):
+            self._push(base=sha(i), head=sha(1000 + i), named=["J1"])
+            self._ran(sha(1000 + i), "J1", "fail")
+        s = ledger.summarize("alpha")
+        self.assertEqual((s["caught"], s["missed"]), (0, 0))
+        self.assertFalse(s["ready_for_ranking"])
 
     def test_skipped_journeys_cannot_satisfy_the_gate(self):
         # `skip` says the journey was deliberately NOT run. Twenty of those used

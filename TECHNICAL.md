@@ -688,7 +688,8 @@ name it.
 
 ### Four buckets for a failure, and why they must stay apart
 
-- **caught** — the selection for that push named the journey.
+- **caught** — the selection **answered** for that push, named the journey, and
+  the journey was **known-good at the push's base**.
 - **missed** — the selection **answered** for that push, did not name the
   journey, and the journey was **known-good at the push's base**. A real silent
   under-selection, the one failure mode a recall-first selector must not have.
@@ -729,6 +730,32 @@ blaming the selector removes that: **you only get to call it a miss when you had
 green baseline to regress from.** The cost is that misses stay rare unless
 journeys run on every push — which is the discipline this number needs in order
 to mean anything, so the cost is the point.
+
+**The baseline gates `caught` and `missed` identically, and that symmetry was
+missing for one release.** As first shipped, only `missed` required the green
+baseline; `caught` required nothing. So the paragraph above was implemented in
+one direction and the bucket list said "the selection for that push named the
+journey" with no baseline clause — which is the *same* defect as the two above
+it, pointed the other way: a row that says nothing about the selector counted as
+evidence, here **for** it.
+
+A journey that was never green banked a `caught` on every push whose selection
+happened to name it. That is a perfect score for zero information — the journey
+was already red, so naming it predicted nothing — and it was one-directional:
+pre-existing breakage could only ever *raise* `observed_recall`, never lower it,
+because the same history with a selector that named nothing fell into
+`unbaselined` and was excluded from scoring. Two pushes of an always-red journey
+read **2 caught / 0 missed / recall 1.00** one way and **0 / 0 / `None`** the
+other.
+
+It also propagated into the ranking gate. `RankingGateTest` built twenty pushes
+of an always-red journey with no baseline anywhere and asserted the gate opened;
+its `_push` helper's docstring claimed it recorded a green baseline and never
+did. Twenty `unbaselined` failures now correctly leave the gate shut, and
+`test_always_red_history_cannot_open_the_gate` pins that.
+
+You only get to **credit** the selector when there was something to regress
+from, for the same reason you only get to blame it then.
 
 Two smaller rules follow from the same principle. Observations are deduplicated
 on `(commit, journey)`, last verdict wins, so re-recording one failure does not
