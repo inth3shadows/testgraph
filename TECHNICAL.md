@@ -1222,9 +1222,29 @@ which is exactly the failure mode a 20-commit window is worst at detecting.
 | `testgraph/integrity.py` | 151 nodes | J2, J4, J6 | `integrity` |
 | `testgraph/ledger.py` | 257 nodes | all six | `ledger` |
 
-The cause is not the registry. **codegraph records no cross-file edges for aliased
-relative imports** — cross-file inbound edge counts are exactly 0 for the two modules
-imported `from . import X as Y`, against 15/44/15 for the unaliased ones. Adding these
+The cause is not the registry. **codegraph does not resolve calls through a module bound
+under an alias.** `from . import ledger` then `ledger.append(...)` links; `from . import
+db as dbmod` then `dbmod.connect(...)` does not — the local name no longer matches the
+module name. Both forms are `module.attr()` calls in the same package, and the alias is
+the only difference:
+
+| module | bound as | `alias.attr()` call sites in source | cross-file inbound edges |
+|---|---|---|---|
+| `registry.py` | `reg` | **38** | **0** |
+| `db.py` | `dbmod` | 18 | **0** |
+| `select.py` | `sel` | 6 | 1 |
+| `ledger.py` | `ledger` | 10 | **44** |
+| `integrity.py` | `integrity` | 3 | **15** |
+
+Thirty-eight call sites resolving to zero edges, against ten resolving to forty-four.
+`select.py` shows the effect is not strictly all-or-nothing — one edge survives — but at
+6 call sites it is the same collapse, and its journeys are covered because it is itself a
+registered entry point rather than because the graph reaches it.
+
+**This does not reach honeyslate's numbers.** Checked directly: honeyslate has 9 aliased
+imports and every one aliases a *symbol* (`Session as DbSession`), never a module, so the
+`alias.attr()` form never arises. The recall figures in this document are unaffected.
+Adding these
 files' symbols as journey `entries` would manufacture the right answer from a false claim
 about what an entry is, so the registry declares the gap instead. Until the indexer links
 aliased imports, a `NONE` following a `db.py` or `registry.py` change means **unknown**,
