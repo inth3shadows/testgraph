@@ -27,6 +27,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+# ONLY this directory goes on the target's PYTHONPATH. `harness/` itself holds
+# `trace.py`, which would shadow the stdlib `trace` module for every import in
+# the traced suite.
+PLUGIN_DIR = os.path.join(HERE, "plugin")
 
 
 def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
@@ -35,25 +39,39 @@ def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
     A non-zero pytest exit is NOT fatal here. A suite with failing tests still
     executed real code, and the traces of the tests that did pass are still the
     truth about what those journeys touch. Refusing to report unless the whole
-    suite is green would make the measurement hostage to the target's health."""
+    suite is green would make the measurement hostage to the target's health.
+
+    A pytest that dies BEFORE the plugin can report is different, and the
+    difference has to survive: the output file is deleted first, so "the file
+    exists" means "this run wrote it". Without that, a run killed at its timeout
+    — the exact honeyslate case — would load the PREVIOUS run's trace and report
+    it as fresh."""
+    repo = os.path.abspath(repo)
     out = os.path.abspath(out)
+    if os.path.exists(out):
+        os.remove(out)
     env = dict(env if env is not None else os.environ)
     env["TGTRACE_OUT"] = out
-    env["TGTRACE_ROOT"] = os.path.abspath(os.path.join(repo, root))
+    env["TGTRACE_ROOT"] = os.path.join(repo, root)
     env["PYTHONPATH"] = os.pathsep.join(
-        [HERE] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+        [PLUGIN_DIR] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
     )
     cmd = [
         python, "-m", "pytest", os.path.join(repo, tests),
         "-p", "tgtrace", "-p", "no:cacheprovider", "-q",
         *extra_args,
     ]
-    proc = subprocess.run(cmd, cwd=repo, env=env, timeout=timeout)
+    try:
+        rc = subprocess.run(cmd, cwd=repo, env=env, timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        # The documented honeyslate failure. Report it as the no-trace case the
+        # caller already handles, rather than as a traceback.
+        return None, None
     payload = None
     if os.path.exists(out):
         with open(out) as f:
             payload = json.load(f)
-    return proc.returncode, payload
+    return rc, payload
 
 
 def main(argv=None):
@@ -72,15 +90,27 @@ def main(argv=None):
         extra_args=args.pytest_args, timeout=args.timeout,
     )
     if payload is None:
-        print(
-            f"no trace written to {args.out} — pytest exited {rc} before the plugin "
-            f"could report (a collection error, or the plugin was not loaded)",
-            file=sys.stderr,
+        why = (
+            f"timed out after {args.timeout}s"
+            if rc is None
+            else f"exited {rc} before the plugin could report "
+            f"(a collection error, or the plugin was not loaded)"
         )
+        print(f"no trace written to {args.out} — pytest {why}", file=sys.stderr)
         return 1
 
     tests = payload["tests"]
     symbols = {tuple(s) for syms in tests.values() for s in syms}
+    if not symbols:
+        # A green run that recorded nothing is the worst output this can produce,
+        # because everything downstream reads it as "no journey has a problem".
+        print(
+            f"traced {len(tests)} test(s) and ZERO symbols — --root "
+            f"({args.root}) is almost certainly wrong, or every source file was "
+            f"skipped. Do NOT score this trace.",
+            file=sys.stderr,
+        )
+        return 1
     print(f"traced {len(tests)} test(s), {len(symbols)} distinct symbol(s)")
     print(f"  backend: {payload['backend']}   root: {payload['root']}")
     print(f"  wrote {args.out}")

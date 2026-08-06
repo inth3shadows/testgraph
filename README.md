@@ -123,8 +123,8 @@ selector *said*, not what running the journeys then *found*.
   `selectivity.py` (selection sizes per commit for a target with no labels),
   `seed_regressions.py` + `ast_oracle.py` (seeded-mutation eval against an
   independent oracle), `adjudications.json` (hand-ruled disagreements),
-  `trace.py` + `tgtrace.py` + `ground_truth.py` (score the static footprint
-  against what a journey actually *executes*, issue #12).
+  `trace.py` + `plugin/tgtrace.py` + `ground_truth.py` (score the static
+  footprint against what a journey actually *executes*, issue #12).
 - `hooks/` — `pre-push` (the git hook that runs the selector on every push) and
   `install.sh` (installs it into each repo with an approved registry).
 - `maps/` — generated journey maps (symbol -> journeys, grouped by file).

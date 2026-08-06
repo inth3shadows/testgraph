@@ -74,9 +74,11 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
   blind spots. Writes `approved: false`.
 - `journeys/honeyslate.json` — 8 journeys (submit, browse, edit, reschedule,
   comments, auth, gcal sync, scheduler) + `spot_checks` floors for the guard.
-- `harness/tgtrace.py` — pytest plugin, loaded into the TARGET's interpreter;
-  records every function entered during each test body. Imports nothing from
-  this project.
+- `harness/plugin/tgtrace.py` — pytest plugin, loaded into the TARGET's
+  interpreter; records every function entered during each test body. Imports
+  nothing from this project, and sits in its own directory so only that
+  directory joins the target's `PYTHONPATH` — exporting `harness/` would shadow
+  the stdlib `trace` module for the traced suite.
 - `harness/trace.py` — runs a target's suite under that plugin and writes the
   trace JSON.
 - `harness/ground_truth.py` — joins traces to journeys and scores the static
@@ -997,9 +999,9 @@ four modules where `routes.create` reaches `dyn.audit` only through
 `getattr(mod, HOOK)`. Measured 2026-08-06:
 
 ```
-1/1 journey(s) traced; 1 traced symbol(s) outside the static footprint
+1/1 journey(s) scored; 1 traced symbol(s) outside the static footprint
   J1  create a thing  ! SILENT-MISS SOURCE
-      traced 5 symbol(s) -> 4 node(s); static footprint 7
+      traced 5 symbol(s) -> 4 node(s); static footprint 7 (from 1 resolved entry symbol(s))
       traced_only 1   static_only 4   unresolved 0
         - audit (app/dyn.py)
 ```
@@ -1020,6 +1022,15 @@ This is the #8 decision arriving with its bill. testgraph deliberately does not 
 an environment, so the trace harness inherits whatever the target needs to run, and
 honeyslate needs a seeded Postgres. `harness/journey_tests_honeyslate.json` is
 written and ready; the run needs a dev Postgres on :55433 and nothing else.
+
+**The map is keyed on path suffixes, not on exact nodeids.** pytest nodeids are
+relative to its *rootdir*, which for a target with no ini file falls back to the
+invocation directory — so `--repo <r>/backend --tests tests` yields
+`tests/test_auth.py::…` while `--repo <r> --tests backend/tests` yields
+`backend/tests/test_auth.py::…` for the same test. Matching longest-suffix-first
+makes the map independent of how the harness was invoked. Keying on exact
+nodeids meant every test went unmapped under the other invocation form, every
+journey reported `no_trace`, and the summary line read as a clean run.
 
 **The map is coarse on purpose.** It labels at *file* level, never per test-nodeid:
 a per-test label needs a reading of what each test asserts, which is the judgement

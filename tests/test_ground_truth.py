@@ -17,7 +17,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from harness import ground_truth as gt  # noqa: E402
-from harness import tgtrace  # noqa: E402
+from harness.plugin import tgtrace  # noqa: E402
 
 
 def build_index():
@@ -100,11 +100,33 @@ class TestMappingTest(unittest.TestCase):
         _, unmapped = gt.journey_traces(self.trace, {})
         self.assertEqual(len(unmapped), 3)
 
+    def test_a_map_still_matches_when_pytest_prefixes_the_nodeid(self):
+        # pytest nodeids are relative to its rootdir, which for a target with no
+        # ini file is the invocation dir — so `--repo <r>/backend --tests tests`
+        # and `--repo <r> --tests backend/tests` yield DIFFERENT nodeids for the
+        # same test. A map keyed on one form matched nothing under the other and
+        # every journey reported no_trace, which read as a clean run.
+        prefixed = {
+            "root": "/x",
+            "tests": {"backend/tests/test_a.py::test_one": [["app/svc.py", "mid"]]},
+        }
+        by_j, unmapped = gt.journey_traces(prefixed, {"tests/test_a.py": ["J1"]})
+        self.assertEqual(by_j["J1"], {("app/svc.py", "mid")})
+        self.assertEqual(unmapped, [])
+
+    def test_the_longest_matching_suffix_wins(self):
+        trace = {"tests": {"a/b/test_x.py::t": [["app/svc.py", "mid"]]}}
+        by_j, _ = gt.journey_traces(
+            trace, {"test_x.py": ["J2"], "b/test_x.py": ["J1"]}
+        )
+        self.assertIn("J1", by_j)
+        self.assertNotIn("J2", by_j)
+
 
 class ResolutionTest(unittest.TestCase):
     def setUp(self):
         self.conn = build_index()
-        gt._FILE_CACHE.clear()
+        
 
     def test_a_traced_symbol_resolves_to_its_node(self):
         ids, missing = gt.resolve_traced(self.conn, [("app/svc.py", "mid")])
@@ -129,11 +151,28 @@ class ResolutionTest(unittest.TestCase):
         self.assertEqual(ids, set())
         self.assertEqual(missing, [("app/ghost.py", "nowhere")])
 
+    def test_a_same_named_symbol_in_another_file_is_not_accepted_as_a_match(self):
+        # `resolve_symbol` matches on a basename LIKE, so a traced
+        # `vendor/svc.py:mid` the index genuinely lacks would bind to
+        # `app/svc.py:mid` — and whether it counted as a miss would then be
+        # decided by an unrelated node's edges.
+        ids, missing = gt.resolve_traced(self.conn, [("vendor/svc.py", "mid")])
+        self.assertEqual(ids, set())
+        self.assertEqual(missing, [("vendor/svc.py", "mid")])
+
+    def test_two_indexes_in_one_process_do_not_share_a_file_cache(self):
+        other = build_index()
+        other.execute("UPDATE nodes SET file_path = 'elsewhere/svc.py' WHERE id = 'f:mid'")
+        ids, _ = gt.resolve_traced(other, [("elsewhere/svc.py", "mid")])
+        self.assertEqual(ids, {"f:mid"})
+        ids, _ = gt.resolve_traced(self.conn, [("app/svc.py", "mid")])
+        self.assertEqual(ids, {"f:mid"})
+
 
 class ComparisonTest(unittest.TestCase):
     def setUp(self):
         self.conn = build_index()
-        gt._FILE_CACHE.clear()
+        
 
     def _rows(self, by_journey):
         return {r["journey"]: r for r in gt.compare(self.conn, REGISTRY, by_journey)}
@@ -164,6 +203,32 @@ class ComparisonTest(unittest.TestCase):
         self.assertIn("SILENT-MISS SOURCE", text)
         self.assertIn("stray", text)
         self.assertIn("NO TRACE", text)
+
+    def test_a_measurement_that_measured_nothing_reports_no_miss_count(self):
+        # The old headline read "0/8 journey(s) traced; 0 traced symbol(s)
+        # outside the static footprint" — the sentence a reader quotes, and
+        # indistinguishable from a clean result.
+        rows = gt.compare(self.conn, REGISTRY, {})
+        text = gt.render(rows, self.conn, unmapped=["tests/test_a.py::t"])
+        self.assertIn("NO MEASUREMENT", text)
+        self.assertNotIn("outside the static footprint", text)
+
+    def test_unresolved_entries_are_named_rather_than_rendered_as_misses(self):
+        # An empty footprint makes EVERY traced node "outside" it. Reporting
+        # that as the selector's worst defect hides a renamed entry point or a
+        # mismatched --db behind a wall of false silent misses.
+        registry = {
+            "journeys": {"J1": {"name": "gone", "entries": [{"name": "vanished"}]}}
+        }
+        rows = gt.compare(self.conn, registry, {"J1": {("app/svc.py", "mid")}})
+        self.assertEqual(rows[0]["entries_resolved"], 0)
+        text = gt.render(rows, self.conn, unmapped=[])
+        self.assertIn("ENTRIES UNRESOLVED", text)
+        self.assertNotIn("SILENT-MISS SOURCE", text)
+
+    def test_the_footprint_line_states_how_many_entries_resolved(self):
+        rows = gt.compare(self.conn, REGISTRY, {"J1": {("app/svc.py", "mid")}})
+        self.assertIn("resolved entry symbol", gt.render(rows, self.conn, unmapped=[]))
 
 
 class CollectorTest(unittest.TestCase):
@@ -206,6 +271,18 @@ class CollectorTest(unittest.TestCase):
         tgtrace._current = set()
         tgtrace._record(self._code("<string>", "exec"))
         self.assertEqual(tgtrace._current, set())
+
+    def test_a_repo_living_under_a_tests_directory_still_traces(self):
+        # The skip list is matched against the path RELATIVE to the root. Match
+        # it absolutely and a checkout at /tmp/pytest-of-me/test_0/repo skips
+        # its own entire source tree, succeeds, and writes an empty trace.
+        root = os.path.join(tempfile.mkdtemp(), "tests", "repo")
+        os.makedirs(root)
+        tgtrace._root = os.path.abspath(root)
+        tgtrace._seen_files.clear()
+        tgtrace._current = set()
+        tgtrace._record(self._code(os.path.join(root, "app.py"), "handler"))
+        self.assertEqual(tgtrace._current, {("app.py", "handler")})
 
 
 if __name__ == "__main__":

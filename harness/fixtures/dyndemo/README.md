@@ -29,10 +29,10 @@ python3 harness/ground_truth.py --trace /tmp/dyndemo-trace.json \
 Expected (measured 2026-08-06, `sys.monitoring` backend, codegraph 1.4.1):
 
 ```
-1/1 journey(s) traced; 1 traced symbol(s) outside the static footprint
+1/1 journey(s) scored; 1 traced symbol(s) outside the static footprint
 
   J1  create a thing  ! SILENT-MISS SOURCE
-      traced 5 symbol(s) -> 4 node(s); static footprint 7
+      traced 5 symbol(s) -> 4 node(s); static footprint 7 (from 1 resolved entry symbol(s))
       traced_only 1   static_only 4   unresolved 0
         - audit (app/dyn.py)
 ```

@@ -5,6 +5,11 @@ rest of `harness/`. It is loaded into the TARGET repo's interpreter (`pytest -p
 tgtrace` with this directory on `PYTHONPATH`), which has its own venv, its own
 dependency set, and no reason to be able to import this project.
 
+It lives in its own directory for the same reason. `harness/` contains
+`trace.py`, and putting `harness/` on the target's `PYTHONPATH` would SHADOW the
+stdlib `trace` module for every import in the traced suite — `import trace` would
+resolve here and then fail on `trace.Trace`. Only this directory is exported.
+
 Configured by environment variable rather than pytest options for the same
 reason: adding `--tg-*` flags to someone else's pytest run is a change to their
 CLI surface, and a target with `addopts` or a strict conftest can reject it.
@@ -50,14 +55,24 @@ def _relpath(filename):
     """Path relative to the traced root, or None if this file is not ours.
 
     Memoised because it runs on every function entry in the suite, and the
-    answer for a given file never changes within a run."""
+    answer for a given file never changes within a run.
+
+    The skip list is matched against the RELATIVE path, never the absolute one.
+    Matching absolutely means a target checked out under any directory named
+    `tests` — `/tmp/pytest-of-user/test_0/repo`, a CI scratch path — skips its
+    own entire source tree, and the only symptom is an empty trace that later
+    renders as agreement."""
     if filename in _seen_files:
         return _seen_files[filename]
     rel = None
     if filename and not filename.startswith("<"):
         path = os.path.abspath(filename)
-        if path.startswith(_root + os.sep) and not any(s in path for s in _skip):
-            rel = os.path.relpath(path, _root)
+        if path.startswith(_root + os.sep):
+            candidate = os.path.relpath(path, _root)
+            # Leading separator so a fragment like "/tests/" still anchors at
+            # the root of the RELATIVE path.
+            if not any(s in os.sep + candidate for s in _skip):
+                rel = candidate
     _seen_files[filename] = rel
     return rel
 
@@ -101,15 +116,36 @@ def _stop_profile():
 
 
 _HAVE_MONITORING = hasattr(sys, "monitoring")
-_start = _start_monitoring if _HAVE_MONITORING else _start_profile
-_stop = _stop_monitoring if _HAVE_MONITORING else _stop_profile
+
+
+def _start():
+    _start_monitoring() if _HAVE_MONITORING else _start_profile()
+
+
+def _stop():
+    _stop_monitoring() if _HAVE_MONITORING else _stop_profile()
 
 
 # --- pytest hooks ------------------------------------------------------------
 
 def pytest_configure(config):
-    if _out_path:
-        _start()
+    if not _out_path:
+        return
+    # xdist gives every worker AND the controller its own copy of this module,
+    # all writing one path at unconfigure. The controller runs no test body, so
+    # its empty `_results` wins the last write and the run reports a green suite
+    # with a zero-symbol trace — which `ground_truth.py` then renders as a
+    # journey with nothing outside its footprint. Refusing is loud; merging
+    # per-worker files is the fix to write when a target actually needs xdist.
+    if os.environ.get("PYTEST_XDIST_WORKER") or getattr(
+        config.option, "numprocesses", None
+    ):
+        raise RuntimeError(
+            "tgtrace cannot run under pytest-xdist: parallel workers would "
+            "overwrite one another's trace and the result would silently be "
+            "empty. Re-run without -n/--numprocesses."
+        )
+    _start()
 
 
 def pytest_unconfigure(config):
