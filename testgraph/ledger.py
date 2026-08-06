@@ -184,6 +184,21 @@ def commit_of(row):
     return head if is_sha(head) else None
 
 
+def base_of(row):
+    """The push's BASE as a join key, or None. The mirror of `commit_of`.
+
+    `hook.run` records `base` as the caller SPELLED it and the resolved form in
+    `base_commit`. The baseline lookup joins against outcome rows keyed on
+    resolved shas, so accepting only a sha here is what keeps a symbolic
+    spelling from silently matching nothing — `base` is still read as a
+    fallback because git hands the hook a real sha on the ordinary path."""
+    base = row.get("base_commit")
+    if is_sha(base):
+        return base
+    base = row.get("base")
+    return base if is_sha(base) else None
+
+
 def selection_row(record):
     """Shape a `hook.run` record as a selection row."""
     row = dict(record)
@@ -211,8 +226,9 @@ def summarize(repo, rows=None, directory=None):
 
     Four buckets for a failure, and keeping them apart is the whole point:
 
-      caught      — the selection for that push named this journey. The selector
-                    earned its keep.
+      caught      — the selection ANSWERED for that push and named this journey,
+                    and the journey was known-good at the push's base. The
+                    selector earned its keep.
       missed      — the selection ANSWERED for that push and did not name it, and
                     the journey was known-good at the push's base. A real silent
                     under-selection.
@@ -220,6 +236,22 @@ def summarize(repo, rows=None, directory=None):
                     asked, so this says nothing about it.
       unbaselined — a selection answered, but nothing records the journey passing
                     at that push's BASE, so the breakage may predate the push.
+
+    The green baseline gates `caught` and `missed` IDENTICALLY, and that symmetry
+    is load-bearing. Requiring it for `missed` alone — the state this function
+    shipped in — made pre-existing breakage able to raise `observed_recall` and
+    never able to lower it. A journey that was never green scored `caught` on
+    every push whose selection happened to name it, which is a perfect score for
+    zero information: the journey was already red, so naming it predicted
+    nothing. The same history with a selector that named nothing was excluded
+    from scoring entirely as `unbaselined`. Two pushes of an always-red journey
+    read 2 caught / 0 missed / recall 1.00 one way and 0/0/None the other.
+
+    That is the same defect as the two the DELTA-vs-STATE fix closed, pointed the
+    other way: a row that says nothing about the selector counted as evidence —
+    there, against it; here, for it. You only get to CREDIT the selector when
+    there was something to regress from, for the same reason you only get to
+    blame it then.
 
     `unbaselined` is the bucket that keeps the number honest, and it is the one
     that was missing. A `selection` row answers "what could base..head break" — a
@@ -260,8 +292,9 @@ def summarize(repo, rows=None, directory=None):
         # Repeated pushes of one commit: union, because a journey named by any
         # selection for that commit was named.
         entry["named"].update(r.get("journey_ids") or [])
-        if r.get("base"):
-            entry["bases"].add(r["base"])
+        base = base_of(r)
+        if base:
+            entry["bases"].add(base)
 
     # One observation per (commit, journey); the last verdict wins. Recording the
     # same failure twice — a re-run to confirm, or /autorun logging each attempt —
@@ -304,26 +337,37 @@ def summarize(repo, rows=None, directory=None):
         if isinstance(r.get("ts"), (int, float)):
             j["last_ts"] = max(j["last_ts"] or 0, r["ts"])
         entry = answered.get(commit)
-        # A `skip` says the journey was deliberately not run, so it is not
-        # evidence about anything — including how dense the history is.
-        if entry and verdict in ("pass", "fail"):
-            judged_commits.add(commit)
+        # `judged_commits` measures how DENSE the history is and gates ranking at
+        # MIN_JUDGED_COMMITS. It must count only what the score can actually use,
+        # or it diverges from `judged` and the gate opens on evidence that was
+        # excluded: 24 always-red pushes (all `unbaselined`) plus ONE real catch
+        # read as 25 judged commits and opened ranking on an observed_recall of
+        # 1.00 drawn from a single observation. A `skip` is likewise not
+        # evidence about anything — including density.
         if verdict == "pass":
             j["passes"] += 1
+            if entry:
+                judged_commits.add(commit)
             continue
         if verdict != "fail":
             continue
         j["failures"] += 1
         if not entry:
             j["unasked"] += 1
+        # The baseline is checked BEFORE caught-vs-missed, not as the fallback
+        # after it. As a fallback it gated only `missed`, so an always-red
+        # journey could bank a `caught` on every push that named it while the
+        # same history with a blind selector was excluded from the score.
+        elif not any((base, jid) in passed_at for base in entry["bases"]):
+            j["unbaselined"] += 1
         elif jid in entry["named"]:
             j["caught"] += 1
             caught_total += 1
-        elif any((base, jid) in passed_at for base in entry["bases"]):
+            judged_commits.add(commit)
+        else:
             j["missed"] += 1
             missed_total += 1
-        else:
-            j["unbaselined"] += 1
+            judged_commits.add(commit)
 
     judged = caught_total + missed_total
     return {

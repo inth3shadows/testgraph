@@ -688,7 +688,8 @@ name it.
 
 ### Four buckets for a failure, and why they must stay apart
 
-- **caught** — the selection for that push named the journey.
+- **caught** — the selection **answered** for that push, named the journey, and
+  the journey was **known-good at the push's base**.
 - **missed** — the selection **answered** for that push, did not name the
   journey, and the journey was **known-good at the push's base**. A real silent
   under-selection, the one failure mode a recall-first selector must not have.
@@ -729,6 +730,58 @@ blaming the selector removes that: **you only get to call it a miss when you had
 green baseline to regress from.** The cost is that misses stay rare unless
 journeys run on every push — which is the discipline this number needs in order
 to mean anything, so the cost is the point.
+
+**The baseline gates `caught` and `missed` identically, and that symmetry was
+missing for one release.** As first shipped, only `missed` required the green
+baseline; `caught` required nothing. So the paragraph above was implemented in
+one direction and the bucket list said "the selection for that push named the
+journey" with no baseline clause — which is the *same* defect as the two above
+it, pointed the other way: a row that says nothing about the selector counted as
+evidence, here **for** it.
+
+A journey that was never green banked a `caught` on every push whose selection
+happened to name it. That is a perfect score for zero information — the journey
+was already red, so naming it predicted nothing — and it was one-directional:
+pre-existing breakage could only ever *raise* `observed_recall`, never lower it,
+because the same history with a selector that named nothing fell into
+`unbaselined` and was excluded from scoring. Two pushes of an always-red journey
+read **2 caught / 0 missed / recall 1.00** one way and **0 / 0 / `None`** the
+other.
+
+It also propagated into the ranking gate. `RankingGateTest` built twenty pushes
+of an always-red journey with no baseline anywhere and asserted the gate opened;
+its `_push` helper's docstring claimed it recorded a green baseline and never
+did. Twenty `unbaselined` failures now correctly leave the gate shut, and
+`test_always_red_history_cannot_open_the_gate` pins that.
+
+You only get to **credit** the selector when there was something to regress
+from, for the same reason you only get to blame it then.
+
+**Two things the widened `unbaselined` bucket then collided with, both found in
+review of the fix itself.**
+
+*The density counter and the score had diverged.* `ready_for_ranking` is
+`judged_commits >= 20 AND judged > 0`, but `judged_commits` counted any commit
+carrying a selection plus a pass/fail — including the `unbaselined` failures
+`judged` now excludes. Twenty-four always-red pushes plus **one** properly
+baselined catch read as `judged_commits: 25, caught: 1, ready: True,
+observed_recall: 1.00`: the gate opened and handed ranking a recall drawn from a
+single observation. A commit now counts toward density only if it carries a
+`pass` a selection answered for, or a failure that was actually **scored**.
+
+*`base` was never resolved.* `hook.run` normalises `head` into `commit` through
+`resolve_commit` — with a comment explaining that two spellings of one commit
+join to nothing — and stored `base` **verbatim** on the line above. That was
+harmless until the baseline started gating the score: the lookup joins against
+outcome rows keyed on resolved shas, so `--base HEAD~1` matched nothing, every
+failure on that push fell to `unbaselined`, and `observed_recall` was pinned at
+`None` for any caller passing a symbolic base. `base_commit` now carries the
+resolved form; `base` is kept as spelled, because that is what the rendered
+output should show.
+
+The pattern in both: a change to what a bucket MEANS has to be chased into every
+counter and every sentence that reads it. Neither of these was in the diff that
+introduced the rule.
 
 Two smaller rules follow from the same principle. Observations are deduplicated
 on `(commit, journey)`, last verdict wins, so re-recording one failure does not

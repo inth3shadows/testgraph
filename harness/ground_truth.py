@@ -109,6 +109,32 @@ def file_map(conn):
     }
 
 
+def path_matches(indexed, rel):
+    """Whether an index `file_path` denotes the traced relative path `rel`.
+
+    A suffix match on whole path COMPONENTS. The tolerance is deliberate: the
+    trace's relpath is taken against the TRACED root while `file_path` is
+    relative to the INDEXED root, so when the index is rooted at a PARENT of the
+    traced root, `file_path` is longer and `vendor/app/dyn.py` must still match a
+    traced `app/dyn.py`.
+
+    The opposite direction is NOT handled and cannot be, here: if the index is
+    rooted BELOW the traced root, `file_path` is shorter than `rel` and no suffix
+    match exists, so every symbol in that journey silently resolves to nothing
+    and `traced_nodes` reads 0. That is indistinguishable from "the suite does
+    not exercise this journey". Point `--db` at an index rooted at or above the
+    traced root; `resolve_traced` reports the symbols as unresolved, and
+    `render` surfaces a nonzero `unresolved` count, but neither can name the
+    cause.
+
+    What it must NOT do is match `myapp/dyn.py`, which a bare
+    `indexed.endswith(rel)` does, because the boundary between components is not
+    checked. Requiring the character before the suffix to be `/` is the whole
+    difference between "the same file reached by a longer root" and "a different
+    file whose directory happens to end in the right letters"."""
+    return indexed == rel or indexed.endswith("/" + rel)
+
+
 def resolve_traced(conn, symbols, files=None):
     """({node_id, ...}, [(relpath, qualname), ...]) — resolved ids and the misses.
 
@@ -123,7 +149,13 @@ def resolve_traced(conn, symbols, files=None):
     `app/dyn.py:audit` the index genuinely lacks would otherwise bind to
     `vendor/dyn.py:audit` — and whether it then counts as a miss would be decided
     by an unrelated node's edges. That is the indexing-gap/traversal-gap
-    conflation this module refuses everywhere else."""
+    conflation this module refuses everywhere else.
+
+    The comparison is `path_matches`, not a bare `endswith`, because a raw suffix
+    test has no path boundary: `myapp/dyn.py`.endswith(`app/dyn.py`) is True, so
+    the narrowing this docstring promises leaked at exactly the case it exists to
+    stop — binding a traced symbol to a same-named node in an unrelated
+    directory, silently."""
     files = files if files is not None else file_map(conn)
     resolved, unresolved = set(), []
     for rel, qualname in symbols:
@@ -131,7 +163,7 @@ def resolve_traced(conn, symbols, files=None):
             continue
         name = qualname.split(".")[-1]
         ids = dbmod.resolve_symbol(conn, name, os.path.basename(rel))
-        hits = [i for i in ids if files.get(i, "").endswith(rel)]
+        hits = [i for i in ids if path_matches(files.get(i, ""), rel)]
         if hits:
             resolved.update(hits)
         else:

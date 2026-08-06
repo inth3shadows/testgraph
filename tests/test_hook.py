@@ -234,6 +234,27 @@ class InvocationLogTest(unittest.TestCase):
         self.assertEqual(rec["caller"], "manual")
         self.assertIn("duration_ms", rec)
 
+    def test_a_symbolic_base_is_resolved_into_its_own_join_key(self):
+        # `base` is stored as the caller SPELLED it, which is what the rendered
+        # output wants. But the baseline check joins against outcome rows keyed
+        # on resolved shas, so a symbolic base matched nothing and every failure
+        # on such a push fell to `unbaselined` — pinning observed_recall at None
+        # for any caller that passes one. `head` was resolved from the start;
+        # `base` was not, and only started mattering once the baseline gated the
+        # score.
+        head, base = "a" * 40, "b" * 40
+
+        def fake_resolve(repo, rev):
+            return {"HEAD": head, "HEAD~1": base}.get(rev)
+
+        with mock.patch.object(hook.reg, "resolve_for_repo", return_value=None), \
+             mock.patch.object(hook.ledger, "resolve_commit", side_effect=fake_resolve):
+            hook.main(["--repo", GAMMA, "--base", "HEAD~1", "--head", "HEAD"])
+        rec = json.loads(open(os.path.join(self.dir, "ledger.jsonl")).read())
+        self.assertEqual(rec["base"], "HEAD~1")       # kept for rendering
+        self.assertEqual(rec["base_commit"], base)     # the actual join key
+        self.assertEqual(rec["commit"], head)
+
 
 if __name__ == "__main__":
     unittest.main()
