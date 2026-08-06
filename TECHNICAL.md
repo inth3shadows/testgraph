@@ -1297,6 +1297,15 @@ registered entry point rather than because the graph reaches it.
 **This does not reach honeyslate's numbers.** Checked directly: honeyslate has 9 aliased
 imports and every one aliases a *symbol* (`Session as DbSession`), never a module, so the
 `alias.attr()` form never arises. The recall figures in this document are unaffected.
+
+**Already known upstream, with a fix in flight.** colbymchenry/codegraph issue #899, and
+open PR #1453, whose diagnosis matches the measurement above exactly: the submodule lookup
+joins the import source with `imp.localName`, which under an alias names no module, and
+`localName` coincides with `exportedName` only when the import is unaliased. Confirmed on
+that PR with a five-file minimal repro — two modules identical apart from the alias, where
+the unaliased one produces a `file -> file` `imports` edge and the aliased one produces
+none. Nothing to do here but wait for it and re-measure; the registry declaration below
+stands until then.
 Adding these
 files' symbols as journey `entries` would manufacture the right answer from a false claim
 about what an entry is, so the registry declares the gap instead. Until the indexer links
@@ -1325,17 +1334,46 @@ as a **liveness** test of the selection -> outcome join, not as an accuracy clai
 accuracy claims in this document come from honeyslate's hand labels and from the outside
 repos in Update 3, and nothing here changes them.
 
-**Operational finding: codegraph cannot find a bare-worktree repo root.** In the
-`claudew` layout a worktree's `.git` is a *file* (`gitdir: .../.bare/worktrees/main`), not
-a directory. codegraph 1.5.0's root detection wants a `.git` directory, so from any
-worktree it walks up past the repo, and `codegraph index <path>` silently rebuilds
-whichever ancestor index it finds — or refuses at `$HOME` when there is none. This is the
-mechanism behind the 279 MB stray `~/personal_projects/.codegraph` that had to be removed
-before testgraph could be indexed at all; it had been answering every query from any
-un-indexed repo under that root. **Use `codegraph init <path>` for a first index, never
-`codegraph index <path>`** — `init` creates the index in the directory named, `index`
-resolves an ancestor. Both `testgraph/main` and this worktree are now indexed correctly
-(34 files, 798 nodes, 1,509 edges, ~0.5s).
+**Operational finding: `codegraph index <path>` silently indexes an ancestor.** When
+`<path>` has no `.codegraph/codegraph.db` of its own, `resolveProjectPath`
+(`src/bin/codegraph.ts`) discards the argument, walks up to the filesystem root, and
+rebuilds the first initialized **ancestor** it finds — printing an ordinary `Done` and
+never naming the project it actually indexed. **Use `codegraph init <path>` for a first
+index, never `codegraph index <path>`**: `init` creates the index in the directory named,
+`index` resolves an ancestor. Reported upstream as colbymchenry/codegraph#1524.
+
+This is the mechanism behind the 279 MB stray `~/personal_projects/.codegraph` that had to
+be removed before testgraph could be indexed at all — ~11,000 files across 55 unrelated
+repos, which then answered every query from any un-indexed repo beneath that root. Both
+`testgraph/main` and the working worktree are now indexed correctly (34 files, 798 nodes,
+1,509 edges, ~0.5s).
+
+**An earlier version of this paragraph gave the wrong cause, and the correction is the
+point.** It claimed codegraph's root detection "wants a `.git` directory" and that the
+bare-worktree layout — where a worktree's `.git` is a *file* — was therefore to blame.
+That was inferred from the symptom (it happened in a worktree) and never checked against
+the source. `resolveProjectPath` and `findNearestCodeGraphRoot` do not consult `.git` at
+all; they look only for an initialized `.codegraph`, with no repo boundary to stop at.
+Falsified by reproducing it with **no git repository anywhere**:
+
+```
+1. initialize ONLY the parent
+   parent/.codegraph exists : yes
+   child/.codegraph exists  : no
+2. ask codegraph to index the CHILD, by explicit path
+   ●  4 nodes, 2 edges in 363ms
+   └  Done
+3. child/.codegraph created : NO  <-- the request was silently ignored
+   'codegraph status' from the child reports:
+     Project: /tmp/.../reproindex/parent
+```
+
+The worktree layout is an *aggravating condition*, not the cause: sibling worktrees under
+a shared parent are never initialized themselves, so the walk escapes the repo on the
+first `index` in a fresh one. Any un-indexed subdirectory does it. The practical guidance
+(`init`, not `index`) was right for the wrong reason, which is the failure mode this
+document keeps naming everywhere else — a correct answer whose stated justification does
+not survive being checked.
 
 ## Known Limitations
 
