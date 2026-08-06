@@ -1375,6 +1375,54 @@ first `index` in a fresh one. Any un-indexed subdirectory does it. The practical
 document keeps naming everywhere else — a correct answer whose stated justification does
 not survive being checked.
 
+### Update 6 — the benchmark registry declared no blind spots, and had two (2026-08-06)
+
+`journeys/honeyslate.json` carried a two-sentence note and declared no blind spots at all.
+That is not the same as having none, and because the registry is `approved: true`, the
+`UNAPPROVED REGISTRY` banner — whose entire job is to say *"a NONE may mean not-registered
+rather than not-affected"* — never fired for it. honeyslate is the one repo whose numbers
+this document quotes as **accuracy** rather than sizes, so an undeclared gap costs more
+here than anywhere else.
+
+Found with the same structural sweep that found testgraph's own blind spot (Update 5):
+seed every node of each product file, run the impact closure, intersect with the entry
+map. **17 of 38 honeyslate product files reached no journey.** Most were expected — 6
+alembic migrations, 6 frontend files this document already excludes. Two were not:
+
+| file | why it is a real gap |
+|---|---|
+| `app/main.py` | `lifespan` calls `scheduler.start()`. Break it and the auto-scheduler never runs — yet no journey selected for a change to it. **A recall bug, not a registration preference.** |
+| `app/routers/google.py` | a **live wired router** (`app.include_router(google.router)`) serving `/api/google/status` and `/selftest`, with no journey at all |
+
+Closed by extending the **entries of existing journeys**, deliberately not by adding
+journeys: `lifespan` and `create_app` join J8, and the two Google diagnostics join J7
+(same integration as `gcal_push`). Adding a J9 would have changed the registry's journey
+set, which is what `labels_honeyslate.json` and the published "mean 3.33 of 8 journeys
+named" are both written against. `app/cli.py` stays uncovered and is now *declared* — CLI
+entry points are the first item on the proposer's own blind-spot list, and signedintake
+and testgraph declare the same class.
+
+**Re-measured, because the registry changed.** `harness/accuracy.py` reads
+`journeys/honeyslate.json` live, so any edit silently re-points every published number at
+a registry that no longer exists — the exact defect commit `94e29a9` corrected for
+signedintake. Rather than assert that four added entries were harmless, both registries
+were run through the harness back to back:
+
+| registry | entries | min recall | mean precision (non-empty oracles) |
+|---|---|---|---|
+| before | 16 | 1.00 | 0.68 |
+| **after** | **20** | **1.00** | **0.68** |
+
+S1 PASS either way, and the honest reason precision did not move is worth stating: the
+five labeled commits barely touch the newly covered files. This shows the entries cost
+nothing **on the scored set**, not that widening entries is free in general. A future
+commit touching `app/main.py` will now select J8 — which is the entire point, and is
+exactly the case the labeled set does not contain.
+
+Verified after the edit: all 8 journeys resolve, 20 entry nodes, no `unchecked_entries`,
+no approval warning, and `app/main.py -> [J8]`, `routers/google.py -> [J7]`,
+`app/cli.py -> NONE` (declared).
+
 ## Known Limitations
 
 - **Scope:** three *approved* registries — honeyslate, signedintake, and

@@ -1,6 +1,6 @@
 {
   "target": "honeyslate",
-  "note": "Hand-authored journey registry. Entries are route handlers + the scheduler sweep. name+file resolves node ids at run time.",
+  "note": "Hand-authored journey registry. Entries are route handlers, the scheduler sweep, and the app lifespan that starts it. name+file resolves node ids at run time.\n\nBLIND SPOTS, DECLARED 2026-08-06 (issue #62). This registry previously declared none, which is not the same as having none — and because it is `approved: true`, the UNAPPROVED REGISTRY banner that warns 'a NONE may mean not-registered rather than not-affected' never fired for it. honeyslate is the only repo whose numbers are quoted as ACCURACY rather than sizes, so an undeclared gap costs more here than anywhere else.\n\nFound by seeding every node of each product file and intersecting the impacted closure with the entry map: 17 of 38 product files reached no journey. Two were real gaps and are now closed: (1) `app/main.py` — `lifespan` calls `scheduler.start()`, so breaking it stops the auto-scheduler, yet nothing selected J8 for a change to it; `lifespan` and `create_app` are now J8 entries. (2) `routers/google.py` — a LIVE wired router (`app.include_router(google.router)`) serving `/api/google/status` and `/selftest`; its two operator diagnostics are now J7 entries, since they belong to the same Google integration as `gcal_push` rather than to a journey of their own.\n\nKnowingly uncovered, each for a reason with no fix in this file: (a) `app/cli.py` — a management CLI (`seed-users`, `magic-link`, `digest`, `add-types`); CLI entry points are the first item on `testgraph.propose`'s own blind-spot list, and signedintake and testgraph declare the same class. Note `digest` is a mailer with no HTTP surface at all. (b) the alembic migrations under `alembic/versions/` — schema changes with no runtime journey. (c) the frontend (`src/routes/**`, `service-worker.js`, `playwright.config.js`) — TECHNICAL.md already states no journey has a frontend entry point, so a frontend change is visible only where it reaches a backend entry.",
   "approved": true,
   "journeys": {
     "J1": {"name": "submit task",   "entries": [{"name": "create_task", "file": "routers/tasks.py"}]},
@@ -19,10 +19,15 @@
       {"name": "consume", "file": "routers/auth.py"},
       {"name": "logout", "file": "routers/auth.py"},
       {"name": "me", "file": "routers/auth.py"}]},
-    "J7": {"name": "gcal sync",     "entries": [{"name": "gcal_push", "file": "routers/webhooks.py"}]},
+    "J7": {"name": "gcal sync",     "entries": [
+      {"name": "gcal_push", "file": "routers/webhooks.py"},
+      {"name": "google_status", "file": "routers/google.py"},
+      {"name": "google_selftest", "file": "routers/google.py"}]},
     "J8": {"name": "auto-scheduler", "entries": [
       {"name": "sweep", "file": "scheduler.py"},
-      {"name": "start", "file": "scheduler.py"}]}
+      {"name": "start", "file": "scheduler.py"},
+      {"name": "lifespan", "file": "app/main.py"},
+      {"name": "create_app", "file": "app/main.py"}]}
   },
   "codegraph_schema_version": 8,
   "spot_checks": {
