@@ -1,0 +1,375 @@
+{
+  "target": "mealie",
+  "note": "All 23 journeys testgraph.propose drafted for mealie-recipes/mealie \u2014 an OUTSIDE repo, authored by people unconnected to honeyslate and signedintake, which removes the same-author confound those two share. 23 journeys is the 20+ registry TECHNICAL.md asked for, at near-full coverage of the handler surface propose can see (module-level decorated routes; mealie also uses class-based controllers, which the proposer does not read). Shallow clone, depth 80. UNAPPROVED: machine-drafted, nobody has reviewed it.",
+  "approved": false,
+  "proposed_by": "testgraph.propose",
+  "journeys": {
+    "J_app_about_get_app_info": {
+      "name": "get_app_info",
+      "entries": [
+        {
+          "name": "get_app_info",
+          "file": "mealie/routes/app/app_about.py"
+        }
+      ],
+      "route": [
+        "GET ?"
+      ]
+    },
+    "J_app_about_get_startup_info": {
+      "name": "GET /startup-info",
+      "entries": [
+        {
+          "name": "get_startup_info",
+          "file": "mealie/routes/app/app_about.py"
+        }
+      ],
+      "route": [
+        "GET /startup-info"
+      ]
+    },
+    "J_app_about_get_app_theme": {
+      "name": "GET /theme",
+      "entries": [
+        {
+          "name": "get_app_theme",
+          "file": "mealie/routes/app/app_about.py"
+        }
+      ],
+      "route": [
+        "GET /theme"
+      ]
+    },
+    "J_auth_get_token": {
+      "name": "POST /token",
+      "entries": [
+        {
+          "name": "get_token",
+          "file": "mealie/routes/auth/auth.py"
+        }
+      ],
+      "route": [
+        "POST /token"
+      ]
+    },
+    "J_auth_oauth_login": {
+      "name": "GET /oauth",
+      "entries": [
+        {
+          "name": "oauth_login",
+          "file": "mealie/routes/auth/auth.py"
+        }
+      ],
+      "route": [
+        "GET /oauth"
+      ]
+    },
+    "J_auth_oauth_callback": {
+      "name": "GET /oauth/callback",
+      "entries": [
+        {
+          "name": "oauth_callback",
+          "file": "mealie/routes/auth/auth.py"
+        }
+      ],
+      "route": [
+        "GET /oauth/callback"
+      ]
+    },
+    "J_auth_refresh_token": {
+      "name": "GET /refresh",
+      "entries": [
+        {
+          "name": "refresh_token",
+          "file": "mealie/routes/auth/auth.py"
+        }
+      ],
+      "route": [
+        "GET /refresh"
+      ]
+    },
+    "J_auth_logout": {
+      "name": "POST /logout",
+      "entries": [
+        {
+          "name": "logout",
+          "file": "mealie/routes/auth/auth.py"
+        }
+      ],
+      "route": [
+        "POST /logout"
+      ]
+    },
+    "J_init_get_validation_text": {
+      "name": "GET /docker/validate.txt",
+      "entries": [
+        {
+          "name": "get_validation_text",
+          "file": "mealie/routes/media/__init__.py"
+        }
+      ],
+      "route": [
+        "GET /docker/validate.txt"
+      ]
+    },
+    "J_media_recipe_get_recipe_img": {
+      "name": "GET /{recipe_id}/images/{file_name}",
+      "entries": [
+        {
+          "name": "get_recipe_img",
+          "file": "mealie/routes/media/media_recipe.py"
+        }
+      ],
+      "route": [
+        "GET /{recipe_id}/images/{file_name}"
+      ]
+    },
+    "J_media_recipe_get_recipe_timeline_event_img": {
+      "name": "GET /{recipe_id}/images/timeline/{timeline_event_id}/{file_name}",
+      "entries": [
+        {
+          "name": "get_recipe_timeline_event_img",
+          "file": "mealie/routes/media/media_recipe.py"
+        }
+      ],
+      "route": [
+        "GET /{recipe_id}/images/timeline/{timeline_event_id}/{file_name}"
+      ]
+    },
+    "J_media_recipe_get_recipe_asset": {
+      "name": "GET /{recipe_id}/assets/{file_name}",
+      "entries": [
+        {
+          "name": "get_recipe_asset",
+          "file": "mealie/routes/media/media_recipe.py"
+        }
+      ],
+      "route": [
+        "GET /{recipe_id}/assets/{file_name}"
+      ]
+    },
+    "J_media_user_get_user_image": {
+      "name": "GET /{user_id}/{file_name}",
+      "entries": [
+        {
+          "name": "get_user_image",
+          "file": "mealie/routes/media/media_user.py"
+        }
+      ],
+      "route": [
+        "GET /{user_id}/{file_name}"
+      ]
+    },
+    "J_shared_routes_get_shared_recipe": {
+      "name": "GET /shared/{token_id}",
+      "entries": [
+        {
+          "name": "get_shared_recipe",
+          "file": "mealie/routes/recipe/shared_routes.py"
+        }
+      ],
+      "route": [
+        "GET /shared/{token_id}"
+      ]
+    },
+    "J_shared_routes_get_shared_recipe_as_zip": {
+      "name": "GET /shared/{token_id}/zip",
+      "entries": [
+        {
+          "name": "get_shared_recipe_as_zip",
+          "file": "mealie/routes/recipe/shared_routes.py"
+        }
+      ],
+      "route": [
+        "GET /shared/{token_id}/zip"
+      ]
+    },
+    "J_forgot_password_forgot_password": {
+      "name": "POST /forgot-password",
+      "entries": [
+        {
+          "name": "forgot_password",
+          "file": "mealie/routes/users/forgot_password.py"
+        }
+      ],
+      "route": [
+        "POST /forgot-password"
+      ]
+    },
+    "J_forgot_password_reset_password": {
+      "name": "POST /reset-password",
+      "entries": [
+        {
+          "name": "reset_password",
+          "file": "mealie/routes/users/forgot_password.py"
+        }
+      ],
+      "route": [
+        "POST /reset-password"
+      ]
+    },
+    "J_utility_routes_download_file": {
+      "name": "GET /download",
+      "entries": [
+        {
+          "name": "download_file",
+          "file": "mealie/routes/utility_routes.py"
+        }
+      ],
+      "route": [
+        "GET /download"
+      ]
+    },
+    "J_validators_validate_user": {
+      "name": "GET /user/name",
+      "entries": [
+        {
+          "name": "validate_user",
+          "file": "mealie/routes/validators/validators.py"
+        }
+      ],
+      "route": [
+        "GET /user/name"
+      ]
+    },
+    "J_validators_validate_user_email": {
+      "name": "GET /user/email",
+      "entries": [
+        {
+          "name": "validate_user_email",
+          "file": "mealie/routes/validators/validators.py"
+        }
+      ],
+      "route": [
+        "GET /user/email"
+      ]
+    },
+    "J_validators_validate_group": {
+      "name": "GET /group",
+      "entries": [
+        {
+          "name": "validate_group",
+          "file": "mealie/routes/validators/validators.py"
+        }
+      ],
+      "route": [
+        "GET /group"
+      ]
+    },
+    "J_validators_validate_household": {
+      "name": "GET /household",
+      "entries": [
+        {
+          "name": "validate_household",
+          "file": "mealie/routes/validators/validators.py"
+        }
+      ],
+      "route": [
+        "GET /household"
+      ]
+    },
+    "J_validators_validate_recipe": {
+      "name": "GET /recipe",
+      "entries": [
+        {
+          "name": "validate_recipe",
+          "file": "mealie/routes/validators/validators.py"
+        }
+      ],
+      "route": [
+        "GET /recipe"
+      ]
+    }
+  },
+  "codegraph_schema_version": 8,
+  "spot_checks": {
+    "GUID": {
+      "min_caller_edges": 151,
+      "file": "mealie/db/models/_model_utils/guid.py"
+    },
+    "BaseButton": {
+      "min_caller_edges": 140,
+      "file": "frontend/app/components/global/BaseButton.vue"
+    }
+  },
+  "spot_check_candidates": [
+    {
+      "name": "GUID",
+      "file": "mealie/db/models/_model_utils/guid.py",
+      "fan_in": 189,
+      "caller_churn": 1.0,
+      "score": 94.5,
+      "min_caller_edges": 151
+    },
+    {
+      "name": "BaseButton",
+      "file": "frontend/app/components/global/BaseButton.vue",
+      "fan_in": 175,
+      "caller_churn": 1.17,
+      "score": 80.65,
+      "min_caller_edges": 140
+    },
+    {
+      "name": "uuid4",
+      "file": "frontend/app/composables/use-utils.ts",
+      "fan_in": 153,
+      "caller_churn": 1.05,
+      "score": 74.63,
+      "min_caller_edges": 122
+    },
+    {
+      "name": "useUserApi",
+      "file": "frontend/app/composables/api/api-client.ts",
+      "fan_in": 160,
+      "caller_churn": 1.15,
+      "score": 74.42,
+      "min_caller_edges": 128
+    },
+    {
+      "name": "BaseDialog",
+      "file": "frontend/app/components/global/BaseDialog.vue",
+      "fan_in": 102,
+      "caller_churn": 1.23,
+      "score": 45.74,
+      "min_caller_edges": 81
+    },
+    {
+      "name": "get_repositories",
+      "file": "mealie/repos/all_repositories.py",
+      "fan_in": 82,
+      "caller_churn": 1.1,
+      "score": 39.05,
+      "min_caller_edges": 65
+    },
+    {
+      "name": "MigrationAlias",
+      "file": "mealie/services/migrations/utils/migration_alias.py",
+      "fan_in": 78,
+      "caller_churn": 1.0,
+      "score": 39.0,
+      "min_caller_edges": 62
+    },
+    {
+      "name": "Field",
+      "file": "frontend/app/composables/use-query-filter-builder.ts",
+      "fan_in": 77,
+      "caller_churn": 1.0,
+      "score": 38.5,
+      "min_caller_edges": 61
+    }
+  ],
+  "spot_check_basis": "caller-file churn over the last 500 commits, then fan-in",
+  "blind_spots": [
+    "background jobs and schedulers (no decorator marks them \u2014 honeyslate's J8 is this class)",
+    "CLI entry points and management commands",
+    "event, queue, and webhook consumers registered by callback rather than decorator",
+    "ASGI/WSGI middleware and lifespan hooks",
+    "232 TypeScript/JavaScript file(s) scanned for Next.js route handlers, server actions and page components ONLY",
+    "Express, Fastify, Hono, tRPC and other non-Next.js routers \u2014 only Next.js app-router conventions are recognised",
+    "`middleware.ts`, `generateStaticParams`, and route handlers outside the `app/` directory (the pages router's `pages/api/*`)",
+    "client-side navigation: a journey reachable only through in-browser routing has no server entry point to register",
+    "`export default function () {}` \u2014 an anonymous default export has no symbol name to resolve, so those pages are omitted rather than drafted",
+    "203 product file(s) no scanner here reads (e.g. frontend/app/components/Domain/Admin/Setup/EndPageContent.vue, frontend/app/components/Domain/Announcement/AnnouncementDialog.vue, frontend/app/components/Domain/Announcement/Announcements/2026-03-27_1_welcome.vue) \u2014 any handler defined in them is invisible"
+  ],
+  "unresolved_candidates": []
+}

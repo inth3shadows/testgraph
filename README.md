@@ -142,8 +142,18 @@ instead of an assumed caller. Whether it worked is a number, not an opinion —
 **On whether this is worth it:** at 8 journeys selection avoids 57.5% of journey-runs
 on the labeled set, but bimodally — 3 of 5 commits select ≤2 journeys, 2 of 5 select
 ≥6. The case for the tool at this scale is the *target* it gives an agent and the
-guards that refuse a confident wrong answer, not the runtime saved. TECHNICAL.md
-states that null hypothesis and what would falsify it.
+guards that refuse a confident wrong answer, not the runtime saved.
+
+**That was stated as a falsifiable claim, and in 2026-08 it was falsified.** Measured on
+two repos with no registry before — one of them written by strangers — the bimodality
+holds at 20+ journeys and the "total" pole does not recede: mealie at 23 journeys gives a
+histogram of literally `{0: 38 commits, 23: 2 commits}`, and coriolis-local at 207
+journeys avoids only 54.1% of journey-runs once commits that touch no registered surface
+are excluded. **Read the selection numbers here as a floor on coupling, not a promise of
+savings.** What the same measurement *did* confirm is the ranking: a false-positive
+whole-registry selection came back flagged `verify_manually` at confidence 0.3 while a
+genuine 82-journey blast radius came back clean at 0.9. TECHNICAL.md "Update 3" has the
+full result, the method, and the two corrections it forced to earlier figures.
 
 ## Related Documentation
 

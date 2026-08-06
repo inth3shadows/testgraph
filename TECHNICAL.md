@@ -876,6 +876,88 @@ coupling, not the tool, and the honest move is to stop selling selection and shi
 map plus the guards. The results ledger (#10) is what would make that measurable
 rather than arguable.
 
+### Update 3 — the 20+ falsification ran, and it fired (2026-08-05)
+
+The condition above was tested on two repos neither of which had a registry before, one
+of them written by strangers. **It fired.** Selection rule and expected readings were
+written to `~/.claude/plans/testgraph-20plus-journey-falsification.md` before the sweep,
+because the prediction was already published and a hand-picked registry would prove
+nothing.
+
+**mealie** (`mealie-recipes/mealie`, an OUTSIDE repo — no authorship connection to
+honeyslate or signedintake, which removes the same-author confound those two share).
+23 drafted journeys, 40 commits, per-commit indexes:
+
+| | value |
+|---|---|
+| mean selected | 1.15 / 23 (5.0%) |
+| journey-runs avoided | 95.0% |
+| histogram | **`{0: 38, 23: 2}`** |
+| `recall_degraded` | 0 of 40 |
+
+**There is no middle.** Not a gap with outliers on either side — literally two values,
+nothing and everything. This is the "narrow or total" shape at 23 journeys, in code this
+project has never seen, and it is the sharpest form of it measured so far.
+
+**coriolis-local** (207 drafted journeys — full handler coverage, 60 commits):
+
+| | all 60 commits | non-degraded (52) | **commits touching backend Python (25)** |
+|---|---|---|---|
+| mean selected | 46.88 / 207 | 22.25 / 207 | **95.00 / 207 (45.9%)** |
+| journey-runs avoided | 77.4% | 89.3% | **54.1%** |
+| ceiling | 207 / 207 | 189 / 207 (91%) | 207 / 207 |
+| `<= 2` journeys | 36 of 60 | 36 of 52 | 5 of 25 |
+
+Histogram over all 60: `{0:31, 1:5, 3:2, 12:4, 14:1, 25:3, 82:1, 183:1, 184:1, 185:1,
+186:1, 189:1, 207:8}` — empty from 26 to 81 and from 83 to 182. The same bimodality,
+with **11 of 25 backend-touching commits selecting >= 88% of the registry**.
+
+**A methodology correction that applies to every number above this line.** The published
+72.3% and 81.1% "journey-runs avoided" figures are means over *all* commits in the
+window, including commits that touch no registered surface at all and therefore could
+never select anything. On coriolis that difference is not cosmetic: 77.4% across all 60
+commits versus **54.1%** across the 25 that touch backend Python. A commit that changes
+only CI config is not evidence the selector is selective. The signedintake figures should
+be read with the same discount until re-measured that way.
+
+**A window-size correction to Update 2's reading.** At 30 commits coriolis looked like a
+continuation of the trend — ceiling 82/207 (40%), nothing degraded. Extending the same
+sweep to 60 found eight commits that degrade to all 207 and five more selecting 183–189.
+The 30-commit result was a small-window artifact. Sweeps shorter than the repo's release
+cadence do not see the shared-symbol commits, which is exactly the tail the question is
+about.
+
+**Coupling is not something a registry author can choose.** Before any sweep, the arm
+construction measured coriolis's dependency structure: the shared core is **77 nodes**,
+**174 of 207** handlers transitively reach **>= 90%** of it, and the floor across all 207
+is **62 of 77**. There is no low-coupling 22-journey registry to build in that codebase —
+the "isolated journeys" arm does not exist. That is the kill condition's mechanism stated
+structurally rather than observed statistically.
+
+**What survived, and it is the part TECHNICAL.md already argued for.** Of mealie's two
+total-selection commits, one is genuine and canonical: a change to
+`mealie/core/settings/settings.py` reaching all 23 journeys, the shared-config fan-out
+this document has described since honeyslate. The other is a **single frontend locale
+file** (`available-locales.ts`, one file, one seed) expanding to 8,721 impacted symbols
+and all 23 journeys — and every one of them came back at **confidence 0.3 with
+`verify_manually: true`**, the `HEURISTIC_CONFIDENCE` cap. The selector said "everything,
+and trust none of it." That is B1's weak-edge flag doing exactly what it was built for,
+on outside code, unprompted. By contrast coriolis's 82-journey selection from a two-file
+CIDR/settings change came back at **confidence 0.9 across all 82, zero
+`verify_manually`** — a genuine wide blast radius, correctly reported as one.
+
+So: the selection claim does not survive at 20+ journeys, and the *ranking and
+confidence* claim does. That is the split this document predicted under "What survives
+that hypothesis" (points 2 and 3) and the evidence now points at it rather than at
+selectivity.
+
+Reproduce: `harness/couple.py` builds the arms, `harness/registries/*.json` are the
+registries measured (all `approved: false` — machine-drafted measurement artifacts, never
+product registries), and `harness/selectivity.py --bare ... --registry ...` runs the
+sweep. `tests/test_couple.py` pins the one piece of new logic that could silently
+invalidate the split: `footprint()` inverts `db.impacted_closure` exactly, checked
+node-by-node against the real closure rather than by eye.
+
 ## Known Limitations
 
 - **Scope:** honeyslate is the only *approved* registry. `testgraph.propose`
