@@ -1,0 +1,19 @@
+{
+  "target": "honeyslate",
+  "approved": false,
+  "note": "Hand-authored map from honeyslate's pytest files to journey ids. This is the ONE hand-labeled artifact that survives issue #12, and it is a separate file rather than a heuristic inside ground_truth.py precisely so it stays visible: hiding the labeling step inside code is how the bias #12 exists to remove gets reintroduced.",
+  "granularity": "file",
+  "granularity_note": "Mapped at FILE level, never per test-nodeid. Per-test labels would need a reading of what each test asserts, which is exactly the judgement call this measurement is supposed to replace — and a wrong per-test label is invisible in the result. File level costs precision and buys auditability from the filename alone.",
+  "over_approximation_note": "A file that exercises several journeys is mapped to ALL of them. That inflates traced(J), which inflates `traced_only`, which makes the selector look WORSE. Same argument as ast_oracle.py's bare-name matching: an over-approximating oracle makes the test harder to pass, never easier, which is the safe direction for a recall check.",
+  "unmapped": {
+    "tests/test_notifications.py": "The digest mailer is not a registered journey. Deliberately left unmapped so ground_truth.py reports it — a traced behaviour with no journey is a registry gap, and silently attaching it to J8 would hide that."
+  },
+  "tests": {
+    "tests/test_auth.py": ["J6"],
+    "tests/test_comments.py": ["J5", "J3", "J4"],
+    "tests/test_gcal_sync.py": ["J7"],
+    "tests/test_placement.py": ["J8", "J3", "J4"],
+    "tests/test_scheduler.py": ["J8", "J3", "J4"],
+    "tests/test_tasks.py": ["J1", "J2", "J3"]
+  }
+}

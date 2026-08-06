@@ -64,9 +64,17 @@ python3 -m testgraph.propose --repo <path>
 hooks/install.sh
 
 # Run the tests and the accuracy harness:
-python3 -m unittest tests.test_core tests.test_propose tests.test_skill_contract
+python3 -m unittest discover -s tests
 python3 harness/accuracy.py            # 5 hand-labeled real commits
 python3 harness/seed_regressions.py    # ~20 seeded mutation sites
+
+# Score the static footprint against what a journey actually EXECUTES (issue #12).
+# Needs a target whose own test suite runs; see harness/fixtures/dyndemo/README.md.
+python3 harness/trace.py --repo <target> --python <its venv python> \
+    --tests tests --root app --out traces/<target>.json
+python3 harness/ground_truth.py --trace traces/<target>.json \
+    --map harness/journey_tests_<target>.json \
+    --registry journeys/<target>.json --db <target>/.codegraph/codegraph.db
 ```
 
 ## Wiring It In
@@ -114,7 +122,9 @@ selector *said*, not what running the journeys then *found*.
 - `harness/` — `accuracy.py` (recall/precision on labeled commits),
   `selectivity.py` (selection sizes per commit for a target with no labels),
   `seed_regressions.py` + `ast_oracle.py` (seeded-mutation eval against an
-  independent oracle), `adjudications.json` (hand-ruled disagreements).
+  independent oracle), `adjudications.json` (hand-ruled disagreements),
+  `trace.py` + `tgtrace.py` + `ground_truth.py` (score the static footprint
+  against what a journey actually *executes*, issue #12).
 - `hooks/` — `pre-push` (the git hook that runs the selector on every push) and
   `install.sh` (installs it into each repo with an approved registry).
 - `maps/` — generated journey maps (symbol -> journeys, grouped by file).
