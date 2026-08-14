@@ -1549,7 +1549,7 @@ be in a static footprint by construction.
 **4 (`ledger.py`: `append` x2, `path`, `state_dir`) are new, and the root
 cause is not aliasing.** `testgraph/record.py:99` calls `ledger.append(row)`
 directly — no module-alias indirection, the same syntactic shape as
-`ledger.path()` two lines later, which resolves fine. Querying
+`ledger.path()` one line later, which resolves fine. Querying
 `add_outcome`'s outgoing edges shows `known_journeys`, `resolve_commit`,
 `outcome_row`, and `path` (`resolvedBy: "import"`) — **no edge to `append` at
 all**. `testgraph/hook.py:44`'s `ledger.append(ledger.selection_row(record))`
