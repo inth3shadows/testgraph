@@ -3,3 +3,4 @@ __pycache__/
 .codegraph/
 .venv/
 .ai/
+traces/
