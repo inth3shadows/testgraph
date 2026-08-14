@@ -1,0 +1,20 @@
+{
+  "target": "testgraph",
+  "approved": false,
+  "note": "Hand-authored map from testgraph's OWN unittest files (tests/test_*.py) to journey ids in journeys/testgraph.json. Written for issue #12's cheaper trace target: honeyslate's Postgres is unreachable under WSL (see Update 4), while testgraph is stdlib-only, has no fixture infrastructure, and its 251-test suite runs in ~5s. The self-reference caveat from journeys/testgraph.json's own note applies here unchanged — a good number is not independent evidence the way honeyslate's or signedintake's would be, because the instrument and the target share a repo.",
+  "granularity": "file",
+  "granularity_note": "Mapped at FILE level, same as honeyslate's map. A file exercising more than one journey's real entry code is mapped to all of them, which inflates traced(J) and therefore inflates traced_only rather than deflating it — the safe direction for a recall check.",
+  "mapping_basis": "Checked which module each file imports UNMOCKED, not just imported. tests/test_hook.py imports testgraph.hook but mock.patch.object(hook.sel, 'select', ...) and mock.patch.object(hook.reg, 'resolve_for_repo', ...) on every path that would otherwise run real select/registry code, so its trace stays inside hook.py + ledger — J1 only. tests/test_core.py calls db.impacted_closure, integrity.check, select.select, select._parse_unified_diff, export.build_map/main/render_markdown, and registry.resolve_entries/unresolved/journey_sort_key directly with no mocking, so it is mapped to both J2 (select) and J4 (export) whose entry functions it exercises for real.",
+  "unmapped": {
+    "tests/test_registries.py": "Index-free structural checks over journeys/*.json itself (parses, target unique, journeys non-empty, ids sort). Meta-testing the registry files, not exercising any journey's runtime entry code — same class as honeyslate's test_notifications.py.",
+    "tests/test_skill_contract.py": "Pins skills/testgraph-verify/SKILL.md, which is markdown with no symbols. journeys/testgraph.json's own note already lists the skill contract as knowingly uncovered for exactly this reason."
+  },
+  "tests": {
+    "tests/test_hook.py": ["J1"],
+    "tests/test_core.py": ["J2", "J4"],
+    "tests/test_propose.py": ["J3"],
+    "tests/test_record.py": ["J5"],
+    "tests/test_couple.py": ["J6"],
+    "tests/test_ground_truth.py": ["J6"]
+  }
+}

@@ -1470,6 +1470,123 @@ Verified after the edit: all 8 journeys resolve, 20 entry nodes, no `unchecked_e
 no approval warning, and `app/main.py -> [J8]`, `routers/google.py -> [J7]`,
 `delete_task -> [J3]`, `app/cli.py -> NONE` (declared).
 
+### Update 7 — the self-trace ran, and it found a real edge defect the alias blind spot doesn't explain (2026-08-13)
+
+Issue #12, picking up where Update 4 stopped. honeyslate's Postgres is still
+unreachable — port `:55433` closed, no Docker under WSL, nothing changed since
+Update 4 — so this runs the cheaper target Update 4's comment proposed and
+Update 5 made available: testgraph's own 251-test, stdlib-only `unittest` suite
+against its own registry (`journeys/testgraph.json`, from #59). `pytest` (9.0.3,
+already on this machine) collects and runs `unittest.TestCase` classes with no
+code changes to the suite — `harness/trace.py --repo . --python python3 --tests
+tests --root . --out traces/testgraph.json` traced all 251 tests, 127 distinct
+symbols, in ~4s.
+
+`harness/journey_tests_testgraph.json` is the new hand-authored map, one entry
+per `tests/test_*.py` file against `journeys/testgraph.json`'s six journeys.
+Mapped by checking which module each file exercises **unmocked**, not just
+imports: `tests/test_hook.py` patches `hook.sel.select` and
+`hook.reg.resolve_for_repo` on every path, so its trace stays inside `hook.py` +
+`ledger.py` (J1 only); `tests/test_core.py` calls `select.select`,
+`select._parse_unified_diff`, `export.build_map/main/render_markdown`, and
+`registry.resolve_entries/unresolved` directly with nothing mocked, so it maps
+to both J2 and J4. `tests/test_registries.py` and `tests/test_skill_contract.py`
+stay unmapped, same reason honeyslate's `test_notifications.py` does — they pin
+structure (registry JSON shape, a markdown skill contract), not a journey's
+runtime entry path.
+
+The self-reference caveat from `journeys/testgraph.json`'s own note applies
+unchanged: this is not independent evidence the way honeyslate's or
+signedintake's numbers would be, because the instrument and the target share a
+repo.
+
+```
+6/6 journey(s) scored; 81 traced symbol(s) outside the static footprint
+  18 traced test(s) map to no journey — tests/test_registries.py, tests/test_skill_contract.py
+```
+
+All six journeys report `! SILENT-MISS SOURCE`. Querying the 81 `traced_only`
+node ids against `.codegraph/codegraph.db`, grouped by (journey, symbol) rather
+than assumed from the file totals alone — an earlier draft of this section got
+that grouping wrong and a review caught it before merge — splits them into
+four causes:
+
+**63 of 81 (`registry.py` 41, `db.py` 21, one `select.py` symbol) are the
+blind spot Update 5 already declared** — `dbmod.resolve_symbol`,
+`reg.resolve_for_repo`, `reg.repo_name`, `reg.journey_name`, and the rest, all
+reached in reality through `from . import db as dbmod` / `from . import
+registry as reg` then `dbmod.X()` / `reg.X()`. Update 5 found this by seeding
+every node and running the static closure; the trace now confirms the same
+gap by an independent method — real execution, joined against the same static
+footprint. The one `select.py` symbol is the same pattern showing up a second
+place: `testgraph/propose.py` does `from . import select as sel` then calls
+`sel._is_test(...)` for real, and it is traced-only under J3 for exactly the
+same reason `dbmod`/`reg` calls are — an aliased-module call the closure
+doesn't follow.
+
+**12 (`export.py` 5 under J2, `select.py` 5 + `integrity.py` 1 under J4,
+`export.py` 1 under J3) are two distinct map-granularity artifacts, not a
+defect.** `tests/test_core.py` is mapped to both J2 and J4, and it exercises
+`select.py`/`export.py`/`integrity.py` directly and unmocked, so its full
+traced set is charged against *both* journeys even though each journey's real
+entries only reach half of it — the `export.py` calls are J4's territory,
+`select.py`/`integrity.py` are J2's, and each shows up as `traced_only` noise
+in the journey it doesn't belong to. Separately, `tests/test_propose.py:725`
+calls `exp.render_markdown({}, {"journeys": {}}, meta)` directly as its own
+unit test of an `export.py` edge case, unrelated to anything `propose.py`
+itself does at runtime; mapped at file level to J3 (propose's journey), that
+one call shows up as a J3 miss it has no real connection to. The methodology
+note in Update 4 says this kind of inflation runs one direction only (makes
+the selector look worse, never better); both mechanisms here are that
+direction, showing up exactly where file-level mapping predicts it will.
+
+**2 (`harness/plugin/tgtrace.py`, under J6) are the blind spot
+`journeys/testgraph.json` already declares in its own note, point 3** — the
+plugin is loaded by pytest via `-p tgtrace`, reached by the plugin loader
+rather than any call edge, so no entry symbol registers it and it can never
+be in a static footprint by construction.
+
+**4 (`ledger.py`: `append` x2, `path`, `state_dir`) are new, and the root
+cause is not aliasing.** `testgraph/record.py:99` calls `ledger.append(row)`
+directly — no module-alias indirection, the same syntactic shape as
+`ledger.path()` one line later, which resolves fine. Querying
+`add_outcome`'s outgoing edges shows `known_journeys`, `resolve_commit`,
+`outcome_row`, and `path` (`resolvedBy: "import"`) — **no edge to `append` at
+all**. `testgraph/hook.py:44`'s `ledger.append(ledger.selection_row(record))`
+is the same story from `log_invocation`: an edge to `selection_row`, none to
+`append`. Querying `append`'s *incoming* edges the other direction shows why
+the registry's own spot-check (`"append": {"min_caller_edges": 5}`) passed
+anyway — it has 7 inbound edges, all `resolvedBy: "exact-match"`, from
+`top_fanin_nodes`, `build_map`, `_merge_duplicate_hits`, `assign_ids`,
+`_unscanned_product`, and `_parse_unified_diff` (`select.py`, twice) — six
+functions with no relationship to `ledger.py` at all, each almost certainly
+calling `.append(...)` on a plain local list. `append` and `path` sit on
+adjacent lines calling the same imported module the same way; one resolves by
+import, the other resolves not at all and instead collects false inbound edges
+from unrelated stdlib list calls elsewhere in the repo. `path`, `state_dir`
+join the miss only because they run as callees *inside* `ledger.append` at
+trace time (`append -> state_dir`, `append -> path` are real static edges);
+once the caller-side edge into `append` is gone, everything downstream of it is
+unreachable from J1/J5 regardless.
+
+**What this means for the selector, concretely:** a commit that breaks
+`ledger.append` — the single write path both the pre-push hook (J1) and
+`testgraph record` (J5) depend on to log anything at all — selects neither
+journey. `min_caller_edges` spot-checks count edge *quantity*, not edge
+*correctness*; this one passed while pointing at the wrong callers entirely,
+which is a sharper failure than an unresolved entry, because nothing here would
+have warned this document if the trace had not run.
+
+**Not fixed here.** The `append`/false-inbound-edge defect lives in CodeGraph's
+call resolver, not in this repo, and is a distinct root cause from the
+already-documented module-alias gap — worth its own issue rather than folding
+into #62's blind-spot list, which is about registry coverage, not indexer
+correctness.
+
+**Scope not delivered, same as Update 4.** #12's full scope — traces
+*replacing* hand-labeled journeys — is still untouched. This is the second
+measurement, not the replacement.
+
 ## Known Limitations
 
 - **Scope:** three *approved* registries — honeyslate, signedintake, and
