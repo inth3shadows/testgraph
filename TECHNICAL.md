@@ -1506,27 +1506,47 @@ repo.
 ```
 
 All six journeys report `! SILENT-MISS SOURCE`. Querying the 81 `traced_only`
-node ids against `.codegraph/codegraph.db` splits them into three causes, not
-one:
+node ids against `.codegraph/codegraph.db`, grouped by (journey, symbol) rather
+than assumed from the file totals alone — an earlier draft of this section got
+that grouping wrong and a review caught it before merge — splits them into
+four causes:
 
-**62 of 81 (`registry.py` 41, `db.py` 21) are the blind spot Update 5 already
-declared** — `dbmod.resolve_symbol`, `reg.resolve_for_repo`, `reg.repo_name`,
-`reg.journey_name`, and the rest, all reached in reality through `from . import
-db as dbmod` / `from . import registry as reg` then `dbmod.X()` / `reg.X()`.
-Update 5 found this by seeding every node and running the static closure; the
-trace now confirms the same gap by an independent method — real execution,
-joined against the same static footprint. Two methods, same 62 symbols, same
-cause.
+**63 of 81 (`registry.py` 41, `db.py` 21, one `select.py` symbol) are the
+blind spot Update 5 already declared** — `dbmod.resolve_symbol`,
+`reg.resolve_for_repo`, `reg.repo_name`, `reg.journey_name`, and the rest, all
+reached in reality through `from . import db as dbmod` / `from . import
+registry as reg` then `dbmod.X()` / `reg.X()`. Update 5 found this by seeding
+every node and running the static closure; the trace now confirms the same
+gap by an independent method — real execution, joined against the same static
+footprint. The one `select.py` symbol is the same pattern showing up a second
+place: `testgraph/propose.py` does `from . import select as sel` then calls
+`sel._is_test(...)` for real, and it is traced-only under J3 for exactly the
+same reason `dbmod`/`reg` calls are — an aliased-module call the closure
+doesn't follow.
 
-**8 (`export.py` 6, `select.py` 1, `integrity.py` 1) are an artifact of this
-map's own file-level coarseness, not a defect.** `tests/test_core.py` is mapped
-to both J2 and J4, so its full traced set — including the `export.py` and
-`integrity.py` code J4 alone would exercise — is charged against J2 too, where
-it was never selectable and never needed to be. The methodology note in Update
-4 says this inflation runs one direction only (makes the selector look worse,
-never better); this is that direction, showing up exactly where predicted.
+**12 (`export.py` 5 under J2, `select.py` 5 + `integrity.py` 1 under J4,
+`export.py` 1 under J3) are two distinct map-granularity artifacts, not a
+defect.** `tests/test_core.py` is mapped to both J2 and J4, and it exercises
+`select.py`/`export.py`/`integrity.py` directly and unmocked, so its full
+traced set is charged against *both* journeys even though each journey's real
+entries only reach half of it — the `export.py` calls are J4's territory,
+`select.py`/`integrity.py` are J2's, and each shows up as `traced_only` noise
+in the journey it doesn't belong to. Separately, `tests/test_propose.py:725`
+calls `exp.render_markdown({}, {"journeys": {}}, meta)` directly as its own
+unit test of an `export.py` edge case, unrelated to anything `propose.py`
+itself does at runtime; mapped at file level to J3 (propose's journey), that
+one call shows up as a J3 miss it has no real connection to. The methodology
+note in Update 4 says this kind of inflation runs one direction only (makes
+the selector look worse, never better); both mechanisms here are that
+direction, showing up exactly where file-level mapping predicts it will.
 
-**11 (`ledger.py`: `append` x2, `path`, `state_dir`) are new, and the root
+**2 (`harness/plugin/tgtrace.py`, under J6) are the blind spot
+`journeys/testgraph.json` already declares in its own note, point 3** — the
+plugin is loaded by pytest via `-p tgtrace`, reached by the plugin loader
+rather than any call edge, so no entry symbol registers it and it can never
+be in a static footprint by construction.
+
+**4 (`ledger.py`: `append` x2, `path`, `state_dir`) are new, and the root
 cause is not aliasing.** `testgraph/record.py:99` calls `ledger.append(row)`
 directly — no module-alias indirection, the same syntactic shape as
 `ledger.path()` two lines later, which resolves fine. Querying
