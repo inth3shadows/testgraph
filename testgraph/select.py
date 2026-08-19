@@ -287,10 +287,14 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # Files already in `unmapped` are skipped: their seeds are untrusted, not
     # evidence of confinement.
     confined_files = []
+    single_file = len(seeds_by_file) == 1
     for f, file_seeds in sorted(seeds_by_file.items()):
         if f in unmapped_files:
             continue
-        file_impacted = dbmod.impacted_closure(conn, file_seeds)
+        # When exactly one file contributed seeds, its seeds ARE `seeds` and
+        # its closure IS `impacted` — reuse it instead of re-running the same
+        # recursive traversal a second time.
+        file_impacted = impacted if single_file else dbmod.impacted_closure(conn, file_seeds)
         reached_files = dbmod.closure_files(conn, file_impacted.keys())
         if reached_files and reached_files <= {f}:
             confined_files.append(f)

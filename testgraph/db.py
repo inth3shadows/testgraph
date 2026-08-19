@@ -89,14 +89,23 @@ def closure_files(conn, node_ids):
     counted by their own path). Used to detect a closure that never leaves
     the file its seeds started in — an edge-resolution blind spot distinct
     from an unmapped seed (issue #63): the seeds resolved fine, they just
-    have no outbound reach on record."""
+    have no outbound reach on record.
+
+    Routed through a TEMP TABLE rather than one `IN (?,?,...)` placeholder
+    per id, same as `impacted_closure` — a widely-imported module's closure
+    can fan out past SQLite's bound-parameter ceiling (999 on some packaged
+    builds), which a raw IN-list would hit and raise on.
+    """
     node_ids = list(node_ids)
     if not node_ids:
         return set()
-    placeholders = ",".join("?" for _ in node_ids)
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _closure_ids(id TEXT PRIMARY KEY)")
+    conn.execute("DELETE FROM _closure_ids")
+    conn.executemany(
+        "INSERT OR IGNORE INTO _closure_ids(id) VALUES (?)", [(i,) for i in node_ids]
+    )
     rows = conn.execute(
-        f"SELECT DISTINCT file_path FROM nodes WHERE id IN ({placeholders})",
-        node_ids,
+        "SELECT DISTINCT file_path FROM nodes WHERE id IN (SELECT id FROM _closure_ids)"
     )
     return {r[0] for r in rows}
 

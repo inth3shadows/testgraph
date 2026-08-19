@@ -141,6 +141,7 @@ def run(repo, base, head, registry_path=None, caller="pre-push"):
     record["n_journeys"] = len(result.get("journeys", []))
     record["journey_ids"] = [j["id"] for j in result.get("journeys", [])]
     record["recall_degraded"] = bool(result.get("recall_degraded"))
+    record["closure_confined"] = result.get("closure_confined", [])
     record["duration_ms"] = int((time.time() - started) * 1000)
     more = (
         f"python3 -m testgraph.select --repo {repo} --base {base} --head {head}"
