@@ -1434,6 +1434,67 @@ class ZeroSeedDegradesTests(unittest.TestCase):
         self.assertGreater(res["seed_symbols"], 0)
 
 
+class ClosureConfinedTests(unittest.TestCase):
+    """Issue #63: seeds that resolve fine but whose closure never leaves the
+    file they started in used to be indistinguishable from a confident,
+    correct `NONE` — no signal at all. `function:leaf` (app/leaf.py) has zero
+    outbound edges in the fixture (see ClosureTests.test_leaf_stays_tight),
+    so editing it is exactly this blind spot."""
+
+    REG = {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                              "file": "app/svc.py"}]}}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(
+            self.tmp, {"app/svc.py": 22, "app/leaf.py": 5, "app/config.py": 5}
+        )
+
+    def _edit_leaf(self):
+        full = os.path.join(self.repo, "app", "leaf.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[1] = "changed = 1\n"  # inside function:leaf (1-5)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit leaf")
+
+    def test_confined_closure_is_flagged(self):
+        self._edit_leaf()
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["status"], "OK")
+        self.assertFalse(res["recall_degraded"], "not the no-node case")
+        self.assertEqual(res["closure_confined"], ["app/leaf.py"])
+        self.assertTrue(
+            any("app/leaf.py" in w and "did not leave the file" in w
+                for w in res["warnings"]),
+            res["warnings"],
+        )
+        # leaf has no journey entry, so the answer is still NONE -- the point
+        # is that NONE now carries a NOTE saying it may mean UNKNOWN.
+        self.assertEqual(res["journeys"], [])
+
+    def test_change_reaching_outside_its_file_is_not_flagged(self):
+        # get_settings' closure crosses into app/svc.py via the imports edge +
+        # file expansion (ClosureTests.test_imports_and_file_expansion_reach_
+        # handler) -- confirm a real cross-file reach produces no false
+        # positive.
+        full = os.path.join(self.repo, "app", "config.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[1] = "changed = 1\n"  # inside get_settings (1-5)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit get_settings")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["closure_confined"], [])
+
+
 class ChangedFileContentDriftTests(unittest.TestCase):
     """A changed file whose bytes no longer match the indexed copy is the
     quietest way to be unmappable. The other two resolve to no node and are

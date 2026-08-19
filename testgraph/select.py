@@ -226,15 +226,19 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # PRODUCT_EXT but not in this repo's graph. Per-file node sets, not one
     # running total, so one mapped file cannot mask an unmapped one.
     unmapped = []
+    unmapped_files = set()
     seeds = set()
+    seeds_by_file = {}
     for f, rs in sorted(ranges.items()):
         in_file = set()
         for lo, hi in rs:
             in_file.update(dbmod.nodes_for_lines(conn, f, lo, hi))
         if in_file:
             seeds.update(in_file)
+            seeds_by_file[f] = in_file
         else:
             unmapped.append(f"{f} (changed lines map to no indexed symbol)")
+            unmapped_files.add(f)
 
     # Whole-file changes (deletions, renames) have no line ranges to map: seed
     # every symbol the file contains. A file deleted in `head` is usually absent
@@ -246,8 +250,10 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         nodes = dbmod.nodes_in_file(conn, path)
         if nodes:
             seeds.update(nodes)
+            seeds_by_file[path] = set(nodes)
         else:
             unmapped.append(f"{path} ({reason})")
+            unmapped_files.add(path)
 
     # A changed file that is NEWER than its index row is a third way to be
     # unmappable, and the quietest. The other two resolve to no node and are
@@ -268,8 +274,26 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     drifted = integrity.content_drift(conn, repo, set(ranges) | set(whole_files))
     for path in sorted(drifted):
         unmapped.append(f"{path} (bytes differ from the indexed copy — line spans are stale)")
+        unmapped_files.add(path)
 
     impacted = dbmod.impacted_closure(conn, seeds)
+
+    # A closure that resolves fine but never leaves the file(s) its seeds
+    # started in is a second, silent way to be blind (issue #63) — distinct
+    # from `unmapped` above (no node at all). The seeds have symbols; those
+    # symbols just have no recorded outbound reach. Checked per file, not
+    # against the union of every seeded file in this diff, so a genuinely
+    # cross-file change cannot mask a same-diff file that stayed confined.
+    # Files already in `unmapped` are skipped: their seeds are untrusted, not
+    # evidence of confinement.
+    confined_files = []
+    for f, file_seeds in sorted(seeds_by_file.items()):
+        if f in unmapped_files:
+            continue
+        file_impacted = dbmod.impacted_closure(conn, file_seeds)
+        reached_files = dbmod.closure_files(conn, file_impacted.keys())
+        if reached_files and reached_files <= {f}:
+            confined_files.append(f)
     entry_map = reg.resolve_entries(conn, registry)
 
     touched = {}
@@ -318,11 +342,21 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
 
     journeys.sort(key=lambda j: (-j["rank"], reg.journey_sort_key(j["id"])))
 
+    if confined_files:
+        warnings.append(
+            f"impact for {', '.join(confined_files)} did not leave the file it "
+            f"started in ({sum(len(seeds_by_file[f]) for f in confined_files)} "
+            f"node(s), all local) — either the module is genuinely leaf-only, or "
+            f"its callers are not linked in the index; a NONE here means UNKNOWN, "
+            f"not verified-safe"
+        )
+
     result.update(
         status="OK",
         changed_files=sorted(ranges),
         whole_file_changes=whole_files,
         recall_degraded=bool(unmapped),
+        closure_confined=confined_files,
         seed_symbols=len(seeds),
         impacted_symbols=len(impacted),
         journeys=journeys,
@@ -354,6 +388,11 @@ def _render(result):
         lines.append(f"  whole-file: {path} ({reason})")
     if result.get("recall_degraded"):
         lines.append("  RECALL DEGRADED — unbounded impact, all journeys listed")
+    for f in result.get("closure_confined", []):
+        lines.append(
+            f"  NOTE: impact for {f} did not leave the file it started in — "
+            f"a NONE here means UNKNOWN, not verified-safe"
+        )
     if not result["journeys"]:
         lines.append("journeys to test: NONE (no product-behavior change detected)")
     else:

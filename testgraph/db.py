@@ -84,6 +84,23 @@ def file_node_id(conn, file_path):
     return row[0] if row else None
 
 
+def closure_files(conn, node_ids):
+    """Distinct `file_path` values for a set of node ids (file-kind nodes
+    counted by their own path). Used to detect a closure that never leaves
+    the file its seeds started in — an edge-resolution blind spot distinct
+    from an unmapped seed (issue #63): the seeds resolved fine, they just
+    have no outbound reach on record."""
+    node_ids = list(node_ids)
+    if not node_ids:
+        return set()
+    placeholders = ",".join("?" for _ in node_ids)
+    rows = conn.execute(
+        f"SELECT DISTINCT file_path FROM nodes WHERE id IN ({placeholders})",
+        node_ids,
+    )
+    return {r[0] for r in rows}
+
+
 def impacted_closure(conn, seed_ids):
     """Transitive reverse-reachability closure of `seed_ids`, as
     `{node_id: confidence}`.
