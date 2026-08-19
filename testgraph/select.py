@@ -227,6 +227,15 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # running total, so one mapped file cannot mask an unmapped one.
     unmapped = []
     unmapped_files = set()
+
+    def _mark_unmapped(path, detail):
+        # `unmapped_files` gates the confinement check below (an untrusted
+        # seed must not read as evidence of confinement) — one helper instead
+        # of three independent append/add pairs means that gate can't drift
+        # out of sync with `unmapped` itself.
+        unmapped.append(f"{path} ({detail})")
+        unmapped_files.add(path)
+
     seeds = set()
     seeds_by_file = {}
     for f, rs in sorted(ranges.items()):
@@ -237,8 +246,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             seeds.update(in_file)
             seeds_by_file[f] = in_file
         else:
-            unmapped.append(f"{f} (changed lines map to no indexed symbol)")
-            unmapped_files.add(f)
+            _mark_unmapped(f, "changed lines map to no indexed symbol")
 
     # Whole-file changes (deletions, renames) have no line ranges to map: seed
     # every symbol the file contains. A file deleted in `head` is usually absent
@@ -262,8 +270,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             if path not in seeds_by_file:
                 seeds_by_file[path] = set(nodes)
         else:
-            unmapped.append(f"{path} ({reason})")
-            unmapped_files.add(path)
+            _mark_unmapped(path, reason)
 
     # A changed file that is NEWER than its index row is a third way to be
     # unmappable, and the quietest. The other two resolve to no node and are
@@ -283,10 +290,10 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # exceptional path rather than every push.
     drifted = integrity.content_drift(conn, repo, set(ranges) | set(whole_files))
     for path in sorted(drifted):
-        unmapped.append(f"{path} (bytes differ from the indexed copy — line spans are stale)")
-        unmapped_files.add(path)
+        _mark_unmapped(path, "bytes differ from the indexed copy — line spans are stale")
 
     impacted = dbmod.impacted_closure(conn, seeds)
+    entry_map = reg.resolve_entries(conn, registry)
 
     # A closure that resolves fine but never leaves the file(s) its seeds
     # started in is a second, silent way to be blind (issue #63) — distinct
@@ -297,13 +304,23 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # Files already in `unmapped` are skipped: their seeds are untrusted, not
     # evidence of confinement.
     #
+    # NOT flagged when the file's own closure already lands on a registered
+    # entry point (`entry_map`): a route handler with no callers on record is
+    # not a blind spot, it's a correctly-confident answer — the seed IS the
+    # thing the registry names, so there is nothing "unknown" left to say.
+    # Reproduced against this repo's own index before this guard existed: 7
+    # of 11 "confined" files had already selected a journey at confidence
+    # 1.0, and the warning called that UNKNOWN anyway.
+    #
     # One recursive traversal per seeded file (beyond the single-file reuse
-    # below): a mechanical rename/refactor touching many files pays for many
-    # extra closures. Accepted for the same reason `journeys` already loops
-    # `caller_edge_count` per entry above — this selector is recall-first and
-    # already spends per-item DB round trips elsewhere; a diff wide enough to
-    # feel this is also wide enough to be a whole-file/`unmapped` case on the
-    # commonest paths. Revisit if this ever shows up in profiling.
+    # below), and `closure_files` scans every resulting node rather than
+    # short-circuiting on the first one outside `f`: a mechanical
+    # rename/refactor touching many files pays for it on every one. Accepted
+    # for the same reason `journeys` already loops `caller_edge_count` per
+    # entry above — this selector is recall-first and already spends
+    # per-item DB round trips elsewhere; a diff wide enough to feel this is
+    # also wide enough to be a whole-file/`unmapped` case on the commonest
+    # paths. Revisit if this ever shows up in profiling.
     confined_files = []
     for f, file_seeds in sorted(seeds_by_file.items()):
         if f in unmapped_files:
@@ -317,10 +334,15 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         file_impacted = (
             impacted if file_seeds == seeds else dbmod.impacted_closure(conn, file_seeds)
         )
+        if file_impacted.keys() & entry_map.keys():
+            continue
+        # `file_impacted` always contains at least the seeds themselves
+        # (`impacted_closure` seeds every id at 1.0), and every seed in
+        # `file_seeds` came from a `nodes` row whose own `file_path == f` —
+        # so `closure_files` here can never come back empty.
         reached_files = dbmod.closure_files(conn, file_impacted.keys())
-        if reached_files and reached_files <= {f}:
+        if reached_files <= {f}:
             confined_files.append(f)
-    entry_map = reg.resolve_entries(conn, registry)
 
     touched = {}
     for nid in impacted.keys() & set(entry_map):
@@ -368,19 +390,11 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
 
     journeys.sort(key=lambda j: (-j["rank"], reg.journey_sort_key(j["id"])))
 
-    # One warning per file, not one combined message: a summed node count
-    # across several confined files tells a reader nothing about which file
-    # contributed how much, and the per-file NOTE lines in `_render` below
-    # already report them separately -- the warnings channel should agree.
-    for f in confined_files:
-        warnings.append(
-            f"impact for {f} did not leave the file it started in "
-            f"({len(seeds_by_file[f])} node(s), all local) — either the module "
-            f"is genuinely leaf-only, or its callers are not linked in the "
-            f"index; that file's own contribution to this answer is UNKNOWN, "
-            f"not verified-safe, even though other changed files may still be "
-            f"selecting journeys above"
-        )
+    # Not appended to `warnings`: this is its own signal, deliberately kept
+    # off the capped, generic channel. `_render` below and `hook.render` each
+    # give it a dedicated, uncapped line (`closure_confined` on the result is
+    # the data both read from) — riding `warnings` would let it silently drop
+    # off a push whose other warnings already filled hook.py's MAX_WARNINGS.
 
     result.update(
         status="OK",
@@ -422,7 +436,9 @@ def _render(result):
     for f in result.get("closure_confined", []):
         lines.append(
             f"  NOTE: impact for {f} did not leave the file it started in — "
-            f"that file's own contribution is UNKNOWN, not verified-safe"
+            f"either the module is genuinely leaf-only, or its callers are "
+            f"not linked in the index; that file's own contribution is "
+            f"UNKNOWN, not verified-safe"
         )
     if not result["journeys"]:
         lines.append("journeys to test: NONE (no product-behavior change detected)")

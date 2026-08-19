@@ -1478,11 +1478,15 @@ class ClosureConfinedTests(unittest.TestCase):
         self.assertEqual(res["status"], "OK")
         self.assertFalse(res["recall_degraded"], "not the no-node case")
         self.assertEqual(res["closure_confined"], ["app/leaf.py"])
-        self.assertTrue(
-            any("app/leaf.py" in w and "did not leave the file" in w
-                for w in res["warnings"]),
-            res["warnings"],
+        # The signal is NOT on the capped `warnings` channel (see hook.py's
+        # dedicated line) -- it's carried structurally on the result, and
+        # `_render` turns it into its own NOTE line.
+        self.assertNotIn(
+            "did not leave the file", " ".join(res["warnings"]), res["warnings"]
         )
+        rendered = sel._render(res)
+        self.assertIn("app/leaf.py", rendered)
+        self.assertIn("did not leave the file", rendered)
         # leaf has no journey entry, so the answer is still NONE -- the point
         # is that NONE now carries a NOTE saying it may mean UNKNOWN.
         self.assertEqual(res["journeys"], [])
@@ -1502,6 +1506,26 @@ class ClosureConfinedTests(unittest.TestCase):
         self.run("git", "commit", "-qm", "edit get_settings")
         res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
         self.assertEqual(res["closure_confined"], [])
+
+    def test_an_edited_entry_point_with_no_callers_is_not_a_false_positive(self):
+        # handler_a is ITSELF the registered J1 entry and has no callers on
+        # record in this fixture, so its own closure never leaves app/svc.py
+        # -- but that is not unknown, it's a confidently-selected journey.
+        # Flagging it anyway was reproduced against this repo's own index
+        # (issue #63 PR review): 7 of 11 "confined" files had already
+        # selected a journey at confidence 1.0.
+        full = os.path.join(self.repo, "app", "svc.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[11] = "changed = 1\n"  # inside handler_a (10-20)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit handler_a")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["closure_confined"], [])
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertEqual(j1["confidence"], 1.0)
 
 
 class RenameWithEditConfinementTests(unittest.TestCase):

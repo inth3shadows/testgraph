@@ -141,6 +141,21 @@ class RenderTest(unittest.TestCase):
         self.assertIn("app/leaf.py", text)
         self.assertIn("did not leave the file", text)
 
+    def test_closure_confined_is_not_also_printed_via_warnings(self):
+        # select() no longer puts this text on `warnings` at all (it's
+        # structural data on `closure_confined` only) -- confirm the render
+        # path doesn't print it twice even if a caller's `warnings` happens
+        # to mention the same file for an unrelated reason.
+        text = hook.render(
+            _result(
+                1,
+                closure_confined=["app/leaf.py"],
+                warnings=["app/leaf.py: registry not approved"],
+            ),
+            SIGNEDINTAKE,
+        )
+        self.assertEqual(text.count("app/leaf.py"), 2)  # NOTE line + WARN line, not 3
+
     def test_closure_confined_survives_the_warning_cap(self):
         # issue #63's whole point is a signal that must not go silent. Riding
         # the capped `warnings` channel like other detail does would let
