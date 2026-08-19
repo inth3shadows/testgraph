@@ -84,26 +84,32 @@ def file_node_id(conn, file_path):
     return row[0] if row else None
 
 
+def _load_id_temp_table(conn, table_name, ids):
+    """(Re)fill a single-column TEMP TABLE with `ids`, for callers that need
+    to join or filter against a large id set. A raw `IN (?,?,...)` with one
+    bound placeholder per id hits SQLite's bound-parameter ceiling (999 on
+    some packaged builds) once a closure fans out wide enough; a temp table
+    has no such limit. Shared by `impacted_closure` and `closure_files` so
+    that fix applies once, not per copy.
+    """
+    conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {table_name}(id TEXT PRIMARY KEY)")
+    conn.execute(f"DELETE FROM {table_name}")
+    conn.executemany(
+        f"INSERT OR IGNORE INTO {table_name}(id) VALUES (?)", [(i,) for i in ids]
+    )
+
+
 def closure_files(conn, node_ids):
     """Distinct `file_path` values for a set of node ids (file-kind nodes
     counted by their own path). Used to detect a closure that never leaves
     the file its seeds started in — an edge-resolution blind spot distinct
     from an unmapped seed (issue #63): the seeds resolved fine, they just
     have no outbound reach on record.
-
-    Routed through a TEMP TABLE rather than one `IN (?,?,...)` placeholder
-    per id, same as `impacted_closure` — a widely-imported module's closure
-    can fan out past SQLite's bound-parameter ceiling (999 on some packaged
-    builds), which a raw IN-list would hit and raise on.
     """
     node_ids = list(node_ids)
     if not node_ids:
         return set()
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _closure_ids(id TEXT PRIMARY KEY)")
-    conn.execute("DELETE FROM _closure_ids")
-    conn.executemany(
-        "INSERT OR IGNORE INTO _closure_ids(id) VALUES (?)", [(i,) for i in node_ids]
-    )
+    _load_id_temp_table(conn, "_closure_ids", node_ids)
     rows = conn.execute(
         "SELECT DISTINCT file_path FROM nodes WHERE id IN (SELECT id FROM _closure_ids)"
     )
@@ -130,11 +136,7 @@ def impacted_closure(conn, seed_ids):
     """
     if not seed_ids:
         return {}
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _seeds(id TEXT PRIMARY KEY)")
-    conn.execute("DELETE FROM _seeds")
-    conn.executemany(
-        "INSERT OR IGNORE INTO _seeds(id) VALUES (?)", [(s,) for s in seed_ids]
-    )
+    _load_id_temp_table(conn, "_seeds", seed_ids)
     kinds = ",".join("'%s'" % k for k in REACH_KINDS)  # constants, safe to inline
     edge_conf = (
         f"MIN(COALESCE(json_extract(e.metadata, '$.confidence'), "

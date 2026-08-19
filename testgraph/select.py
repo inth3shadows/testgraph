@@ -286,15 +286,27 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # cross-file change cannot mask a same-diff file that stayed confined.
     # Files already in `unmapped` are skipped: their seeds are untrusted, not
     # evidence of confinement.
+    #
+    # One recursive traversal per seeded file (beyond the single-file reuse
+    # below): a mechanical rename/refactor touching many files pays for many
+    # extra closures. Accepted for the same reason `journeys` already loops
+    # `caller_edge_count` per entry above — this selector is recall-first and
+    # already spends per-item DB round trips elsewhere; a diff wide enough to
+    # feel this is also wide enough to be a whole-file/`unmapped` case on the
+    # commonest paths. Revisit if this ever shows up in profiling.
     confined_files = []
-    single_file = len(seeds_by_file) == 1
     for f, file_seeds in sorted(seeds_by_file.items()):
         if f in unmapped_files:
             continue
-        # When exactly one file contributed seeds, its seeds ARE `seeds` and
-        # its closure IS `impacted` — reuse it instead of re-running the same
-        # recursive traversal a second time.
-        file_impacted = impacted if single_file else dbmod.impacted_closure(conn, file_seeds)
+        # `impacted` is already this file's closure whenever its seeds equal
+        # the full seed set — reuse it instead of re-running the same
+        # recursive traversal. Checked by value, not by `len(seeds_by_file)
+        # == 1`: inferring it from the file count silently breaks if a future
+        # seed source populates `seeds` without also updating
+        # `seeds_by_file`.
+        file_impacted = (
+            impacted if file_seeds == seeds else dbmod.impacted_closure(conn, file_seeds)
+        )
         reached_files = dbmod.closure_files(conn, file_impacted.keys())
         if reached_files and reached_files <= {f}:
             confined_files.append(f)
@@ -351,8 +363,9 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             f"impact for {', '.join(confined_files)} did not leave the file it "
             f"started in ({sum(len(seeds_by_file[f]) for f in confined_files)} "
             f"node(s), all local) — either the module is genuinely leaf-only, or "
-            f"its callers are not linked in the index; a NONE here means UNKNOWN, "
-            f"not verified-safe"
+            f"its callers are not linked in the index; that file's own "
+            f"contribution to this answer is UNKNOWN, not verified-safe, even "
+            f"though other changed files may still be selecting journeys above"
         )
 
     result.update(
@@ -395,7 +408,7 @@ def _render(result):
     for f in result.get("closure_confined", []):
         lines.append(
             f"  NOTE: impact for {f} did not leave the file it started in — "
-            f"a NONE here means UNKNOWN, not verified-safe"
+            f"that file's own contribution is UNKNOWN, not verified-safe"
         )
     if not result["journeys"]:
         lines.append("journeys to test: NONE (no product-behavior change detected)")
