@@ -48,6 +48,13 @@ def build_fixture():
         ("function:handler_a", "function", "handler_a", "handler_a",
          "app/svc.py", 10, 20),
         ("function:leaf", "function", "leaf", "leaf", "app/leaf.py", 1, 5),
+        # a second, untouched symbol in the same file that IS reached from
+        # elsewhere -- lets a test tell a whole-file seed set (which would
+        # pull this in) apart from a range-precise one (which would not).
+        ("function:leaf_sibling", "function", "leaf_sibling", "leaf_sibling",
+         "app/leaf.py", 7, 10),
+        ("function:external_caller", "function", "external_caller",
+         "external_caller", "app/othercaller.py", 1, 5),
         # confidence fixture: base <- {mid_a weak, mid_b strong} <- top,
         # plus a synthesized (heuristic) caller.
         ("function:base", "function", "base", "base", "app/conf.py", 1, 5),
@@ -69,6 +76,8 @@ def build_fixture():
         ("function:top", "function:mid_b", "calls", '{"confidence":0.9}', None),
         # synthesized edge: capped regardless of the confidence it claims
         ("function:hcaller", "function:base", "calls", '{"confidence":0.9}', "heuristic"),
+        # leaf_sibling IS reached from another file -- leaf itself is not.
+        ("function:external_caller", "function:leaf_sibling", "calls", None, None),
     ]
     conn.executemany(
         "INSERT INTO edges(source,target,kind,metadata,provenance) VALUES (?,?,?,?,?)",
@@ -1493,6 +1502,45 @@ class ClosureConfinedTests(unittest.TestCase):
         self.run("git", "commit", "-qm", "edit get_settings")
         res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
         self.assertEqual(res["closure_confined"], [])
+
+
+class RenameWithEditConfinementTests(unittest.TestCase):
+    """A rename that also carries edited hunks lands the new path in BOTH
+    `ranges` (precise, from the hunk) and `whole_files` (the full file, from
+    the rename). `function:leaf_sibling` (app/leaf.py:7-10) is untouched by
+    the edit below but IS reached from app/othercaller.py -- so the
+    whole-file seed set escapes app/leaf.py while the precise, edited-lines
+    seed set (just `function:leaf`, 1-5) does not. Confinement must be
+    judged on the precise set, or a real issue-#63 blind spot in the lines
+    that actually changed gets masked by an unrelated symbol in the same
+    file."""
+
+    REG = {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                              "file": "app/svc.py"}]}}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(self.tmp, {"app/oldname.py": 10})
+
+    def test_confinement_uses_the_precise_range_not_the_whole_file(self):
+        self.run("git", "mv", "app/oldname.py", "app/leaf.py")
+        with open(os.path.join(self.repo, "app", "leaf.py")) as fh:
+            lines = fh.readlines()
+        lines[1] = "changed = 1\n"  # inside function:leaf (1-5), not the sibling (7-10)
+        with open(os.path.join(self.repo, "app", "leaf.py"), "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "rename + edit leaf")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["status"], "OK")
+        self.assertEqual(
+            res["closure_confined"], ["app/leaf.py"],
+            "whole-file seeding pulled in leaf_sibling and masked the "
+            "confined edit — confinement should track the edited lines",
+        )
 
 
 class ChangedFileContentDriftTests(unittest.TestCase):

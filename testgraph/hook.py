@@ -78,6 +78,17 @@ def render(result, repo, more_cmd=None):
 
     if result.get("recall_degraded"):
         lines.append("  RECALL DEGRADED — unbounded impact, all journeys listed")
+    # Like recall_degraded above, this gets its own uncapped line rather than
+    # riding the warnings channel below: capped at MAX_WARNINGS, a push with
+    # an unapproved-registry warning plus entry drift already queued ahead of
+    # it would silently swallow the one signal issue #63 exists to surface.
+    confined = result.get("closure_confined", [])
+    if confined:
+        lines.append(
+            f"  NOTE: impact for {', '.join(confined)} did not leave the file "
+            f"it started in — that file's own contribution is UNKNOWN, not "
+            f"verified-safe"
+        )
     # Warnings are the channel that carries an unapproved registry and entry
     # drift — both mean "this answer may be understated", so they are worth the
     # lines. Capped: an unbounded warning block is the noise problem again.

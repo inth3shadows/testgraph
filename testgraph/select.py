@@ -250,7 +250,17 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         nodes = dbmod.nodes_in_file(conn, path)
         if nodes:
             seeds.update(nodes)
-            seeds_by_file[path] = set(nodes)
+            # A rename that ALSO carries edited hunks lands in both `ranges`
+            # and `whole_files` for the new path. `seeds` above always gets
+            # the full file (recall-first: a rename changes the module path
+            # for every importer, so the whole file is in play regardless of
+            # which lines moved) — but for the confinement check specifically,
+            # letting the broader whole-file set clobber a precise range-based
+            # entry can mask a real issue-#63 confinement in the lines that
+            # actually changed behind unrelated untouched symbols that happen
+            # to reach elsewhere. Keep the narrower, already-set entry.
+            if path not in seeds_by_file:
+                seeds_by_file[path] = set(nodes)
         else:
             unmapped.append(f"{path} ({reason})")
             unmapped_files.add(path)
@@ -358,14 +368,18 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
 
     journeys.sort(key=lambda j: (-j["rank"], reg.journey_sort_key(j["id"])))
 
-    if confined_files:
+    # One warning per file, not one combined message: a summed node count
+    # across several confined files tells a reader nothing about which file
+    # contributed how much, and the per-file NOTE lines in `_render` below
+    # already report them separately -- the warnings channel should agree.
+    for f in confined_files:
         warnings.append(
-            f"impact for {', '.join(confined_files)} did not leave the file it "
-            f"started in ({sum(len(seeds_by_file[f]) for f in confined_files)} "
-            f"node(s), all local) — either the module is genuinely leaf-only, or "
-            f"its callers are not linked in the index; that file's own "
-            f"contribution to this answer is UNKNOWN, not verified-safe, even "
-            f"though other changed files may still be selecting journeys above"
+            f"impact for {f} did not leave the file it started in "
+            f"({len(seeds_by_file[f])} node(s), all local) — either the module "
+            f"is genuinely leaf-only, or its callers are not linked in the "
+            f"index; that file's own contribution to this answer is UNKNOWN, "
+            f"not verified-safe, even though other changed files may still be "
+            f"selecting journeys above"
         )
 
     result.update(

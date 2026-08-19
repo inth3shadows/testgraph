@@ -136,6 +136,27 @@ class RenderTest(unittest.TestCase):
         self.assertIn("RECALL DEGRADED", text)
         self.assertIn("registry not approved", text)
 
+    def test_closure_confined_gets_its_own_line_like_recall_degraded(self):
+        text = hook.render(_result(1, closure_confined=["app/leaf.py"]), SIGNEDINTAKE)
+        self.assertIn("app/leaf.py", text)
+        self.assertIn("did not leave the file", text)
+
+    def test_closure_confined_survives_the_warning_cap(self):
+        # issue #63's whole point is a signal that must not go silent. Riding
+        # the capped `warnings` channel like other detail does would let
+        # enough queued-ahead warnings push it past MAX_WARNINGS and off the
+        # rendered push output entirely.
+        text = hook.render(
+            _result(
+                1,
+                closure_confined=["app/leaf.py"],
+                warnings=[f"w{i}" for i in range(hook.MAX_WARNINGS + 5)],
+            ),
+            SIGNEDINTAKE,
+        )
+        self.assertIn("app/leaf.py", text)
+        self.assertIn("did not leave the file", text)
+
     def test_caps_warnings_without_hiding_the_count(self):
         text = hook.render(
             _result(1, warnings=[f"w{i}" for i in range(9)]), SIGNEDINTAKE
