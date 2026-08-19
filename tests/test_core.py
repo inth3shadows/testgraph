@@ -47,7 +47,18 @@ def build_fixture():
         ("file:app/svc.py", "file", "svc.py", "svc.py", "app/svc.py", 1, 999),
         ("function:handler_a", "function", "handler_a", "handler_a",
          "app/svc.py", 10, 20),
+        # unrelated to handler_a, no edges, not a registered entry -- the
+        # actual issue-#63 blind spot when both are edited in one diff.
+        ("function:other_in_svc", "function", "other_in_svc", "other_in_svc",
+         "app/svc.py", 1, 3),
         ("function:leaf", "function", "leaf", "leaf", "app/leaf.py", 1, 5),
+        # a second, untouched symbol in the same file that IS reached from
+        # elsewhere -- lets a test tell a whole-file seed set (which would
+        # pull this in) apart from a range-precise one (which would not).
+        ("function:leaf_sibling", "function", "leaf_sibling", "leaf_sibling",
+         "app/leaf.py", 7, 10),
+        ("function:external_caller", "function", "external_caller",
+         "external_caller", "app/othercaller.py", 1, 5),
         # confidence fixture: base <- {mid_a weak, mid_b strong} <- top,
         # plus a synthesized (heuristic) caller.
         ("function:base", "function", "base", "base", "app/conf.py", 1, 5),
@@ -69,6 +80,8 @@ def build_fixture():
         ("function:top", "function:mid_b", "calls", '{"confidence":0.9}', None),
         # synthesized edge: capped regardless of the confidence it claims
         ("function:hcaller", "function:base", "calls", '{"confidence":0.9}', "heuristic"),
+        # leaf_sibling IS reached from another file -- leaf itself is not.
+        ("function:external_caller", "function:leaf_sibling", "calls", None, None),
     ]
     conn.executemany(
         "INSERT INTO edges(source,target,kind,metadata,provenance) VALUES (?,?,?,?,?)",
@@ -80,6 +93,28 @@ def build_fixture():
     )
     conn.commit()
     return conn
+
+
+class ClosureFilesTests(unittest.TestCase):
+    """Issue #63 PR review: `closure_files` must not silently treat a
+    dangling edge (an id `edges` names that `nodes` has no row for -- the
+    same kind of drift `integrity.content_drift` exists elsewhere to catch)
+    as "resolves to no other file". That reads identically to a legitimate
+    confinement and would manufacture a false signal out of an untrustworthy
+    index."""
+
+    def setUp(self):
+        self.conn = build_fixture()
+
+    def test_all_ids_resolved_returns_the_file_set(self):
+        self.assertEqual(
+            dbmod.closure_files(self.conn, {"function:leaf"}), {"app/leaf.py"}
+        )
+
+    def test_a_dangling_id_returns_none_not_a_partial_set(self):
+        self.assertIsNone(
+            dbmod.closure_files(self.conn, {"function:leaf", "function:ghost"})
+        )
 
 
 class ClosureTests(unittest.TestCase):
@@ -1432,6 +1467,151 @@ class ZeroSeedDegradesTests(unittest.TestCase):
         j1 = next(j for j in res["journeys"] if j["id"] == "J1")
         self.assertNotIn("reason", j1)
         self.assertGreater(res["seed_symbols"], 0)
+
+
+class ClosureConfinedTests(unittest.TestCase):
+    """Issue #63: seeds that resolve fine but whose closure never leaves the
+    file they started in used to be indistinguishable from a confident,
+    correct `NONE` — no signal at all. `function:leaf` (app/leaf.py) has zero
+    outbound edges in the fixture (see ClosureTests.test_leaf_stays_tight),
+    so editing it is exactly this blind spot."""
+
+    REG = {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                              "file": "app/svc.py"}]}}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(
+            self.tmp, {"app/svc.py": 22, "app/leaf.py": 5, "app/config.py": 5}
+        )
+
+    def _edit_leaf(self):
+        full = os.path.join(self.repo, "app", "leaf.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[1] = "changed = 1\n"  # inside function:leaf (1-5)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit leaf")
+
+    def test_confined_closure_is_flagged(self):
+        self._edit_leaf()
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["status"], "OK")
+        self.assertFalse(res["recall_degraded"], "not the no-node case")
+        self.assertEqual(res["closure_confined"], ["app/leaf.py"])
+        # The signal is NOT on the capped `warnings` channel (see hook.py's
+        # dedicated line) -- it's carried structurally on the result, and
+        # `_render` turns it into its own NOTE line.
+        self.assertNotIn(
+            "did not leave the file", " ".join(res["warnings"]), res["warnings"]
+        )
+        rendered = sel._render(res)
+        self.assertIn("app/leaf.py", rendered)
+        self.assertIn("did not leave the file", rendered)
+        # leaf has no journey entry, so the answer is still NONE -- the point
+        # is that NONE now carries a NOTE saying it may mean UNKNOWN.
+        self.assertEqual(res["journeys"], [])
+
+    def test_change_reaching_outside_its_file_is_not_flagged(self):
+        # get_settings' closure crosses into app/svc.py via the imports edge +
+        # file expansion (ClosureTests.test_imports_and_file_expansion_reach_
+        # handler) -- confirm a real cross-file reach produces no false
+        # positive.
+        full = os.path.join(self.repo, "app", "config.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[1] = "changed = 1\n"  # inside get_settings (1-5)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit get_settings")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["closure_confined"], [])
+
+    def test_an_edited_entry_point_with_no_callers_is_not_a_false_positive(self):
+        # handler_a is ITSELF the registered J1 entry and has no callers on
+        # record in this fixture, so its own closure never leaves app/svc.py
+        # -- but that is not unknown, it's a confidently-selected journey.
+        # Flagging it anyway was reproduced against this repo's own index
+        # (issue #63 PR review): 7 of 11 "confined" files had already
+        # selected a journey at confidence 1.0.
+        full = os.path.join(self.repo, "app", "svc.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[11] = "changed = 1\n"  # inside handler_a (10-20)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit handler_a")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["closure_confined"], [])
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertEqual(j1["confidence"], 1.0)
+
+    def test_an_entry_seed_does_not_mask_an_unrelated_confined_seed(self):
+        # Both handler_a (the entry -- fine on its own) and other_in_svc (no
+        # edges, no entry, the actual blind spot) are edited in ONE diff to
+        # app/svc.py. Judging confinement per FILE instead of per SEED let
+        # handler_a's entry-hit clear the whole file, silently swallowing the
+        # NOTE for other_in_svc -- reproduced directly against this fixture
+        # before the per-seed fix.
+        full = os.path.join(self.repo, "app", "svc.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[0] = "changed = 1\n"    # inside other_in_svc (1-3)
+        lines[11] = "changed = 1\n"   # inside handler_a (10-20)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit both svc.py symbols")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["closure_confined"], ["app/svc.py"])
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertEqual(j1["confidence"], 1.0)
+
+
+class RenameWithEditConfinementTests(unittest.TestCase):
+    """A rename that also carries edited hunks lands the new path in BOTH
+    `ranges` (precise, from the hunk) and `whole_files` (the full file, from
+    the rename). `function:leaf_sibling` (app/leaf.py:7-10) is untouched by
+    the edit below but IS reached from app/othercaller.py -- so the
+    whole-file seed set escapes app/leaf.py while the precise, edited-lines
+    seed set (just `function:leaf`, 1-5) does not. Confinement must be
+    judged on the precise set, or a real issue-#63 blind spot in the lines
+    that actually changed gets masked by an unrelated symbol in the same
+    file."""
+
+    REG = {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                              "file": "app/svc.py"}]}}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(self.tmp, {"app/oldname.py": 10})
+
+    def test_confinement_uses_the_precise_range_not_the_whole_file(self):
+        self.run("git", "mv", "app/oldname.py", "app/leaf.py")
+        with open(os.path.join(self.repo, "app", "leaf.py")) as fh:
+            lines = fh.readlines()
+        lines[1] = "changed = 1\n"  # inside function:leaf (1-5), not the sibling (7-10)
+        with open(os.path.join(self.repo, "app", "leaf.py"), "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "rename + edit leaf")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["status"], "OK")
+        self.assertEqual(
+            res["closure_confined"], ["app/leaf.py"],
+            "whole-file seeding pulled in leaf_sibling and masked the "
+            "confined edit — confinement should track the edited lines",
+        )
 
 
 class ChangedFileContentDriftTests(unittest.TestCase):

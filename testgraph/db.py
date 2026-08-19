@@ -84,6 +84,47 @@ def file_node_id(conn, file_path):
     return row[0] if row else None
 
 
+def _load_id_temp_table(conn, table_name, ids):
+    """(Re)fill a single-column TEMP TABLE with `ids`, for callers that need
+    to join or filter against a large id set. A raw `IN (?,?,...)` with one
+    bound placeholder per id hits SQLite's bound-parameter ceiling (999 on
+    some packaged builds) once a closure fans out wide enough; a temp table
+    has no such limit. Shared by `impacted_closure` and `closure_files` so
+    that fix applies once, not per copy.
+    """
+    conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {table_name}(id TEXT PRIMARY KEY)")
+    conn.execute(f"DELETE FROM {table_name}")
+    conn.executemany(
+        f"INSERT OR IGNORE INTO {table_name}(id) VALUES (?)", [(i,) for i in ids]
+    )
+
+
+def closure_files(conn, node_ids):
+    """Distinct `file_path` values for a set of node ids (file-kind nodes
+    counted by their own path). Used to detect a closure that never leaves
+    the file its seeds started in — an edge-resolution blind spot distinct
+    from an unmapped seed (issue #63): the seeds resolved fine, they just
+    have no outbound reach on record.
+
+    Returns `None`, not a smaller set, if any id has no matching `nodes` row.
+    `edges` can name an id `nodes` has no row for (a dangling edge — the same
+    kind of drift `integrity.content_drift` exists elsewhere to catch); a
+    plain `WHERE id IN (...)` join silently drops such an id, which would
+    otherwise read identically to "this id resolves to no other file" and
+    manufacture a false confinement signal out of an untrustworthy index.
+    """
+    node_ids = list(node_ids)
+    if not node_ids:
+        return set()
+    _load_id_temp_table(conn, "_closure_ids", node_ids)
+    rows = list(conn.execute(
+        "SELECT id, file_path FROM nodes WHERE id IN (SELECT id FROM _closure_ids)"
+    ))
+    if len({r[0] for r in rows}) != len(set(node_ids)):
+        return None
+    return {r[1] for r in rows}
+
+
 def impacted_closure(conn, seed_ids):
     """Transitive reverse-reachability closure of `seed_ids`, as
     `{node_id: confidence}`.
@@ -104,11 +145,7 @@ def impacted_closure(conn, seed_ids):
     """
     if not seed_ids:
         return {}
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _seeds(id TEXT PRIMARY KEY)")
-    conn.execute("DELETE FROM _seeds")
-    conn.executemany(
-        "INSERT OR IGNORE INTO _seeds(id) VALUES (?)", [(s,) for s in seed_ids]
-    )
+    _load_id_temp_table(conn, "_seeds", seed_ids)
     kinds = ",".join("'%s'" % k for k in REACH_KINDS)  # constants, safe to inline
     edge_conf = (
         f"MIN(COALESCE(json_extract(e.metadata, '$.confidence'), "

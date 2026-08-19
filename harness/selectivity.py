@@ -106,20 +106,22 @@ def main():
                               sha]).stdout.strip()
             rows.append((sha, desc[:50], len(selected), total,
                          result["recall_degraded"],
-                         len(result["unresolved_journeys"]), selected))
+                         len(result["unresolved_journeys"]), selected,
+                         len(result.get("closure_confined", []))))
             wtlib.remove(args.bare, wt)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
     print(f"\n=== testgraph selectivity — {os.path.basename(args.registry)} "
           f"({total} journeys), {len(shas)}-commit sweep, per-commit index ===")
-    scored = [r for r in rows if len(r) == 7]
+    scored = [r for r in rows if len(r) == 8]
     for r in rows:
         if len(r) == 3:
             print(f"  {r[0][:10]}  {r[1]}: {r[2]}")
             continue
-        sha, desc, n_sel, tot, degraded, unresolved, selected = r
+        sha, desc, n_sel, tot, degraded, unresolved, selected, confined = r
         flag = "  RECALL_DEGRADED" if degraded else ""
+        flag += f"  CLOSURE_CONFINED({confined})" if confined else ""
         unres = f"  ({unresolved} journey(s) not yet in this commit's index)" if unresolved else ""
         print(f"\n  {sha[:10]}  {desc}")
         print(f"    selected : {n_sel}/{tot}  {selected}{flag}{unres}")
@@ -130,6 +132,7 @@ def main():
         return 1
     counts = [r[2] for r in scored]
     degrades = sum(1 for r in scored if r[4])
+    confines = sum(1 for r in scored if r[7])
     mean_sel = sum(counts) / len(counts)
     avoided_pct = 100 * (1 - mean_sel / total)
     le2 = sum(1 for c in counts if c <= 2)
@@ -143,6 +146,7 @@ def main():
     print(f"  all/most (>= {total - 1})     : {most} of {len(scored)}"
           f"  (all {total}: {all_n})")
     print(f"  recall_degraded fired  : {degrades} of {len(scored)}")
+    print(f"  closure_confined fired : {confines} of {len(scored)}")
     # Full histogram — nothing bucketed away, so a reader can re-derive any
     # threshold the two headline buckets above don't happen to answer.
     hist = {}

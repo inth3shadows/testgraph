@@ -136,6 +136,49 @@ class RenderTest(unittest.TestCase):
         self.assertIn("RECALL DEGRADED", text)
         self.assertIn("registry not approved", text)
 
+    def test_closure_confined_gets_its_own_line_like_recall_degraded(self):
+        text = hook.render(_result(1, closure_confined=["app/leaf.py"]), SIGNEDINTAKE)
+        self.assertIn("app/leaf.py", text)
+        self.assertIn("did not leave the file", text)
+
+    def test_closure_confined_line_is_capped_like_journeys_and_warnings(self):
+        confined = [f"app/f{i}.py" for i in range(40)]
+        text = hook.render(_result(1, closure_confined=confined), SIGNEDINTAKE)
+        note = next(ln for ln in text.splitlines() if "did not leave the file" in ln)
+        self.assertLess(len(note), 300, note)
+        self.assertIn(f"… {40 - hook.MAX_CONFINED} more", note)
+
+    def test_closure_confined_is_not_also_printed_via_warnings(self):
+        # select() no longer puts this text on `warnings` at all (it's
+        # structural data on `closure_confined` only) -- confirm the render
+        # path doesn't print it twice even if a caller's `warnings` happens
+        # to mention the same file for an unrelated reason.
+        text = hook.render(
+            _result(
+                1,
+                closure_confined=["app/leaf.py"],
+                warnings=["app/leaf.py: registry not approved"],
+            ),
+            SIGNEDINTAKE,
+        )
+        self.assertEqual(text.count("app/leaf.py"), 2)  # NOTE line + WARN line, not 3
+
+    def test_closure_confined_survives_the_warning_cap(self):
+        # issue #63's whole point is a signal that must not go silent. Riding
+        # the capped `warnings` channel like other detail does would let
+        # enough queued-ahead warnings push it past MAX_WARNINGS and off the
+        # rendered push output entirely.
+        text = hook.render(
+            _result(
+                1,
+                closure_confined=["app/leaf.py"],
+                warnings=[f"w{i}" for i in range(hook.MAX_WARNINGS + 5)],
+            ),
+            SIGNEDINTAKE,
+        )
+        self.assertIn("app/leaf.py", text)
+        self.assertIn("did not leave the file", text)
+
     def test_caps_warnings_without_hiding_the_count(self):
         text = hook.render(
             _result(1, warnings=[f"w{i}" for i in range(9)]), SIGNEDINTAKE
