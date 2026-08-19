@@ -26,6 +26,7 @@ from . import select as sel
 
 MAX_JOURNEYS = 8
 MAX_WARNINGS = 3
+MAX_CONFINED = 3
 
 # Kept as an alias: `ledger` now owns where state lives, but this name is the
 # one the tests and the docs already point at.
@@ -78,16 +79,22 @@ def render(result, repo, more_cmd=None):
 
     if result.get("recall_degraded"):
         lines.append("  RECALL DEGRADED — unbounded impact, all journeys listed")
-    # Like recall_degraded above, this gets its own uncapped line rather than
-    # riding the warnings channel below: capped at MAX_WARNINGS, a push with
-    # an unapproved-registry warning plus entry drift already queued ahead of
-    # it would silently swallow the one signal issue #63 exists to surface.
+    # Like recall_degraded above, this gets its own line rather than riding
+    # the warnings channel below: capped at MAX_WARNINGS, a push with an
+    # unapproved-registry warning plus entry drift already queued ahead of it
+    # would silently swallow the one signal issue #63 exists to surface. But
+    # NEVER just swallowed, not the same as UNCAPPED IN LENGTH: a wide
+    # rename/refactor confining many files would otherwise print one
+    # unbroken multi-hundred-character line, the exact noise rule 2 in this
+    # module's docstring exists to prevent.
     confined = result.get("closure_confined", [])
     if confined:
+        shown = ", ".join(confined[:MAX_CONFINED])
+        if len(confined) > MAX_CONFINED:
+            shown += f", … {len(confined) - MAX_CONFINED} more"
         lines.append(
-            f"  NOTE: impact for {', '.join(confined)} did not leave the file "
-            f"it started in — that file's own contribution is UNKNOWN, not "
-            f"verified-safe"
+            f"  NOTE: impact for {shown} did not leave the file it started "
+            f"in — that file's own contribution is UNKNOWN, not verified-safe"
         )
     # Warnings are the channel that carries an unapproved registry and entry
     # drift — both mean "this answer may be understated", so they are worth the

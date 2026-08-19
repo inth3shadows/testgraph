@@ -47,6 +47,10 @@ def build_fixture():
         ("file:app/svc.py", "file", "svc.py", "svc.py", "app/svc.py", 1, 999),
         ("function:handler_a", "function", "handler_a", "handler_a",
          "app/svc.py", 10, 20),
+        # unrelated to handler_a, no edges, not a registered entry -- the
+        # actual issue-#63 blind spot when both are edited in one diff.
+        ("function:other_in_svc", "function", "other_in_svc", "other_in_svc",
+         "app/svc.py", 1, 3),
         ("function:leaf", "function", "leaf", "leaf", "app/leaf.py", 1, 5),
         # a second, untouched symbol in the same file that IS reached from
         # elsewhere -- lets a test tell a whole-file seed set (which would
@@ -89,6 +93,28 @@ def build_fixture():
     )
     conn.commit()
     return conn
+
+
+class ClosureFilesTests(unittest.TestCase):
+    """Issue #63 PR review: `closure_files` must not silently treat a
+    dangling edge (an id `edges` names that `nodes` has no row for -- the
+    same kind of drift `integrity.content_drift` exists elsewhere to catch)
+    as "resolves to no other file". That reads identically to a legitimate
+    confinement and would manufacture a false signal out of an untrustworthy
+    index."""
+
+    def setUp(self):
+        self.conn = build_fixture()
+
+    def test_all_ids_resolved_returns_the_file_set(self):
+        self.assertEqual(
+            dbmod.closure_files(self.conn, {"function:leaf"}), {"app/leaf.py"}
+        )
+
+    def test_a_dangling_id_returns_none_not_a_partial_set(self):
+        self.assertIsNone(
+            dbmod.closure_files(self.conn, {"function:leaf", "function:ghost"})
+        )
 
 
 class ClosureTests(unittest.TestCase):
@@ -1524,6 +1550,27 @@ class ClosureConfinedTests(unittest.TestCase):
         self.run("git", "commit", "-qm", "edit handler_a")
         res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
         self.assertEqual(res["closure_confined"], [])
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertEqual(j1["confidence"], 1.0)
+
+    def test_an_entry_seed_does_not_mask_an_unrelated_confined_seed(self):
+        # Both handler_a (the entry -- fine on its own) and other_in_svc (no
+        # edges, no entry, the actual blind spot) are edited in ONE diff to
+        # app/svc.py. Judging confinement per FILE instead of per SEED let
+        # handler_a's entry-hit clear the whole file, silently swallowing the
+        # NOTE for other_in_svc -- reproduced directly against this fixture
+        # before the per-seed fix.
+        full = os.path.join(self.repo, "app", "svc.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[0] = "changed = 1\n"    # inside other_in_svc (1-3)
+        lines[11] = "changed = 1\n"   # inside handler_a (10-20)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "edit both svc.py symbols")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["closure_confined"], ["app/svc.py"])
         j1 = next(j for j in res["journeys"] if j["id"] == "J1")
         self.assertEqual(j1["confidence"], 1.0)
 

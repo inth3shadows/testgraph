@@ -105,15 +105,24 @@ def closure_files(conn, node_ids):
     the file its seeds started in — an edge-resolution blind spot distinct
     from an unmapped seed (issue #63): the seeds resolved fine, they just
     have no outbound reach on record.
+
+    Returns `None`, not a smaller set, if any id has no matching `nodes` row.
+    `edges` can name an id `nodes` has no row for (a dangling edge — the same
+    kind of drift `integrity.content_drift` exists elsewhere to catch); a
+    plain `WHERE id IN (...)` join silently drops such an id, which would
+    otherwise read identically to "this id resolves to no other file" and
+    manufacture a false confinement signal out of an untrustworthy index.
     """
     node_ids = list(node_ids)
     if not node_ids:
         return set()
     _load_id_temp_table(conn, "_closure_ids", node_ids)
-    rows = conn.execute(
-        "SELECT DISTINCT file_path FROM nodes WHERE id IN (SELECT id FROM _closure_ids)"
-    )
-    return {r[0] for r in rows}
+    rows = list(conn.execute(
+        "SELECT id, file_path FROM nodes WHERE id IN (SELECT id FROM _closure_ids)"
+    ))
+    if len({r[0] for r in rows}) != len(set(node_ids)):
+        return None
+    return {r[1] for r in rows}
 
 
 def impacted_closure(conn, seed_ids):

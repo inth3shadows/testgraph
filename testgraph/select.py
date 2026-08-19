@@ -325,23 +325,33 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     for f, file_seeds in sorted(seeds_by_file.items()):
         if f in unmapped_files:
             continue
-        # `impacted` is already this file's closure whenever its seeds equal
-        # the full seed set — reuse it instead of re-running the same
-        # recursive traversal. Checked by value, not by `len(seeds_by_file)
-        # == 1`: inferring it from the file count silently breaks if a future
-        # seed source populates `seeds` without also updating
-        # `seeds_by_file`.
-        file_impacted = (
-            impacted if file_seeds == seeds else dbmod.impacted_closure(conn, file_seeds)
-        )
-        if file_impacted.keys() & entry_map.keys():
+        # Judged per SEED, not per file: a file can carry both a registered
+        # entry (correctly confident on its own) and an unrelated edited
+        # symbol that is the actual blind spot. Clearing the whole file
+        # because ANY of its seeds happens to be an entry point silently
+        # swallowed the NOTE for the seed that needed it — reproduced with
+        # two unrelated edited symbols in one file, one an entry, one not.
+        uncovered = file_seeds - entry_map.keys()
+        if not uncovered:
             continue
+        # `impacted` is already this closure whenever the uncovered seeds are
+        # the full seed set — reuse it instead of re-running the same
+        # recursive traversal. Checked by value, not by file/seed counts:
+        # inferring it silently breaks if a future seed source desyncs from
+        # `seeds`.
+        file_impacted = (
+            impacted if uncovered == seeds else dbmod.impacted_closure(conn, uncovered)
+        )
         # `file_impacted` always contains at least the seeds themselves
         # (`impacted_closure` seeds every id at 1.0), and every seed in
-        # `file_seeds` came from a `nodes` row whose own `file_path == f` —
-        # so `closure_files` here can never come back empty.
+        # `uncovered` came from a `nodes` row whose own `file_path == f` — so
+        # `closure_files` here can never come back empty, UNLESS the closure
+        # reached an id with no matching `nodes` row (a dangling edge / stale
+        # index), which `closure_files` reports as `None` rather than
+        # silently reading as "resolves to no other file". An index
+        # inconsistent enough to produce that is not evidence of anything.
         reached_files = dbmod.closure_files(conn, file_impacted.keys())
-        if reached_files <= {f}:
+        if reached_files is not None and reached_files <= {f}:
             confined_files.append(f)
 
     touched = {}
