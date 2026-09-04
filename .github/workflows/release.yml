@@ -1,0 +1,26 @@
+name: Release
+# Fires on a version tag. Builds sdist+wheel, asserts the built version matches the tag,
+# and publishes a GitHub Release. Assumes tag-derived versioning (hatch-vcs / setuptools-scm)
+# is configured — see the repo-publish checklist. Git-install-first; no PyPI publish.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0   # tag-derived versioning needs full history
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - run: uv build
+      - name: Assert built version matches the tag
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          if ! ls dist/*-"${expected}"-*.whl >/dev/null 2>&1; then
+            echo "::error::built wheel does not match tag ${GITHUB_REF_NAME} (expected ${expected})"; ls -1 dist/; exit 1
+          fi
+      - env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --title "${GITHUB_REF_NAME}"
