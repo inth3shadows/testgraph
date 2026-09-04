@@ -140,6 +140,16 @@ def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None):
 
     # 3. caller-count spot-check — the corruption detector `sync` can't clear.
     for name, spec in spot_checks.items():
+        # A check whose edges are known-fabricated cannot detect corruption: it
+        # passes on the fabrication exactly as it would on real callers (#66,
+        # `ledger.append`). Counting it returns a green backed by nothing, which
+        # is strictly worse than not checking — so a suspended check skips the
+        # floor and surfaces its reason as a warning rather than being deleted,
+        # which would take the reason with it.
+        suspended = (spec.get("suspended") or "").strip()
+        if suspended:
+            warnings.append(f"spot-check '{name}' suspended — {suspended}")
+            continue
         min_callers = spec["min_caller_edges"]
         file_suffix = spec.get("file")
         ids = dbmod.resolve_symbol(conn, name, file_suffix)

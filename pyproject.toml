@@ -1,0 +1,64 @@
+[project]
+name = "testgraph"
+dynamic = ["version"]
+description = "Journey-level test selection over a CodeGraph index — given a diff, name the user journeys that could have broken."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Eric Minish", email = "eric.minish@gmail.com" }]
+keywords = ["test-selection", "codegraph", "call-graph", "git-hook", "agent", "claude-code", "user-journeys"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+# No runtime dependencies, deliberately. testgraph reads a CodeGraph SQLite db with
+# the stdlib `sqlite3` and shells out to `git`; both are assumed present wherever it
+# would run. The empty list is the claim README makes ("stdlib-only"), asserted here
+# where a resolver can check it rather than only in prose.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/inth3shadows/testgraph"
+Repository = "https://github.com/inth3shadows/testgraph"
+Issues = "https://github.com/inth3shadows/testgraph/issues"
+
+# NOTE: no [project.scripts]. Every CLI surface is documented and journey-registered
+# as `python3 -m testgraph.<module>` (see journeys/testgraph.json J1-J5), and each
+# module carries its own `main`. Minting console scripts here would create a second,
+# undocumented interface whose drift from the first nothing checks. Add them with a
+# decision, not as a side effect of packaging.
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# Single source of version truth: the GIT TAG. hatch-vcs derives the version from
+# `git describe`, so pyproject, the package, and the release cannot drift — there is
+# no hand-synced literal to forget. This replaces the hardcoded
+# `__version__ = "0.1.0-spike"` that sat in __init__.py since the Phase 1 spike and
+# was never once updated across 60+ commits. Requires `fetch-depth: 0` in CI.
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "testgraph/_version.py"
+
+# The installable package is `testgraph/` alone. `harness/` (the measurement rig),
+# `hooks/`, `skills/`, `journeys/` and `maps/` are repo artifacts a user reads or
+# installs from a checkout — shipping them in a wheel would imply an import contract
+# none of them have.
+[tool.hatch.build.targets.wheel]
+packages = ["testgraph"]
+
+[tool.hatch.build.targets.sdist]
+include = ["testgraph", "journeys", "skills", "hooks", "README.md", "USAGE.md", "TECHNICAL.md", "LICENSE"]
