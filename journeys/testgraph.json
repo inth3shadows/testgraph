@@ -5,7 +5,11 @@
   "proposed_by": "hand-authored",
   "codegraph_schema_version": 8,
   "spot_checks": {
-    "append": { "min_caller_edges": 5, "file": "testgraph/ledger.py" },
+    "append": {
+      "min_caller_edges": 5,
+      "file": "testgraph/ledger.py",
+      "suspended": "all 7 of its inbound edges are fabricated by codegraph's Python resolver (#66); the floor passes on them exactly as it would on real callers, so it detects nothing. Re-enable when a codegraph release carries the fix — re-verified live in 1.5.0 and 1.6.0 on 2026-09-03."
+    },
     "StampError": { "min_caller_edges": 4, "file": "testgraph/export.py" }
   },
   "journeys": {

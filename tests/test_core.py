@@ -185,6 +185,39 @@ class IntegrityTests(unittest.TestCase):
         blocking, _ = integrity.check(self.conn, "/nonexistent", spot)
         self.assertTrue(any("corrupt" in b for b in blocking))
 
+    def test_suspended_spot_check_warns_instead_of_passing_silently(self):
+        """A suspended check must not return a green. `append`'s floor passes on
+        7 fabricated edges (#66), so counting it asserts an integrity guarantee
+        the index cannot keep. Suspending skips the floor — and must SAY so,
+        because a check that is silently skipped is indistinguishable from one
+        that passed."""
+        spot = {
+            "get_settings": {
+                "min_caller_edges": 10,  # would block if it were counted
+                "file": "config.py",
+                "suspended": "edges fabricated by the resolver (#66)",
+            }
+        }
+        blocking, warnings = integrity.check(self.conn, "/nonexistent", spot)
+        self.assertEqual(blocking, [], "a suspended check must not block")
+        self.assertTrue(
+            any("suspended" in w and "get_settings" in w for w in warnings),
+            f"suspension was silent, not warned: {warnings}",
+        )
+
+    def test_blank_suspension_still_counts(self):
+        """An empty or whitespace `suspended` is not a suspension — otherwise a
+        stray key silently disarms the one check `codegraph sync` cannot clear."""
+        spot = {
+            "get_settings": {
+                "min_caller_edges": 10,
+                "file": "config.py",
+                "suspended": "   ",
+            }
+        }
+        blocking, _ = integrity.check(self.conn, "/nonexistent", spot)
+        self.assertTrue(any("corrupt" in b for b in blocking))
+
     def test_missing_spot_symbol_blocks(self):
         spot = {"nonexistent_sym": {"min_caller_edges": 1}}
         blocking, _ = integrity.check(self.conn, "/nonexistent", spot)
