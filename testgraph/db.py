@@ -28,9 +28,56 @@ DEFAULT_EDGE_CONFIDENCE = 0.9
 # claims.
 HEURISTIC_CONFIDENCE = 0.3
 
+# A STATICALLY EXTRACTED edge can be just as wrong as a synthesized one, and
+# nothing in `provenance` says so -- it is NULL for all of them.
+#
+# CodeGraph records HOW it resolved each edge in `metadata.resolvedBy`.
+# `import` / `qualified-name` are backed by evidence in the source. `exact-match`
+# means it matched a bare NAME, and when several symbols share that name it is a
+# guess wearing the same confidence as a proof. Measured on the codegraph repo's
+# own index: 16,569 of 29,440 `calls` edges are `exact-match`, and 8,407 of those
+# point at a name more than one symbol has.
+#
+# The live failure this exists for (codegraph #66): with a module-level `append`
+# in the project, `rows["k"].append(2)` extracted as a bare `append` and resolved
+# onto it --
+#     {"confidence":0.9,"resolvedBy":"exact-match","refName":"append"}
+# -- an edge that does not exist, arriving in testgraph's TOP trust tier.
+#
+# Capped only when the name is genuinely AMBIGUOUS. A single-candidate
+# exact-match had nothing to get wrong, and capping it would flood
+# `verify_manually` (56% of call edges) until the flag meant nothing.
+AMBIGUOUS_NAME_MATCH_CONFIDENCE = 0.5
+
+# Resolvers whose edge rests on a bare name rather than on evidence in the
+# source. A resolver we do not know is NOT treated as suspect: an unrecognized
+# (or missing) `resolvedBy` leaves the edge scored exactly as before, so a
+# codegraph change can cost us the protection but can never invent a flag.
+NAME_ONLY_RESOLVERS = ("exact-match",)
+
 # At or below this, a journey is reported as needing manual verification. Splits
 # the observed 0.5 edge tier from 0.7+.
 LOW_CONFIDENCE = 0.6
+
+
+def weak_edge_reason(conf):
+    """Why a journey's strongest route is weak, as a short phrase — or None when
+    it is not weak at all.
+
+    Derived from the confidence VALUE rather than tracked through the recursive
+    walk: the caps are distinct constants, so the number that survived the `min`
+    names the cap that produced it. That is a real coupling, and
+    `test_core` pins the constants apart so a future tier cannot silently
+    collide and mislabel a flag. Any other low value is a confidence the index
+    itself reported, with no cap involved.
+    """
+    if conf > LOW_CONFIDENCE:
+        return None
+    if abs(conf - HEURISTIC_CONFIDENCE) < 1e-9:
+        return "synthesized edge (no static proof)"
+    if abs(conf - AMBIGUOUS_NAME_MATCH_CONFIDENCE) < 1e-9:
+        return "name-collision edge (matched a name several symbols share)"
+    return "low-confidence edge path"
 
 
 def connect(db_path):
@@ -125,6 +172,27 @@ def closure_files(conn, node_ids):
     return {r[1] for r in rows}
 
 
+def _load_ambiguous_names_table(conn):
+    """(Re)fill `_ambiguous_ids` with every non-file node whose `name` is shared
+    by at least one other non-file node.
+
+    Membership is the discriminator for `AMBIGUOUS_NAME_MATCH_CONFIDENCE`: it is
+    what separates "matched the only symbol with this name" from "picked one of
+    several". Computed per call rather than cached because the closure may be
+    run against a freshly re-indexed database within one process.
+    """
+    conn.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS _ambiguous_ids(id TEXT PRIMARY KEY)"
+    )
+    conn.execute("DELETE FROM _ambiguous_ids")
+    conn.execute(
+        "INSERT OR IGNORE INTO _ambiguous_ids(id) "
+        "SELECT id FROM nodes WHERE kind != 'file' AND name IN ("
+        "  SELECT name FROM nodes WHERE kind != 'file' "
+        "  GROUP BY name HAVING count(*) > 1)"
+    )
+
+
 def impacted_closure(conn, seed_ids):
     """Transitive reverse-reachability closure of `seed_ids`, as
     `{node_id: confidence}`.
@@ -140,18 +208,32 @@ def impacted_closure(conn, seed_ids):
     file node's confidence unchanged — containment is a structural fact, not an
     inference hop.
 
+    Three caps compose inside that per-edge `min`: the metadata confidence,
+    `provenance='heuristic'` (synthesized), and name-only resolution onto an
+    ambiguous name (fabricated — see `AMBIGUOUS_NAME_MATCH_CONFIDENCE`). None of
+    them drops an edge; they only lower what the selection claims about it.
+
     Terminates despite cycles: edge confidences come from a finite set and `min`
     is monotone, so the (id, conf) pair space is finite and UNION converges.
     """
     if not seed_ids:
         return {}
     _load_id_temp_table(conn, "_seeds", seed_ids)
+    _load_ambiguous_names_table(conn)
     kinds = ",".join("'%s'" % k for k in REACH_KINDS)  # constants, safe to inline
+    resolvers = ",".join("'%s'" % r for r in NAME_ONLY_RESOLVERS)  # constants
     edge_conf = (
         f"MIN(COALESCE(json_extract(e.metadata, '$.confidence'), "
         f"{DEFAULT_EDGE_CONFIDENCE}), "
         f"CASE WHEN e.provenance = 'heuristic' THEN {HEURISTIC_CONFIDENCE} "
-        f"ELSE 1.0 END)"
+        f"ELSE 1.0 END, "
+        # Name-only resolution onto a name several symbols share. Folded into
+        # the same MIN so it composes with the other two caps rather than
+        # overriding them -- an edge that is BOTH heuristic and a name collision
+        # keeps the lower of the two.
+        f"CASE WHEN json_extract(e.metadata, '$.resolvedBy') IN ({resolvers}) "
+        f"AND e.target IN (SELECT id FROM _ambiguous_ids) "
+        f"THEN {AMBIGUOUS_NAME_MATCH_CONFIDENCE} ELSE 1.0 END)"
     )
     query = f"""
     WITH RECURSIVE impacted(id, conf) AS (

@@ -630,10 +630,49 @@ is finite and `UNION` still converges.
   would only manufacture false warnings.
 - `provenance='heuristic'` (synthesized JSX/dynamic-dispatch edges) → capped at
   `0.3` whatever the metadata claims.
+- `metadata.resolvedBy = 'exact-match'` **onto a name more than one symbol has**
+  → capped at `AMBIGUOUS_NAME_MATCH_CONFIDENCE = 0.5`. See below.
 - `contains` file-expansion inherits the file node's confidence — containment is
   structural, not an inference hop.
 - A journey at or below `LOW_CONFIDENCE = 0.6` renders `VERIFY MANUALLY` and sets
-  `verify_manually: true` in `--json`.
+  `verify_manually: true` in `--json`, plus a `reason` naming which cap held the
+  route down (`weak_edge_reason`, derived from the confidence value — the tiers
+  are kept numerically distinct by a test so the label cannot be wrong).
+
+### Fabricated edges are not the same problem as synthesized ones
+
+`provenance` marks an edge codegraph SYNTHESIZED. It says nothing about an edge
+codegraph EXTRACTED and then resolved WRONG, which arrives with
+`provenance = NULL` and `confidence = 0.9` — the top trust tier.
+
+The live case (codegraph #66, reproduced against the installed 1.5.0 bundle): a
+project with a module-level `append`, and `rows["k"].append(2)` extracted as a
+bare `append`, then matched onto it:
+
+```
+{"confidence":0.9,"resolvedBy":"exact-match","refName":"append"}
+```
+
+`metadata.resolvedBy` is the discriminator already in the index. `import` and
+`qualified-name` rest on evidence in the source; `exact-match` rests on a bare
+name. On the codegraph repo's own index, 16,569 of 29,440 `calls` edges are
+`exact-match` — so capping all of them would flag 56% of the graph and make
+`VERIFY MANUALLY` meaningless. Capping only those whose target NAME is shared by
+more than one symbol narrows it to 8,407, and an exact-match on a unique name is
+left alone because it had nothing to get wrong.
+
+**The flag does not flood.** Journey-level effect, 300 random single-symbol
+changes per repo, counting journeys that go from trusted to flagged:
+
+```
+honeyslate      324 journey-selections    0 newly flagged   (0.0%)
+signedintake    261 journey-selections    8 newly flagged   (3.1%)
+testgraph        66 journey-selections    0 newly flagged   (0.0%)
+```
+
+`max over paths` absorbs nearly all of it: a journey with any evidence-backed
+route in is unaffected. An unrecognized or missing `resolvedBy` is scored exactly
+as before — a codegraph change can cost us this protection, never invent a flag.
 
 **Note on `edges.provenance`:** the parent plan proposed keying B1 on this
 column. Measured across 17 indexed repos it is binary (`NULL` / `'heuristic'`)

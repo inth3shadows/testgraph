@@ -375,6 +375,12 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                 "verify_manually": conf <= dbmod.LOW_CONFIDENCE,
             }
         )
+        # A flag nobody can act on is noise. Say which kind of weak edge held
+        # the route down, so the reader knows whether to distrust the graph
+        # (name collision) or the runtime (synthesized dispatch).
+        reason = dbmod.weak_edge_reason(conf)
+        if reason:
+            journeys[-1]["reason"] = reason
     # Unmappable whole-file change -> unbounded impact. Add every journey the
     # closure did not already select, flagged for manual verification, so the
     # answer degrades toward "test everything" instead of toward silence.
@@ -455,7 +461,11 @@ def _render(result):
     else:
         lines.append(f"journeys to test ({len(result['journeys'])}), ranked:")
         for j in result["journeys"]:
-            flag = "  ! VERIFY MANUALLY (weak edge path)" if j["verify_manually"] else ""
+            flag = (
+                "  ! VERIFY MANUALLY — %s" % j.get("reason", "weak edge path")
+                if j["verify_manually"]
+                else ""
+            )
             lines.append(
                 f"  [{j['rank']:>3}] {j['id']}  {j['name']}  "
                 f"({j['entries_hit']} entry, conf {j['confidence']}){flag}"

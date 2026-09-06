@@ -170,6 +170,137 @@ class ConfidenceTests(unittest.TestCase):
         self.assertLessEqual(self.impacted["function:hcaller"], dbmod.LOW_CONFIDENCE)
 
 
+def build_name_collision_fixture():
+    """The codegraph-#66 shape, in its own db so it cannot perturb the counts
+    the other fixtures' tests assert on.
+
+    Two project symbols named `append`, so the NAME is ambiguous. One caller
+    reaches ledger's `append` through a bare-name match (`resolvedBy` =
+    `exact-match`) claiming confidence 0.9 — this is the fabricated edge, byte
+    for byte the metadata the installed codegraph build wrote for
+    `rows["k"].append(2)`. A second caller reaches the SAME target through an
+    import, which is evidence and must not be capped. A third pair exercises an
+    exact-match onto a name only one symbol has: nothing was ambiguous, so
+    nothing is capped.
+    """
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE nodes(id TEXT, kind TEXT, name TEXT, qualified_name TEXT,
+            file_path TEXT, start_line INT, end_line INT);
+        CREATE TABLE edges(id INTEGER PRIMARY KEY, source TEXT, target TEXT,
+            kind TEXT, metadata TEXT, provenance TEXT);
+        CREATE TABLE schema_versions(version INT, applied_at INT, note TEXT);
+        INSERT INTO schema_versions VALUES (8, 0, 'fixture');
+        """
+    )
+    conn.executemany(
+        "INSERT INTO nodes VALUES (?,?,?,?,?,?,?)",
+        [
+            ("function:ledger_append", "function", "append", "ledger.append",
+             "app/ledger.py", 1, 3),
+            # the collision: a second project symbol with the same NAME
+            ("function:other_append", "function", "append", "other.append",
+             "app/other.py", 1, 3),
+            ("function:fab_caller", "function", "build_map", "build_map",
+             "app/unrelated.py", 1, 8),
+            ("function:import_caller", "function", "add_outcome", "add_outcome",
+             "app/record.py", 1, 8),
+            ("function:unique_target", "function", "unique_target",
+             "unique_target", "app/uniq.py", 1, 3),
+            ("function:uniq_caller", "function", "uniq_caller", "uniq_caller",
+             "app/uniq.py", 10, 15),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO edges(source,target,kind,metadata,provenance) VALUES (?,?,?,?,?)",
+        [
+            ("function:fab_caller", "function:ledger_append", "calls",
+             '{"confidence":0.9,"resolvedBy":"exact-match","refName":"append"}',
+             None),
+            ("function:import_caller", "function:ledger_append", "calls",
+             '{"confidence":0.9,"resolvedBy":"import","refName":"ledger.append"}',
+             None),
+            ("function:uniq_caller", "function:unique_target", "calls",
+             '{"confidence":0.9,"resolvedBy":"exact-match",'
+             '"refName":"unique_target"}', None),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+class NameCollisionConfidenceTests(unittest.TestCase):
+    """codegraph #66: a bare-name match onto an ambiguous name arrives with
+    `confidence 0.9` and `provenance NULL` — testgraph's TOP trust tier — for an
+    edge that does not exist. Reproduced live against the installed 1.5.0
+    bundle before this cap existed."""
+
+    def setUp(self):
+        self.conn = build_name_collision_fixture()
+
+    def test_ambiguous_exact_match_is_capped(self):
+        impacted = dbmod.impacted_closure(self.conn, {"function:ledger_append"})
+        self.assertEqual(
+            impacted["function:fab_caller"],
+            dbmod.AMBIGUOUS_NAME_MATCH_CONFIDENCE,
+        )
+        self.assertLessEqual(
+            impacted["function:fab_caller"], dbmod.LOW_CONFIDENCE
+        )
+
+    def test_import_resolved_edge_to_the_same_target_is_not_capped(self):
+        # The cap keys on HOW the edge was resolved, not on the target being
+        # ambiguous. An import is evidence; capping it would cost real recall
+        # confidence on every shared name in a project.
+        impacted = dbmod.impacted_closure(self.conn, {"function:ledger_append"})
+        self.assertEqual(impacted["function:import_caller"], 0.9)
+
+    def test_unambiguous_exact_match_is_not_capped(self):
+        # Only one symbol has this name, so the match had nothing to get wrong.
+        # This is the case that keeps `verify_manually` meaningful: 56% of the
+        # calls edges in a real index are exact-match, and flagging all of them
+        # would drown the signal.
+        impacted = dbmod.impacted_closure(self.conn, {"function:unique_target"})
+        self.assertEqual(impacted["function:uniq_caller"], 0.9)
+
+    def test_missing_resolvedBy_is_not_treated_as_suspect(self):
+        # A codegraph change that drops the field costs us the protection; it
+        # must never invent a flag.
+        self.conn.execute(
+            "UPDATE edges SET metadata = '{\"confidence\":0.9}' "
+            "WHERE source = 'function:fab_caller'"
+        )
+        impacted = dbmod.impacted_closure(self.conn, {"function:ledger_append"})
+        self.assertEqual(impacted["function:fab_caller"], 0.9)
+
+
+class WeakEdgeReasonTests(unittest.TestCase):
+    def test_tiers_are_distinct(self):
+        # weak_edge_reason reads the cap back OFF the confidence value, so two
+        # tiers sharing a number would mislabel every flag derived from it.
+        tiers = [
+            dbmod.HEURISTIC_CONFIDENCE,
+            dbmod.AMBIGUOUS_NAME_MATCH_CONFIDENCE,
+        ]
+        self.assertEqual(len(tiers), len(set(tiers)))
+        for t in tiers:
+            self.assertLessEqual(t, dbmod.LOW_CONFIDENCE)
+
+    def test_labels(self):
+        self.assertIsNone(dbmod.weak_edge_reason(0.9))
+        self.assertIn(
+            "synthesized", dbmod.weak_edge_reason(dbmod.HEURISTIC_CONFIDENCE)
+        )
+        self.assertIn(
+            "name-collision",
+            dbmod.weak_edge_reason(dbmod.AMBIGUOUS_NAME_MATCH_CONFIDENCE),
+        )
+        # a low confidence the index itself reported -- no cap involved
+        self.assertIn("low-confidence", dbmod.weak_edge_reason(0.4))
+
+
 class IntegrityTests(unittest.TestCase):
     def setUp(self):
         self.conn = build_fixture()
