@@ -60,24 +60,27 @@ NAME_ONLY_RESOLVERS = ("exact-match",)
 LOW_CONFIDENCE = 0.6
 
 
-def weak_edge_reason(conf):
-    """Why a journey's strongest route is weak, as a short phrase — or None when
-    it is not weak at all.
+# The cap that held a route down, as the token the closure carries and the
+# phrase a reader sees. The token is produced by the SQL, not inferred from the
+# resulting number.
+#
+# Inferring it from the number was wrong and shipped wrong: `0.5` is not a value
+# only the name-collision cap can produce -- it is a tier real indexes report
+# directly (`LOW_CONFIDENCE`'s own comment says so). On honeyslate all 37 edges
+# at 0.5 have unique names, so every "name-collision" label the value-based
+# version produced was false, and it reproduced on this repo's own fixture,
+# where `mid_a` carries a plain `{"confidence":0.5}` and no `resolvedBy` at all.
+CAP_REASONS = {
+    "heuristic": "synthesized edge (no static proof)",
+    "name-collision": "name-collision edge (matched a name several symbols share)",
+    "metadata": "low-confidence edge path",
+}
 
-    Derived from the confidence VALUE rather than tracked through the recursive
-    walk: the caps are distinct constants, so the number that survived the `min`
-    names the cap that produced it. That is a real coupling, and
-    `test_core` pins the constants apart so a future tier cannot silently
-    collide and mislabel a flag. Any other low value is a confidence the index
-    itself reported, with no cap involved.
-    """
-    if conf > LOW_CONFIDENCE:
-        return None
-    if abs(conf - HEURISTIC_CONFIDENCE) < 1e-9:
-        return "synthesized edge (no static proof)"
-    if abs(conf - AMBIGUOUS_NAME_MATCH_CONFIDENCE) < 1e-9:
-        return "name-collision edge (matched a name several symbols share)"
-    return "low-confidence edge path"
+
+def weak_edge_reason(cap):
+    """The phrase for a cap token from `impacted_closure(..., with_reasons=True)`,
+    or None when nothing capped the route (`''`) or the token is unknown."""
+    return CAP_REASONS.get(cap)
 
 
 def connect(db_path):
@@ -173,18 +176,32 @@ def closure_files(conn, node_ids):
 
 
 def _load_ambiguous_names_table(conn):
-    """(Re)fill `_ambiguous_ids` with every non-file node whose `name` is shared
-    by at least one other non-file node.
+    """Ensure `_ambiguous_ids` holds every non-file node whose `name` is shared
+    by at least one other non-file node. Built ONCE per connection.
 
-    Membership is the discriminator for `AMBIGUOUS_NAME_MATCH_CONFIDENCE`: it is
-    what separates "matched the only symbol with this name" from "picked one of
-    several". Computed per call rather than cached because the closure may be
-    run against a freshly re-indexed database within one process.
+    Membership is the discriminator for `AMBIGUOUS_NAME_MATCH_CONFIDENCE`: what
+    separates "matched the only symbol with this name" from "picked one of
+    several".
+
+    Rebuilding it per call was a real cost, not a theoretical one: it is an
+    index-wide `GROUP BY name` (~80 ms on a 17k-node index), and `export.build_map`
+    calls `impacted_closure` once per node -- so a per-call rebuild is quadratic
+    and measured 2.4-2.7x on the map builds, projecting to ~21 minutes of
+    identical redundant work on a large index. TEMP tables are per-connection, so
+    its presence is exactly the right cache key and needs no bookkeeping.
+
+    A connection held open across a re-index would see stale ambiguity data.
+    That can only mislabel or misgrade a cap, never change closure MEMBERSHIP,
+    and no caller here re-indexes mid-connection; `refresh_ambiguous_names` is
+    the escape hatch if one ever does.
     """
-    conn.execute(
-        "CREATE TEMP TABLE IF NOT EXISTS _ambiguous_ids(id TEXT PRIMARY KEY)"
-    )
-    conn.execute("DELETE FROM _ambiguous_ids")
+    exists = conn.execute(
+        "SELECT 1 FROM temp.sqlite_master WHERE type = 'table' "
+        "AND name = '_ambiguous_ids'"
+    ).fetchone()
+    if exists:
+        return
+    conn.execute("CREATE TEMP TABLE _ambiguous_ids(id TEXT PRIMARY KEY)")
     conn.execute(
         "INSERT OR IGNORE INTO _ambiguous_ids(id) "
         "SELECT id FROM nodes WHERE kind != 'file' AND name IN ("
@@ -193,9 +210,16 @@ def _load_ambiguous_names_table(conn):
     )
 
 
-def impacted_closure(conn, seed_ids):
+def refresh_ambiguous_names(conn):
+    """Drop the per-connection ambiguity cache so the next closure rebuilds it.
+    Only needed if a connection outlives a re-index."""
+    conn.execute("DROP TABLE IF EXISTS temp._ambiguous_ids")
+
+
+def impacted_closure(conn, seed_ids, with_reasons=False):
     """Transitive reverse-reachability closure of `seed_ids`, as
-    `{node_id: confidence}`.
+    `{node_id: confidence}` — or `({node_id: confidence}, {node_id: cap_token})`
+    when `with_reasons`.
 
     Two propagation rules (validated on honeyslate):
       1. reverse over REACH_KINDS: callers/importers of an impacted node.
@@ -213,42 +237,69 @@ def impacted_closure(conn, seed_ids):
     ambiguous name (fabricated — see `AMBIGUOUS_NAME_MATCH_CONFIDENCE`). None of
     them drops an edge; they only lower what the selection claims about it.
 
-    Terminates despite cycles: edge confidences come from a finite set and `min`
-    is monotone, so the (id, conf) pair space is finite and UNION converges.
+    The cap token rides ALONG the walk rather than being read back off the
+    number, because confidence values are not unique to a cap — `0.5` is a tier
+    real indexes report directly. Each hop keeps the token of whichever cap
+    produced the value that survived its `min`, and a tie goes to the edge (the
+    more specific fact) rather than to the route so far.
+
+    Terminates despite cycles: edge confidences come from a finite set, `min` is
+    monotone, and the token is drawn from a four-element set, so the
+    (id, conf, cap) triple space is finite and UNION converges.
     """
     if not seed_ids:
-        return {}
+        return ({}, {}) if with_reasons else {}
     _load_id_temp_table(conn, "_seeds", seed_ids)
     _load_ambiguous_names_table(conn)
     kinds = ",".join("'%s'" % k for k in REACH_KINDS)  # constants, safe to inline
     resolvers = ",".join("'%s'" % r for r in NAME_ONLY_RESOLVERS)  # constants
-    edge_conf = (
-        f"MIN(COALESCE(json_extract(e.metadata, '$.confidence'), "
-        f"{DEFAULT_EDGE_CONFIDENCE}), "
+
+    # The three caps, as separate expressions so the walk can say which one won.
+    meta_conf = (
+        f"COALESCE(json_extract(e.metadata, '$.confidence'), "
+        f"{DEFAULT_EDGE_CONFIDENCE})"
+    )
+    heuristic_conf = (
         f"CASE WHEN e.provenance = 'heuristic' THEN {HEURISTIC_CONFIDENCE} "
-        f"ELSE 1.0 END, "
-        # Name-only resolution onto a name several symbols share. Folded into
-        # the same MIN so it composes with the other two caps rather than
-        # overriding them -- an edge that is BOTH heuristic and a name collision
-        # keeps the lower of the two.
+        f"ELSE 1.0 END"
+    )
+    # Name-only resolution onto a name several symbols share.
+    collision_conf = (
         f"CASE WHEN json_extract(e.metadata, '$.resolvedBy') IN ({resolvers}) "
         f"AND e.target IN (SELECT id FROM _ambiguous_ids) "
-        f"THEN {AMBIGUOUS_NAME_MATCH_CONFIDENCE} ELSE 1.0 END)"
+        f"THEN {AMBIGUOUS_NAME_MATCH_CONFIDENCE} ELSE 1.0 END"
+    )
+    # Composed, so an edge that is BOTH heuristic and a name collision keeps the
+    # lower of the two rather than whichever cap is checked last.
+    edge_conf = f"MIN({meta_conf}, {heuristic_conf}, {collision_conf})"
+    edge_cap = (
+        f"CASE WHEN {collision_conf} <= {meta_conf} "
+        f"AND {collision_conf} <= {heuristic_conf} THEN 'name-collision' "
+        f"WHEN {heuristic_conf} <= {meta_conf} THEN 'heuristic' "
+        f"WHEN {meta_conf} <= {LOW_CONFIDENCE} THEN 'metadata' ELSE '' END"
     )
     query = f"""
-    WITH RECURSIVE impacted(id, conf) AS (
-        SELECT id, 1.0 FROM _seeds
+    WITH RECURSIVE impacted(id, conf, cap) AS (
+        SELECT id, 1.0, '' FROM _seeds
         UNION
-        SELECT e.source, MIN(i.conf, {edge_conf})
+        SELECT e.source, MIN(i.conf, {edge_conf}),
+            CASE WHEN {edge_conf} > i.conf THEN i.cap ELSE {edge_cap} END
             FROM edges e JOIN impacted i ON e.target = i.id
             WHERE e.kind IN ({kinds})
         UNION
-        SELECT e.target, i.conf FROM edges e JOIN impacted i ON e.source = i.id
+        SELECT e.target, i.conf, i.cap FROM edges e JOIN impacted i ON e.source = i.id
             WHERE e.kind = 'contains' AND i.id LIKE 'file:%'
     )
-    SELECT id, max(conf) FROM impacted GROUP BY id
+    -- `cap` is a bare column beside max(): SQLite documents that it takes its
+    -- value from the row the max came from, which is exactly the surviving
+    -- route's cap.
+    SELECT id, max(conf), cap FROM impacted GROUP BY id
     """
-    return {r[0]: r[1] for r in conn.execute(query)}
+    rows = list(conn.execute(query))
+    conf = {r[0]: r[1] for r in rows}
+    if not with_reasons:
+        return conf
+    return conf, {r[0]: r[2] for r in rows}
 
 
 def caller_edge_count(conn, node_id):

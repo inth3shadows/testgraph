@@ -292,7 +292,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
     for path in sorted(drifted):
         _mark_unmapped(path, "bytes differ from the indexed copy — line spans are stale")
 
-    impacted = dbmod.impacted_closure(conn, seeds)
+    impacted, impacted_caps = dbmod.impacted_closure(conn, seeds, with_reasons=True)
     entry_map = reg.resolve_entries(conn, registry)
 
     # A closure that resolves fine but never leaves the file(s) its seeds
@@ -364,7 +364,8 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         fanin = sum(dbmod.caller_edge_count(conn, e) for e in ents)
         # Strongest route into the journey: if ANY entry is reached confidently,
         # the selection is trustworthy.
-        conf = max(impacted[e] for e in ents)
+        best = max(ents, key=lambda e: impacted[e])
+        conf = impacted[best]
         journeys.append(
             {
                 "id": jid,
@@ -376,11 +377,17 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             }
         )
         # A flag nobody can act on is noise. Say which kind of weak edge held
-        # the route down, so the reader knows whether to distrust the graph
-        # (name collision) or the runtime (synthesized dispatch).
-        reason = dbmod.weak_edge_reason(conf)
-        if reason:
-            journeys[-1]["reason"] = reason
+        # the surviving route down, so the reader knows whether to distrust the
+        # graph (name collision) or the runtime (synthesized dispatch).
+        #
+        # Deliberately NOT the `reason` key: that one means "why this row is
+        # here at all" and appears only on the bare degrade rows below, whose
+        # `entries_hit` is 0. Two tests read its ABSENCE as proof a journey was
+        # genuinely selected by the closure, so reusing it would quietly make a
+        # real selection look like a degrade row.
+        weak_reason = dbmod.weak_edge_reason(impacted_caps.get(best, ""))
+        if weak_reason and journeys[-1]["verify_manually"]:
+            journeys[-1]["weak_reason"] = weak_reason
     # Unmappable whole-file change -> unbounded impact. Add every journey the
     # closure did not already select, flagged for manual verification, so the
     # answer degrades toward "test everything" instead of toward silence.
@@ -461,11 +468,8 @@ def _render(result):
     else:
         lines.append(f"journeys to test ({len(result['journeys'])}), ranked:")
         for j in result["journeys"]:
-            flag = (
-                "  ! VERIFY MANUALLY — %s" % j.get("reason", "weak edge path")
-                if j["verify_manually"]
-                else ""
-            )
+            why = j.get("weak_reason") or j.get("reason") or "weak edge path"
+            flag = "  ! VERIFY MANUALLY — %s" % why if j["verify_manually"] else ""
             lines.append(
                 f"  [{j['rank']:>3}] {j['id']}  {j['name']}  "
                 f"({j['entries_hit']} entry, conf {j['confidence']}){flag}"

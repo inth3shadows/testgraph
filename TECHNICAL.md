@@ -635,9 +635,35 @@ is finite and `UNION` still converges.
 - `contains` file-expansion inherits the file node's confidence — containment is
   structural, not an inference hop.
 - A journey at or below `LOW_CONFIDENCE = 0.6` renders `VERIFY MANUALLY` and sets
-  `verify_manually: true` in `--json`, plus a `reason` naming which cap held the
-  route down (`weak_edge_reason`, derived from the confidence value — the tiers
-  are kept numerically distinct by a test so the label cannot be wrong).
+  `verify_manually: true` in `--json`, plus a `weak_reason` naming which cap held
+  the surviving route down.
+
+**The cap token rides along the walk; it is not read back off the number.** The
+first version of `weak_edge_reason` inferred the cap by comparing the resulting
+confidence to the cap constants. That is unsound: `0.5` is not a value only the
+name-collision cap can produce — it is a tier real indexes report directly, as
+`LOW_CONFIDENCE`'s own comment says. On honeyslate all 37 reach-kind edges at 0.5
+target a name that is unique in the index, so *every* name-collision label it
+emitted was false (11 of 11 at journey level), and it reproduced on this repo's
+own fixture where `mid_a` carries a plain `{"confidence":0.5}` and no
+`resolvedBy`. `impacted_closure(..., with_reasons=True)` now carries a cap token
+(`heuristic` / `name-collision` / `metadata` / `''`) through the CTE beside
+`conf`, each hop keeping the token of whichever cap produced the value that
+survived its `min`, with a tie going to the edge. Termination is unaffected: the
+token comes from a four-element set, so the `(id, conf, cap)` triple space is
+still finite.
+
+`weak_reason` is deliberately a different key from `reason`, which means "why
+this row is listed at all" and appears only on the bare degrade rows —
+`select`'s tests read its absence as proof a journey was genuinely selected.
+
+**The ambiguity set is built once per connection.** It is an index-wide
+`GROUP BY name` (~80 ms on a 17k-node index) and `export.build_map` runs a
+closure per node, so rebuilding it per call was quadratic — measured 2.4-2.7x on
+the map builds. TEMP tables are per-connection, so the table's presence is the
+cache key; `refresh_ambiguous_names` is the escape hatch for a connection that
+outlives a re-index. Stale ambiguity data can only misgrade a cap, never change
+closure membership. After the fix, honeyslate's `build_map` is 0.53s → 0.59s.
 
 ### Fabricated edges are not the same problem as synthesized ones
 

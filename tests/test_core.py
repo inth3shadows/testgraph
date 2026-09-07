@@ -277,28 +277,130 @@ class NameCollisionConfidenceTests(unittest.TestCase):
 
 
 class WeakEdgeReasonTests(unittest.TestCase):
-    def test_tiers_are_distinct(self):
-        # weak_edge_reason reads the cap back OFF the confidence value, so two
-        # tiers sharing a number would mislabel every flag derived from it.
-        tiers = [
-            dbmod.HEURISTIC_CONFIDENCE,
-            dbmod.AMBIGUOUS_NAME_MATCH_CONFIDENCE,
-        ]
-        self.assertEqual(len(tiers), len(set(tiers)))
-        for t in tiers:
-            self.assertLessEqual(t, dbmod.LOW_CONFIDENCE)
+    """The cap that held a route down must be REPORTED by the walk, not read
+    back off the resulting number.
 
-    def test_labels(self):
-        self.assertIsNone(dbmod.weak_edge_reason(0.9))
-        self.assertIn(
-            "synthesized", dbmod.weak_edge_reason(dbmod.HEURISTIC_CONFIDENCE)
+    The first version inferred it from the value, which is unsound: 0.5 is not a
+    value only the name-collision cap can produce — it is a tier real indexes
+    report directly, and `LOW_CONFIDENCE`'s own comment says so. Measured on
+    honeyslate, all 37 reach-kind edges at 0.5 target a name that is unique in
+    the index, so every "name-collision" label the value-based version emitted
+    was false.
+    """
+
+    def test_a_metadata_half_is_not_called_a_name_collision(self):
+        # `mid_a` reaches `base` over a plain {"confidence":0.5} edge with no
+        # `resolvedBy` at all, and a name no other symbol shares. This is the
+        # exact shape the value-based version mislabelled, on this repo's own
+        # canonical fixture.
+        conf, caps = dbmod.impacted_closure(
+            build_fixture(), {"function:base"}, with_reasons=True
         )
-        self.assertIn(
-            "name-collision",
-            dbmod.weak_edge_reason(dbmod.AMBIGUOUS_NAME_MATCH_CONFIDENCE),
+        self.assertEqual(conf["function:mid_a"], 0.5)
+        self.assertEqual(caps["function:mid_a"], "metadata")
+        self.assertEqual(
+            dbmod.weak_edge_reason(caps["function:mid_a"]), "low-confidence edge path"
         )
-        # a low confidence the index itself reported -- no cap involved
-        self.assertIn("low-confidence", dbmod.weak_edge_reason(0.4))
+
+    def test_the_cap_that_actually_fired_is_the_one_reported(self):
+        conf, caps = dbmod.impacted_closure(
+            build_fixture(), {"function:base"}, with_reasons=True
+        )
+        self.assertEqual(caps["function:hcaller"], "heuristic")
+        self.assertIn("synthesized", dbmod.weak_edge_reason(caps["function:hcaller"]))
+
+        conf, caps = dbmod.impacted_closure(
+            build_name_collision_fixture(),
+            {"function:ledger_append"},
+            with_reasons=True,
+        )
+        self.assertEqual(caps["function:fab_caller"], "name-collision")
+        self.assertIn(
+            "name-collision", dbmod.weak_edge_reason(caps["function:fab_caller"])
+        )
+        # An uncapped route reports nothing rather than a guess.
+        self.assertEqual(caps["function:import_caller"], "")
+        self.assertIsNone(dbmod.weak_edge_reason(caps["function:import_caller"]))
+
+    def test_with_reasons_does_not_change_the_confidences(self):
+        conn = build_fixture()
+        plain = dbmod.impacted_closure(conn, {"function:base"})
+        conf, _ = dbmod.impacted_closure(conn, {"function:base"}, with_reasons=True)
+        self.assertEqual(plain, conf)
+
+
+class AmbiguityTableCacheTests(unittest.TestCase):
+    """The ambiguity set is an index-wide GROUP BY. `export.build_map` runs a
+    closure per node, so rebuilding it per call is quadratic — it measured
+    2.4-2.7x on the map builds. TEMP tables are per-connection, so the table's
+    presence is the cache key."""
+
+    def test_built_once_per_connection(self):
+        conn = build_name_collision_fixture()
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        conn.execute("DELETE FROM _ambiguous_ids")  # a rebuild would refill it
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        self.assertEqual(
+            conn.execute("SELECT count(*) FROM _ambiguous_ids").fetchone()[0], 0
+        )
+
+    def test_refresh_forces_a_rebuild(self):
+        conn = build_name_collision_fixture()
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        expected = conn.execute("SELECT count(*) FROM _ambiguous_ids").fetchone()[0]
+        self.assertGreater(expected, 0)
+        conn.execute("DELETE FROM _ambiguous_ids")
+        dbmod.refresh_ambiguous_names(conn)
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        self.assertEqual(
+            conn.execute("SELECT count(*) FROM _ambiguous_ids").fetchone()[0], expected
+        )
+
+
+class WeakReasonReachesTheSelectorTests(unittest.TestCase):
+    """The `select` half of the cap had no coverage at all: deleting the
+    attachment left the whole suite green. These pin it, including that it does
+    NOT reuse the `reason` key — two tests above read that key's ABSENCE as
+    proof a journey was genuinely selected rather than a bare degrade row."""
+
+    REG = {"J1": {"name": "one", "entries": [{"name": "mid_a",
+                                              "file": "app/conf.py"}]}}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(self.tmp, {"app/conf.py": 46})
+        # edit inside `base` (lines 1-5); J1's only route in is base -> mid_a,
+        # a plain 0.5 metadata edge.
+        full = os.path.join(self.repo, "app", "conf.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[2] = "changed = 1\n"
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "touch base")
+
+    def test_flagged_journey_carries_the_right_weak_reason(self):
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertTrue(j1["verify_manually"])
+        self.assertEqual(j1["weak_reason"], "low-confidence edge path")
+        # NOT the degrade-row key, whose absence is a documented discriminator
+        self.assertNotIn("reason", j1)
+
+    def test_render_shows_the_reason(self):
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        text = sel._render(res)
+        self.assertIn("VERIFY MANUALLY — low-confidence edge path", text)
+
+    def test_a_confident_journey_carries_no_weak_reason(self):
+        conn = build_fixture()
+        conf, caps = dbmod.impacted_closure(conn, {"function:base"}, with_reasons=True)
+        self.assertGreater(conf["function:mid_b"], dbmod.LOW_CONFIDENCE)
+        self.assertIsNone(dbmod.weak_edge_reason(caps["function:mid_b"]))
 
 
 class IntegrityTests(unittest.TestCase):
