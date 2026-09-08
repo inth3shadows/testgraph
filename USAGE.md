@@ -64,6 +64,49 @@ testgraph's.
 
 Every run appends a `selection` row to `~/.local/share/testgraph/ledger.jsonl`.
 
+## Giving a Coding Agent the Tool Directly (MCP)
+
+`python3 -m testgraph.mcp` is an MCP stdio server. It exposes two tools:
+
+| Tool | Answers |
+|---|---|
+| `testgraph_impact` | "I changed this. What could I have broken?" — `select`'s ranked journeys, confidences, and warnings as JSON. `base` defaults to `HEAD~1`; pass `origin/main` to scope a whole branch. |
+| `testgraph_journeys` | "What behaviors does this project claim to have?" — the registry, without running a diff. |
+
+**Register it per repo, not globally.** Put this in the repo's `.mcp.json`:
+
+```json
+{"mcpServers": {"testgraph": {"command": "python3", "args": ["-m", "testgraph.mcp"]}}}
+```
+
+A globally-registered MCP server is spawned once per editor/agent session, so a
+global entry runs a copy in every project you have open, including the ones with
+no journey registry — where the tool can only answer "nothing registered here".
+Register it where it has something to say. This is the same rule
+`hooks/install.sh` follows for the pre-push hook.
+
+### What it costs
+
+The server is stdlib-only and imports the analysis modules lazily, so an idle
+one has not loaded `sqlite3` or `subprocess`, holds no database connection, and
+keeps no index in memory. Measured after a full handshake:
+
+```
+testgraph.mcp                    15.2 MB RSS
+typical Python MCP-SDK server    62-69 MB RSS
+```
+
+That gap is mostly `pydantic` + `anyio` + `httpx`, which is why this server does
+not use the MCP SDK — testgraph has no runtime dependencies and spending that
+budget on a transport would be the most expensive line in the project.
+`tests/test_mcp.py` pins both properties: it asserts the forbidden modules are
+absent from a freshly-imported server and that idle RSS stays under 30 MB.
+
+If you would rather pay nothing at all: the same answer is available as
+`python3 -m testgraph.select --repo <path> --json`, which costs zero resident
+memory between calls. The server exists so an agent finds the tool without being
+told to look for it.
+
 ## Recording What a Journey Run Found
 
 The hook records what testgraph *said*. `record` records what running the journey
