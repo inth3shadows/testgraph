@@ -170,6 +170,239 @@ class ConfidenceTests(unittest.TestCase):
         self.assertLessEqual(self.impacted["function:hcaller"], dbmod.LOW_CONFIDENCE)
 
 
+def build_name_collision_fixture():
+    """The codegraph-#66 shape, in its own db so it cannot perturb the counts
+    the other fixtures' tests assert on.
+
+    Two project symbols named `append`, so the NAME is ambiguous. One caller
+    reaches ledger's `append` through a bare-name match (`resolvedBy` =
+    `exact-match`) claiming confidence 0.9 — this is the fabricated edge, byte
+    for byte the metadata the installed codegraph build wrote for
+    `rows["k"].append(2)`. A second caller reaches the SAME target through an
+    import, which is evidence and must not be capped. A third pair exercises an
+    exact-match onto a name only one symbol has: nothing was ambiguous, so
+    nothing is capped.
+    """
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE nodes(id TEXT, kind TEXT, name TEXT, qualified_name TEXT,
+            file_path TEXT, start_line INT, end_line INT);
+        CREATE TABLE edges(id INTEGER PRIMARY KEY, source TEXT, target TEXT,
+            kind TEXT, metadata TEXT, provenance TEXT);
+        CREATE TABLE schema_versions(version INT, applied_at INT, note TEXT);
+        INSERT INTO schema_versions VALUES (8, 0, 'fixture');
+        """
+    )
+    conn.executemany(
+        "INSERT INTO nodes VALUES (?,?,?,?,?,?,?)",
+        [
+            ("function:ledger_append", "function", "append", "ledger.append",
+             "app/ledger.py", 1, 3),
+            # the collision: a second project symbol with the same NAME
+            ("function:other_append", "function", "append", "other.append",
+             "app/other.py", 1, 3),
+            ("function:fab_caller", "function", "build_map", "build_map",
+             "app/unrelated.py", 1, 8),
+            ("function:import_caller", "function", "add_outcome", "add_outcome",
+             "app/record.py", 1, 8),
+            ("function:unique_target", "function", "unique_target",
+             "unique_target", "app/uniq.py", 1, 3),
+            ("function:uniq_caller", "function", "uniq_caller", "uniq_caller",
+             "app/uniq.py", 10, 15),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO edges(source,target,kind,metadata,provenance) VALUES (?,?,?,?,?)",
+        [
+            ("function:fab_caller", "function:ledger_append", "calls",
+             '{"confidence":0.9,"resolvedBy":"exact-match","refName":"append"}',
+             None),
+            ("function:import_caller", "function:ledger_append", "calls",
+             '{"confidence":0.9,"resolvedBy":"import","refName":"ledger.append"}',
+             None),
+            ("function:uniq_caller", "function:unique_target", "calls",
+             '{"confidence":0.9,"resolvedBy":"exact-match",'
+             '"refName":"unique_target"}', None),
+        ],
+    )
+    conn.commit()
+    return conn
+
+
+class NameCollisionConfidenceTests(unittest.TestCase):
+    """codegraph #66: a bare-name match onto an ambiguous name arrives with
+    `confidence 0.9` and `provenance NULL` — testgraph's TOP trust tier — for an
+    edge that does not exist. Reproduced live against the installed 1.5.0
+    bundle before this cap existed."""
+
+    def setUp(self):
+        self.conn = build_name_collision_fixture()
+
+    def test_ambiguous_exact_match_is_capped(self):
+        impacted = dbmod.impacted_closure(self.conn, {"function:ledger_append"})
+        self.assertEqual(
+            impacted["function:fab_caller"],
+            dbmod.AMBIGUOUS_NAME_MATCH_CONFIDENCE,
+        )
+        self.assertLessEqual(
+            impacted["function:fab_caller"], dbmod.LOW_CONFIDENCE
+        )
+
+    def test_import_resolved_edge_to_the_same_target_is_not_capped(self):
+        # The cap keys on HOW the edge was resolved, not on the target being
+        # ambiguous. An import is evidence; capping it would cost real recall
+        # confidence on every shared name in a project.
+        impacted = dbmod.impacted_closure(self.conn, {"function:ledger_append"})
+        self.assertEqual(impacted["function:import_caller"], 0.9)
+
+    def test_unambiguous_exact_match_is_not_capped(self):
+        # Only one symbol has this name, so the match had nothing to get wrong.
+        # This is the case that keeps `verify_manually` meaningful: 56% of the
+        # calls edges in a real index are exact-match, and flagging all of them
+        # would drown the signal.
+        impacted = dbmod.impacted_closure(self.conn, {"function:unique_target"})
+        self.assertEqual(impacted["function:uniq_caller"], 0.9)
+
+    def test_missing_resolvedBy_is_not_treated_as_suspect(self):
+        # A codegraph change that drops the field costs us the protection; it
+        # must never invent a flag.
+        self.conn.execute(
+            "UPDATE edges SET metadata = '{\"confidence\":0.9}' "
+            "WHERE source = 'function:fab_caller'"
+        )
+        impacted = dbmod.impacted_closure(self.conn, {"function:ledger_append"})
+        self.assertEqual(impacted["function:fab_caller"], 0.9)
+
+
+class WeakEdgeReasonTests(unittest.TestCase):
+    """The cap that held a route down must be REPORTED by the walk, not read
+    back off the resulting number.
+
+    The first version inferred it from the value, which is unsound: 0.5 is not a
+    value only the name-collision cap can produce — it is a tier real indexes
+    report directly, and `LOW_CONFIDENCE`'s own comment says so. Measured on
+    honeyslate, all 37 reach-kind edges at 0.5 target a name that is unique in
+    the index, so every "name-collision" label the value-based version emitted
+    was false.
+    """
+
+    def test_a_metadata_half_is_not_called_a_name_collision(self):
+        # `mid_a` reaches `base` over a plain {"confidence":0.5} edge with no
+        # `resolvedBy` at all, and a name no other symbol shares. This is the
+        # exact shape the value-based version mislabelled, on this repo's own
+        # canonical fixture.
+        conf, caps = dbmod.impacted_closure(
+            build_fixture(), {"function:base"}, with_reasons=True
+        )
+        self.assertEqual(conf["function:mid_a"], 0.5)
+        self.assertEqual(caps["function:mid_a"], "metadata")
+        self.assertEqual(
+            dbmod.weak_edge_reason(caps["function:mid_a"]), "low-confidence edge path"
+        )
+
+    def test_the_cap_that_actually_fired_is_the_one_reported(self):
+        conf, caps = dbmod.impacted_closure(
+            build_fixture(), {"function:base"}, with_reasons=True
+        )
+        self.assertEqual(caps["function:hcaller"], "heuristic")
+        self.assertIn("synthesized", dbmod.weak_edge_reason(caps["function:hcaller"]))
+
+        conf, caps = dbmod.impacted_closure(
+            build_name_collision_fixture(),
+            {"function:ledger_append"},
+            with_reasons=True,
+        )
+        self.assertEqual(caps["function:fab_caller"], "name-collision")
+        self.assertIn(
+            "name-collision", dbmod.weak_edge_reason(caps["function:fab_caller"])
+        )
+        # An uncapped route reports nothing rather than a guess.
+        self.assertEqual(caps["function:import_caller"], "")
+        self.assertIsNone(dbmod.weak_edge_reason(caps["function:import_caller"]))
+
+    def test_with_reasons_does_not_change_the_confidences(self):
+        conn = build_fixture()
+        plain = dbmod.impacted_closure(conn, {"function:base"})
+        conf, _ = dbmod.impacted_closure(conn, {"function:base"}, with_reasons=True)
+        self.assertEqual(plain, conf)
+
+
+class AmbiguityTableCacheTests(unittest.TestCase):
+    """The ambiguity set is an index-wide GROUP BY. `export.build_map` runs a
+    closure per node, so rebuilding it per call is quadratic — it measured
+    2.4-2.7x on the map builds. TEMP tables are per-connection, so the table's
+    presence is the cache key."""
+
+    def test_built_once_per_connection(self):
+        conn = build_name_collision_fixture()
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        conn.execute("DELETE FROM _ambiguous_ids")  # a rebuild would refill it
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        self.assertEqual(
+            conn.execute("SELECT count(*) FROM _ambiguous_ids").fetchone()[0], 0
+        )
+
+    def test_refresh_forces_a_rebuild(self):
+        conn = build_name_collision_fixture()
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        expected = conn.execute("SELECT count(*) FROM _ambiguous_ids").fetchone()[0]
+        self.assertGreater(expected, 0)
+        conn.execute("DELETE FROM _ambiguous_ids")
+        dbmod.refresh_ambiguous_names(conn)
+        dbmod.impacted_closure(conn, {"function:ledger_append"})
+        self.assertEqual(
+            conn.execute("SELECT count(*) FROM _ambiguous_ids").fetchone()[0], expected
+        )
+
+
+class WeakReasonReachesTheSelectorTests(unittest.TestCase):
+    """The `select` half of the cap had no coverage at all: deleting the
+    attachment left the whole suite green. These pin it, including that it does
+    NOT reuse the `reason` key — two tests above read that key's ABSENCE as
+    proof a journey was genuinely selected rather than a bare degrade row."""
+
+    REG = {"J1": {"name": "one", "entries": [{"name": "mid_a",
+                                              "file": "app/conf.py"}]}}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(self.tmp, {"app/conf.py": 46})
+        # edit inside `base` (lines 1-5); J1's only route in is base -> mid_a,
+        # a plain 0.5 metadata edge.
+        full = os.path.join(self.repo, "app", "conf.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[2] = "changed = 1\n"
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "touch base")
+
+    def test_flagged_journey_carries_the_right_weak_reason(self):
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertTrue(j1["verify_manually"])
+        self.assertEqual(j1["weak_reason"], "low-confidence edge path")
+        # NOT the degrade-row key, whose absence is a documented discriminator
+        self.assertNotIn("reason", j1)
+
+    def test_render_shows_the_reason(self):
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        text = sel._render(res)
+        self.assertIn("VERIFY MANUALLY — low-confidence edge path", text)
+
+    def test_a_confident_journey_carries_no_weak_reason(self):
+        conn = build_fixture()
+        conf, caps = dbmod.impacted_closure(conn, {"function:base"}, with_reasons=True)
+        self.assertGreater(conf["function:mid_b"], dbmod.LOW_CONFIDENCE)
+        self.assertIsNone(dbmod.weak_edge_reason(caps["function:mid_b"]))
+
+
 class IntegrityTests(unittest.TestCase):
     def setUp(self):
         self.conn = build_fixture()
