@@ -1,0 +1,60 @@
+# docvet suppressions for testgraph.
+#
+# testgraph is a tool that reads OTHER repositories, so its docs are full of
+# filenames and symbols that belong to the repos under analysis rather than to
+# this tree. Every token below was checked by hand. Anchors
+# (<!-- docvet:anchors -->) are the opposite instrument and stay reserved for
+# claims worth blocking a push over.
+
+# Files in the repos testgraph ANALYSES, named as examples. testgraph is a
+# Python tool; it has no package.json, route.ts or urls.py of its own and never
+# claimed to.
+.d.ts
+auth_service.py
+available-locales.ts
+button.tsx
+clean_db
+config.py
+main.py
+middleware.ts
+package.json
+page.tsx
+route.ts
+scheduling.py
+schemas.py
+svelte.config.js
+test_notifications.py
+tests/test_notifications.py
+urls.py
+vite.config.js
+
+# `path:NN` is a line reference. The files exist; the `:NN` is not part of the
+# name (verified: testgraph/record.py, testgraph/hook.py, tests/test_propose.py
+# are all tracked).
+testgraph/hook.py:44
+testgraph/record.py:99
+tests/test_propose.py:725
+
+# A pytest node id used as an illustration, not a path.
+tests/test_auth.py::…
+
+# Names belonging to other tools: codegraph_impact is a CodeGraph MCP tool,
+# imp.localName is an ESTree/Babel AST property.
+codegraph_impact
+imp.localName
+
+# Not HTTP routes. `/verify` is a gate, `/autorun` a slash-command, and
+# `/path/to/repo` a shell placeholder; `/personal_projects/...` is a filesystem
+# path into a different repo.
+/autorun
+/path/to/repo
+/personal_projects/honeyslate/main
+/verify
+
+# This repo's own layout described in prose, not a tracked path.
+harness/journey_tests_
+harness/tgtrace.py
+testgraph/main
+
+# A filename template, not a literal path.
+journeys/<target>.json
