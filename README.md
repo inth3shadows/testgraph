@@ -9,6 +9,22 @@ It sits above the tools that already exist: it does NOT drive browsers, generate
 tests, or self-heal (Playwright's Planner/Generator/Healer agents commoditized
 that). Its job is the layer no driver has — deciding *what is worth testing*.
 
+## Install
+
+```bash
+pip install testgraph
+```
+
+No runtime dependencies — the stdlib `sqlite3` to read the CodeGraph index, and
+`git` for the diff. The wheel ships `testgraph/` alone: the measurement harness
+and the three dogfood registries live in the repo, not the package.
+
+From source, if you want those too:
+
+```bash
+git clone https://github.com/inth3shadows/testgraph
+```
+
 ## How It Works
 
 A **journey registry** names each user journey and its entry symbols (route
@@ -96,6 +112,25 @@ python3 harness/ground_truth.py --trace traces/<target>.json \
     --map harness/journey_tests_<target>.json \
     --registry journeys/<target>.json --db <target>/.codegraph/codegraph.db
 ```
+
+## Giving It To A Coding Agent (MCP)
+
+`python3 -m testgraph.mcp` is an MCP stdio server exposing two tools:
+`testgraph_impact` (ranked journeys for a diff) and `testgraph_journeys` (the
+registry, without running a diff). Register it **per repo**, in `.mcp.json`:
+
+```json
+{"mcpServers": {"testgraph": {"command": "python3", "args": ["-m", "testgraph.mcp"]}}}
+```
+
+It is stdlib-only and imports the analysis modules lazily, so an idle server has
+not loaded `sqlite3`, holds no database connection, and keeps no index in
+memory. Measured after a full handshake: **15.2 MB RSS**, against 62–69 MB for a
+typical Python MCP-SDK server — a gap that is mostly `pydantic` + `anyio` +
+`httpx`. That matters because MCP servers are spawned once per agent session, so
+the number is multiplied by every editor window you have open, not paid once.
+
+Full detail, including why it does not use the MCP SDK: [USAGE.md](USAGE.md).
 
 ## Wiring It In
 
