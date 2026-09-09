@@ -1,26 +1,150 @@
 name: Release
-# Fires on a version tag. Builds sdist+wheel, asserts the built version matches the tag,
-# and publishes a GitHub Release. Assumes tag-derived versioning (hatch-vcs / setuptools-scm)
-# is configured — see the repo-publish checklist. Git-install-first; no PyPI publish.
+
+# Two ways in, one way out.
+#
+#   1. A PR merges to main carrying a `release:patch|minor|major` label -> the
+#      next version is computed from the latest tag, the tag is created, and the
+#      release proceeds. NO LABEL MEANS NO RELEASE: the default is silence, not
+#      an accidental publish.
+#   2. A `v*` tag is pushed by hand -> the same build/publish path, for the case
+#      where a release is not tied to a PR.
+#
+# The bump comes from a PR label rather than from commit subjects on purpose.
+# Subjects since v0.1.0 are `feat`, `docvet`, `docs`, and one bare sentence — the
+# history is not conventional-commit clean, so a parser would silently mis-bump.
+# A label is set at review time, when the impact is actually known, and it is
+# visible on the PR.
+#
+# WHY THIS IS ONE WORKFLOW AND NOT TWO. The obvious shape — a tagging workflow
+# that fires the existing tag-triggered release — does not work: a tag pushed
+# with GITHUB_TOKEN does not trigger other workflows (GitHub's loop protection),
+# so it would need a PAT stored in repo secrets. Staying inside one run avoids
+# storing a credential at all. For the same reason PyPI auth is trusted
+# publishing over OIDC rather than an API token: nothing to store, nothing to
+# rotate, nothing to leak.
+#
+# Every `uses:` is pinned to a COMMIT sha, not a tag. An annotated tag is its own
+# object and pinning it fails to resolve — `pypa/gh-action-pypi-publish@v1.14.2`
+# is tag object a892a5a, whose commit is dc37677.
+
 on:
+  pull_request:
+    types: [closed]
   push:
     tags: ["v*"]
+
 permissions:
-  contents: write
+  contents: write   # create the tag and the GitHub Release
+  id-token: write   # PyPI trusted publishing (OIDC)
+
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0   # tag-derived versioning needs full history
+
+      - id: pick
+        name: Decide the tag, or decide there is nothing to release
+        env:
+          # Read through env rather than interpolating into the script body:
+          # a PR label is attacker-influencable text on a fork PR, and inlining
+          # it would be a shell injection.
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, re, subprocess
+
+          event = os.environ["EVENT"]
+
+          if event == "push":
+              # The tag already exists; nothing to compute.
+              print(f"tag={os.environ['REF_NAME']}")
+              raise SystemExit(0)
+
+          if os.environ.get("MERGED") != "true":
+              print("tag=")           # closed without merging
+              raise SystemExit(0)
+
+          labels = set(json.loads(os.environ.get("LABELS") or "[]"))
+          bump = next((b for b in ("major", "minor", "patch")
+                       if f"release:{b}" in labels), None)
+          if bump is None:
+              print("tag=")           # the common case: an ordinary merge
+              raise SystemExit(0)
+
+          tags = subprocess.run(
+              ["git", "tag", "--list", "v*", "--sort=-v:refname"],
+              capture_output=True, text=True, check=True,
+          ).stdout.split()
+          semver = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+          latest = next((m for m in (semver.match(t) for t in tags) if m), None)
+          major, minor, patch = (
+              map(int, latest.groups()) if latest else (0, 0, 0)
+          )
+          major, minor, patch = {
+              "major": (major + 1, 0, 0),
+              "minor": (major, minor + 1, 0),
+              "patch": (major, minor, patch + 1),
+          }[bump]
+          print(f"tag=v{major}.{minor}.{patch}")
+          PY
+
+      - name: Create and push the tag
+        if: github.event_name == 'pull_request' && steps.pick.outputs.tag != ''
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists — bump the label or tag by hand"; exit 1
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+
+  release:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+          fetch-depth: 0
+
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
       - run: uv build
+
       - name: Assert built version matches the tag
+        # hatch-vcs derives the version from the tag, so a mismatch means the
+        # checkout or the history is wrong — publish nothing rather than publish
+        # a number that lies about what is in the wheel.
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          expected="${GITHUB_REF_NAME#v}"
+          expected="${TAG#v}"
           if ! ls dist/*-"${expected}"-*.whl >/dev/null 2>&1; then
-            echo "::error::built wheel does not match tag ${GITHUB_REF_NAME} (expected ${expected})"; ls -1 dist/; exit 1
+            echo "::error::built wheel does not match tag ${TAG} (expected ${expected})"
+            ls -1 dist/; exit 1
           fi
-      - env: { GH_TOKEN: "${{ github.token }}" }
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --title "${GITHUB_REF_NAME}"
+
+      - name: Publish to PyPI
+        # Trusted publishing: no password, no token. Authenticated by the OIDC
+        # claim, which PyPI matches against the pending publisher configured for
+        # owner/repo/workflow. Runs BEFORE the GitHub Release: a PyPI upload
+        # cannot be undone (a version may be yanked, never re-uploaded), so if it
+        # is going to fail, fail before announcing anything.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release create "$TAG" dist/* --generate-notes --title "$TAG"
