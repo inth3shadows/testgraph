@@ -121,7 +121,8 @@ def _no_registry_message(reg, repo):
     return (
         f"no journey registry found for repo `{name}` ({repo}). This is NOT "
         f"'no journeys affected' — testgraph has nothing registered here and "
-        f"cannot answer. Add journeys/<name>.json with \"target\": \"{name}\", "
+        f"cannot answer. Looked in: {reg.where_it_looked(repo)}. Add "
+        f"{reg.REPO_JOURNEYS_SUBDIR}/<name>.json with \"target\": \"{name}\", "
         f"or draft one with `python3 -m testgraph.propose --repo {repo}`."
     )
 

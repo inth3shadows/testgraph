@@ -36,6 +36,26 @@ Before answering, an **integrity guard** refuses to run off a corrupted or stale
 CodeGraph index — because a wrong graph produces a confidently-wrong "you don't
 need to test that" answer, the one failure mode a test selector must never have.
 
+## Where the Registry Lives
+
+`resolve_for_repo` searches, first hit wins:
+
+| # | Location | For |
+|---|---|---|
+| 1 | `$TESTGRAPH_JOURNEYS_DIR` | escape hatch — a registry kept outside the repo it describes |
+| 2 | `<repo>/.testgraph/journeys/*.json` | **where your registry belongs.** It describes that repo, so it versions with it and travels with a clone |
+| 3 | `journeys/` beside the package | this project's own checkout, holding the three dogfood registries |
+
+A registry is matched on its self-declared `target`, never on filename — in
+every location, including your own repo. A registry copied from another project
+and left unedited is refused rather than used, because a wrong registry is worse
+than none: every downstream check then reports its own mismatch as a stale index.
+
+`python3 -m testgraph.propose --repo <path>` drafts into (2) by default.
+
+Note for anyone reading this on PyPI: (3) does not exist in an installed wheel,
+which ships `testgraph/` alone. Put your registry in (2).
+
 ## Prerequisites
 
 - Python 3.11+ (standard library only — no third-party dependencies).

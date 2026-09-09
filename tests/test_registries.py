@@ -38,9 +38,11 @@ What each check pins:
 """
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
@@ -205,6 +207,114 @@ class ShippedRegistries(unittest.TestCase):
                         f"{path}:{name} has no file, so the symbol is matched "
                         f"by bare name in any file",
                     )
+
+
+class RegistryDiscoveryTests(unittest.TestCase):
+    """Where `resolve_for_repo` looks, and why the old answer was unusable.
+
+    The search directory used to be package-relative and NOTHING else. That works
+    in a source checkout and is silently useless anywhere else: the wheel ships
+    `testgraph/` alone, so on `pip install testgraph` the path resolves to
+    `site-packages/journeys`, which does not exist. Every repo answered "no
+    journey registry found" forever — including through the MCP server, which
+    would have returned that to every agent that ever called it. Measured on a
+    real wheel install, not inferred, which is why these tests exist at all.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # `repo_name` reads the `.bare/` marker beside the worktree.
+        self.repo = os.path.join(self.tmp, "widget", "main")
+        os.makedirs(self.repo)
+        os.makedirs(os.path.join(self.tmp, "widget", ".bare"))
+        self.addCleanup(os.environ.pop, reg.ENV_JOURNEYS_DIR, None)
+        os.environ.pop(reg.ENV_JOURNEYS_DIR, None)
+
+    def _write(self, directory, fname, target):
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, fname)
+        with open(path, "w") as fh:
+            json.dump({"target": target, "journeys": {}}, fh)
+        return path
+
+    def _repo_dir(self):
+        return os.path.join(self.repo, reg.REPO_JOURNEYS_SUBDIR)
+
+    def test_a_registry_in_the_repo_is_found(self):
+        """The case a pip-installed user is in, and could not reach before."""
+        want = self._write(self._repo_dir(), "widget.json", "widget")
+        self.assertEqual(want, reg.resolve_for_repo(self.repo))
+
+    def test_the_repo_wins_over_the_package_directory(self):
+        """Most specific first.
+
+        A checkout of testgraph itself ships three dogfood registries; a consumer
+        repo that carries its own must not be overridden by one of those merely
+        because the package directory happens to be importable.
+        """
+        pkg = os.path.join(self.tmp, "pkgjourneys")
+        self._write(pkg, "widget.json", "widget")
+        want = self._write(self._repo_dir(), "widget.json", "widget")
+        with unittest.mock.patch.object(reg, "PACKAGE_JOURNEYS_DIR", pkg):
+            self.assertEqual(want, reg.resolve_for_repo(self.repo))
+
+    def test_the_env_var_wins_over_the_repo(self):
+        """The escape hatch outranks both — a registry under review elsewhere."""
+        elsewhere = os.path.join(self.tmp, "elsewhere")
+        want = self._write(elsewhere, "widget.json", "widget")
+        self._write(self._repo_dir(), "widget.json", "widget")
+        os.environ[reg.ENV_JOURNEYS_DIR] = elsewhere
+        self.assertEqual(want, reg.resolve_for_repo(self.repo))
+
+    def test_an_explicit_directory_searches_that_one_and_no_other(self):
+        """An explicit path is an instruction, not a hint.
+
+        The harness passes one when analysing history; falling through to a
+        repo-local registry would quietly score a different file than the caller
+        named.
+        """
+        self._write(self._repo_dir(), "widget.json", "widget")
+        empty = os.path.join(self.tmp, "empty")
+        os.makedirs(empty)
+        self.assertIsNone(reg.resolve_for_repo(self.repo, journeys_dir=empty))
+
+    def test_a_missing_directory_is_skipped_not_fatal(self):
+        """The package directory is absent in every wheel install."""
+        want = self._write(self._repo_dir(), "widget.json", "widget")
+        with unittest.mock.patch.object(
+            reg, "PACKAGE_JOURNEYS_DIR", os.path.join(self.tmp, "nope")
+        ):
+            self.assertEqual(want, reg.resolve_for_repo(self.repo))
+
+    def test_a_mismatched_target_in_the_repo_is_still_refused(self):
+        """Being repo-local does not make a copied registry correct.
+
+        A registry copied from another project and left unedited is exactly the
+        case that used to report the resulting disagreement as a stale index.
+        Returning None is the safe answer; the target is the claim, not the path.
+        """
+        self._write(self._repo_dir(), "widget.json", "someone-else")
+        self.assertIsNone(reg.resolve_for_repo(self.repo))
+
+    def test_the_not_found_message_names_every_directory_searched(self):
+        """'No registry found' without a WHERE is unactionable.
+
+        The reader cannot otherwise tell a missing file from a target typo from a
+        directory the installed package can never see.
+        """
+        looked = reg.where_it_looked(self.repo)
+        self.assertIn(os.path.normpath(self._repo_dir()), looked)
+        self.assertIn("journeys", looked)
+
+    def test_the_shipped_registries_are_still_found_from_this_checkout(self):
+        """The package-relative fallback is a fallback, not a removal."""
+        repo = os.path.join(self.tmp, "testgraph", "main")
+        os.makedirs(repo)
+        os.makedirs(os.path.join(self.tmp, "testgraph", ".bare"))
+        path = reg.resolve_for_repo(repo)
+        self.assertIsNotNone(path, "the checkout's own registries stopped resolving")
+        self.assertEqual(os.path.basename(path), "testgraph.json")
 
 
 if __name__ == "__main__":
