@@ -1,116 +1,218 @@
 {
   "target": "signedintake",
-  "note": "Reviewed 2026-07-30 from a testgraph.propose draft (19 handlers). J1-J8 keep the ids and groupings of the earlier hand-authored registry; J9-J14 are new. J13 and J14 came from working the draft's blind-spot list, not from the scan: a Next.js lifespan hook and a tsx CLI. Knowingly uncovered: (1) client components reached only by in-browser navigation (SimulateButton, PasskeyButton, RegeneratePdfButton) have no server entry symbol of their own — each is registered indirectly through the page or action it calls; (2) scripts/pg-backup.sh, a shell entrypoint with no symbols in the index to register. Remaining drafted blind spots were checked and are empty for this repo: no middleware.ts, no pages/ router, no anonymous default exports, no non-Next.js router, no schedulers.",
+  "note": "Reviewed 2026-07-30 from a testgraph.propose draft (19 handlers). J1-J8 keep the ids and groupings of the earlier hand-authored registry; J9-J14 are new. J13 and J14 came from working the draft's blind-spot list, not from the scan: a Next.js lifespan hook and a tsx CLI. Knowingly uncovered: (1) client components reached only by in-browser navigation (SimulateButton, PasskeyButton, RegeneratePdfButton) have no server entry symbol of their own — each is registered indirectly through the page or action it calls; (2) scripts/pg-backup.sh, a shell entrypoint with no symbols in the index to register. Remaining drafted blind spots were checked and are empty for this repo: no middleware.ts, no pages/ router, no anonymous default exports, no non-Next.js router, no schedulers.\n\nSCHEMA PIN MOVED 8 -> 9 on 2026-09-08, after verifying the queries rather than just the number. Evidence, in the order it was gathered: (1) the upstream migration is purely ADDITIVE — codegraph src/db/migrations.ts version 9 is `ALTER TABLE files ADD COLUMN generated INTEGER NOT NULL DEFAULT 0` plus a partial index on it, with no column dropped, renamed or re-typed, and its own comment says migrated rows stay 0 until a re-index because the flag is derived from file CONTENT the migration cannot see. (2) A trailing column can only hurt a reader that accesses results positionally: there is NO `SELECT *` anywhere in testgraph/ or harness/, and both queries that touch `files` name their columns (`SELECT path, indexed_at` and `SELECT path, content_hash`, integrity.py:28,57). (3) All eleven db.py/integrity.py read paths were run against a live schema-9 index — nodes_for_lines, nodes_in_file, file_node_id, closure_files, impacted_closure with and without reasons, caller_edge_count, top_fanin_nodes, resolve_symbol, refresh_ambiguous_names, stale_by_mtime — 11/11 with no error. (4) End-to-end `select` at pin 9 against all three registered repos returned sane answers, not just non-errors: testgraph 26 seeds/176 impacted/4 journeys, honeyslate 5/422/8, signedintake 39/384/11. NOT COVERED, and worth knowing: the test fixtures write `schema_versions` = 8 (tests/test_core.py:40, tests/test_propose.py:101,311), so the suite exercises the PIN LOGIC but never a schema-9 shaped database. The verification above is the only thing standing behind this bump; a fixture at 9 would be better and is deliberately left as separate work, since the drift tests construct explicit mismatches and changing the base number moves their meaning too. The migration was NOT caused by any single sync: all 33 codegraph indexes on this box read schema 9, and the ones nobody touched were rewritten in a batch at 19:57, so this was a codegraph upgrade, not a per-repo action.",
   "approved": true,
   "proposed_by": "testgraph.propose",
-  "codegraph_schema_version": 8,
+  "codegraph_schema_version": 9,
   "journeys": {
     "J1": {
       "name": "claimant submits a signed form",
       "entries": [
-        { "name": "submitForm", "file": "src/app/f/[token]/actions.ts" },
-        { "name": "Page", "file": "src/app/f/[token]/page.tsx" }
+        {
+          "name": "submitForm",
+          "file": "src/app/f/[token]/actions.ts"
+        },
+        {
+          "name": "Page",
+          "file": "src/app/f/[token]/page.tsx"
+        }
       ],
-      "route": ["ACTION /f/[token]", "PAGE /f/[token]"]
+      "route": [
+        "ACTION /f/[token]",
+        "PAGE /f/[token]"
+      ]
     },
     "J2": {
       "name": "staff issues a form link",
       "entries": [
-        { "name": "issueFormLink", "file": "src/app/staff/forms/actions.ts" }
+        {
+          "name": "issueFormLink",
+          "file": "src/app/staff/forms/actions.ts"
+        }
       ],
-      "route": ["ACTION /staff/forms"]
+      "route": [
+        "ACTION /staff/forms"
+      ]
     },
     "J3": {
       "name": "onboarding: form created from YAML",
       "entries": [
-        { "name": "validateAndPreview", "file": "src/app/onboarding/actions.ts" },
-        { "name": "createFormAndLink", "file": "src/app/onboarding/actions.ts" },
-        { "name": "OnboardingPage", "file": "src/app/onboarding/page.tsx" }
+        {
+          "name": "validateAndPreview",
+          "file": "src/app/onboarding/actions.ts"
+        },
+        {
+          "name": "createFormAndLink",
+          "file": "src/app/onboarding/actions.ts"
+        },
+        {
+          "name": "OnboardingPage",
+          "file": "src/app/onboarding/page.tsx"
+        }
       ],
-      "route": ["ACTION /onboarding", "PAGE /onboarding"]
+      "route": [
+        "ACTION /onboarding",
+        "PAGE /onboarding"
+      ]
     },
     "J4": {
       "name": "staff reviews a submission",
       "entries": [
-        { "name": "SubmissionDetailPage", "file": "src/app/staff/[submissionId]/page.tsx" },
-        { "name": "StaffIndexPage", "file": "src/app/staff/page.tsx" }
+        {
+          "name": "SubmissionDetailPage",
+          "file": "src/app/staff/[submissionId]/page.tsx"
+        },
+        {
+          "name": "StaffIndexPage",
+          "file": "src/app/staff/page.tsx"
+        }
       ],
-      "route": ["PAGE /staff/[submissionId]", "PAGE /staff"]
+      "route": [
+        "PAGE /staff/[submissionId]",
+        "PAGE /staff"
+      ]
     },
     "J5": {
       "name": "staff requests a payment update",
       "entries": [
-        { "name": "createPaymentUpdateRequest", "file": "src/app/staff/[submissionId]/payment-actions.ts" },
-        { "name": "simulatePaymentCompletion", "file": "src/app/staff/[submissionId]/payment-actions.ts" }
+        {
+          "name": "createPaymentUpdateRequest",
+          "file": "src/app/staff/[submissionId]/payment-actions.ts"
+        },
+        {
+          "name": "simulatePaymentCompletion",
+          "file": "src/app/staff/[submissionId]/payment-actions.ts"
+        }
       ],
-      "route": ["ACTION /staff/[submissionId]"]
+      "route": [
+        "ACTION /staff/[submissionId]"
+      ]
     },
     "J6": {
       "name": "stripe webhook settles a payment",
       "entries": [
-        { "name": "POST", "file": "src/app/api/webhooks/stripe/route.ts" }
+        {
+          "name": "POST",
+          "file": "src/app/api/webhooks/stripe/route.ts"
+        }
       ],
-      "route": ["POST /api/webhooks/stripe"]
+      "route": [
+        "POST /api/webhooks/stripe"
+      ]
     },
     "J7": {
       "name": "client polls payment status",
       "entries": [
-        { "name": "GET", "file": "src/app/api/payment-requests/[requestId]/status/route.ts" }
+        {
+          "name": "GET",
+          "file": "src/app/api/payment-requests/[requestId]/status/route.ts"
+        }
       ],
-      "route": ["GET /api/payment-requests/[requestId]/status"]
+      "route": [
+        "GET /api/payment-requests/[requestId]/status"
+      ]
     },
     "J8": {
       "name": "staff browses forms",
       "entries": [
-        { "name": "FormsIndexPage", "file": "src/app/staff/forms/page.tsx" },
-        { "name": "FormDetailPage", "file": "src/app/staff/forms/[formId]/page.tsx" }
+        {
+          "name": "FormsIndexPage",
+          "file": "src/app/staff/forms/page.tsx"
+        },
+        {
+          "name": "FormDetailPage",
+          "file": "src/app/staff/forms/[formId]/page.tsx"
+        }
       ],
-      "route": ["PAGE /staff/forms", "PAGE /staff/forms/[formId]"]
+      "route": [
+        "PAGE /staff/forms",
+        "PAGE /staff/forms/[formId]"
+      ]
     },
     "J9": {
       "name": "staff signs in",
       "entries": [
-        { "name": "LoginPage", "file": "src/app/login/page.tsx" }
+        {
+          "name": "LoginPage",
+          "file": "src/app/login/page.tsx"
+        }
       ],
-      "route": ["PAGE /login"]
+      "route": [
+        "PAGE /login"
+      ]
     },
     "J10": {
       "name": "staff regenerates and downloads the signed PDF",
       "entries": [
-        { "name": "regenerateSubmissionPdf", "file": "src/app/staff/[submissionId]/pdf-actions.ts" },
-        { "name": "GET", "file": "src/app/staff/[submissionId]/pdf/route.ts" }
+        {
+          "name": "regenerateSubmissionPdf",
+          "file": "src/app/staff/[submissionId]/pdf-actions.ts"
+        },
+        {
+          "name": "GET",
+          "file": "src/app/staff/[submissionId]/pdf/route.ts"
+        }
       ],
-      "route": ["ACTION /staff/[submissionId]", "GET /staff/[submissionId]/pdf"]
+      "route": [
+        "ACTION /staff/[submissionId]",
+        "GET /staff/[submissionId]/pdf"
+      ]
     },
     "J11": {
       "name": "customer completes a dev-provider payment",
       "entries": [
-        { "name": "DevSimulatePage", "file": "src/app/pay/[requestId]/page.tsx" },
-        { "name": "simulatePaymentCompletion", "file": "src/app/staff/[submissionId]/payment-actions.ts" }
+        {
+          "name": "DevSimulatePage",
+          "file": "src/app/pay/[requestId]/page.tsx"
+        },
+        {
+          "name": "simulatePaymentCompletion",
+          "file": "src/app/staff/[submissionId]/payment-actions.ts"
+        }
       ],
-      "route": ["PAGE /pay/[requestId]"]
+      "route": [
+        "PAGE /pay/[requestId]"
+      ]
     },
     "J12": {
       "name": "visitor lands on the marketing home page",
       "entries": [
-        { "name": "Home", "file": "src/app/page.tsx" }
+        {
+          "name": "Home",
+          "file": "src/app/page.tsx"
+        }
       ],
-      "route": ["PAGE /"]
+      "route": [
+        "PAGE /"
+      ]
     },
     "J13": {
       "name": "server boots with a safe production config",
       "entries": [
-        { "name": "register", "file": "src/instrumentation.ts" }
+        {
+          "name": "register",
+          "file": "src/instrumentation.ts"
+        }
       ],
-      "route": ["LIFESPAN instrumentation.register"]
+      "route": [
+        "LIFESPAN instrumentation.register"
+      ]
     },
     "J14": {
       "name": "operator seeds a staff account from the CLI",
       "entries": [
-        { "name": "main", "file": "scripts/seed-staff.ts" },
-        { "name": "ensureDemoOrg", "file": "src/lib/seed.ts" }
+        {
+          "name": "main",
+          "file": "scripts/seed-staff.ts"
+        },
+        {
+          "name": "ensureDemoOrg",
+          "file": "src/lib/seed.ts"
+        }
       ],
-      "route": ["CLI npx tsx scripts/seed-staff.ts"]
+      "route": [
+        "CLI npx tsx scripts/seed-staff.ts"
+      ]
     }
   },
   "spot_checks": {
