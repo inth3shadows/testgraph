@@ -1,6 +1,6 @@
 {
   "target": "honeyslate",
-  "note": "Hand-authored journey registry. Entries are route handlers, the scheduler sweep, and the app lifespan that starts it. name+file resolves node ids at run time.\n\nBLIND SPOTS, DECLARED 2026-08-06 (issue #62) — see the structured `blind_spots` key below; this paragraph is the reasoning, that key is the machine-readable list. This registry previously declared none, which is not the same as having none — and because it is `approved: true`, the UNAPPROVED REGISTRY banner that warns 'a NONE may mean not-registered rather than not-affected' never fires for it. honeyslate is the only repo whose numbers are quoted as ACCURACY rather than sizes, so an undeclared gap costs more here than anywhere else.\n\nFound by seeding every node of each product file and intersecting the impacted closure with the entry map: 17 of 38 product files reached no journey. Three real gaps are now closed: (1) `app/main.py` — `lifespan` calls `scheduler.start()`, so breaking it stops the auto-scheduler, yet nothing selected J8 for a change to it; `lifespan` is now a J8 entry. `create_app` was deliberately NOT added: it produces an identical fan-out, so it buys nothing for selection while widening the ast_oracle. (2) `routers/google.py` — a LIVE wired router (`app.include_router(google.router)`) serving `/api/google/status` and `/api/google/selftest`; its two operator diagnostics are now J7 entries, since they belong to the same Google integration as `gcal_push` rather than to a journey of their own. (3) `delete_task` — a live `@router.delete(\"/tasks/{task_id}\")` handler that TECHNICAL.md already listed as missed by this registry, and that the file-level sweep could not see because `routers/tasks.py` is otherwise covered. Added to J3, which costs no new fan-out: that file is already reached by J1-J5.\n\nKNOWN COST of the J8 change, measured and accepted: `impacted_closure` expands a file node into every symbol it contains, so `file:app/main.py` enters the closure of every router. Five files that previously did not name J8 now do — `routers/tasks.py`, `routers/auth.py`, `auth_service.py`, `schemas.py`, `scheduling.py` — at confidence 0.9, which is above LOW_CONFIDENCE and therefore NOT flagged `verify_manually`. That is a real precision cost paid to close a real recall gap, and this project ranks recall first. It is invisible to `harness/accuracy.py` because J8 was already selected on every one of its five labeled commits.",
+  "note": "Hand-authored journey registry. Entries are route handlers, the scheduler sweep, and the app lifespan that starts it. name+file resolves node ids at run time.\n\nBLIND SPOTS, DECLARED 2026-08-06 (issue #62) — see the structured `blind_spots` key below; this paragraph is the reasoning, that key is the machine-readable list. This registry previously declared none, which is not the same as having none — and because it is `approved: true`, the UNAPPROVED REGISTRY banner that warns 'a NONE may mean not-registered rather than not-affected' never fires for it. honeyslate is the only repo whose numbers are quoted as ACCURACY rather than sizes, so an undeclared gap costs more here than anywhere else.\n\nFound by seeding every node of each product file and intersecting the impacted closure with the entry map: 17 of 38 product files reached no journey. Three real gaps are now closed: (1) `app/main.py` — `lifespan` calls `scheduler.start()`, so breaking it stops the auto-scheduler, yet nothing selected J8 for a change to it; `lifespan` is now a J8 entry. `create_app` was deliberately NOT added: it produces an identical fan-out, so it buys nothing for selection while widening the ast_oracle. (2) `routers/google.py` — a LIVE wired router (`app.include_router(google.router)`) serving `/api/google/status` and `/api/google/selftest`; its two operator diagnostics are now J7 entries, since they belong to the same Google integration as `gcal_push` rather than to a journey of their own. (3) `delete_task` — a live `@router.delete(\"/tasks/{task_id}\")` handler that TECHNICAL.md already listed as missed by this registry, and that the file-level sweep could not see because `routers/tasks.py` is otherwise covered. Added to J3, which costs no new fan-out: that file is already reached by J1-J5.\n\nKNOWN COST of the J8 change, measured and accepted: `impacted_closure` expands a file node into every symbol it contains, so `file:app/main.py` enters the closure of every router. Five files that previously did not name J8 now do — `routers/tasks.py`, `routers/auth.py`, `auth_service.py`, `schemas.py`, `scheduling.py` — at confidence 0.9, which is above LOW_CONFIDENCE and therefore NOT flagged `verify_manually`. That is a real precision cost paid to close a real recall gap, and this project ranks recall first. It is invisible to `harness/accuracy.py` because J8 was already selected on every one of its five labeled commits.\n\nSCHEMA PIN MOVED 8 -> 9 on 2026-09-08, after verifying the queries rather than just the number. Evidence, in the order it was gathered: (1) the upstream migration is purely ADDITIVE — codegraph src/db/migrations.ts version 9 is `ALTER TABLE files ADD COLUMN generated INTEGER NOT NULL DEFAULT 0` plus a partial index on it, with no column dropped, renamed or re-typed, and its own comment says migrated rows stay 0 until a re-index because the flag is derived from file CONTENT the migration cannot see. (2) A trailing column can only hurt a reader that accesses results positionally: there is NO `SELECT *` anywhere in testgraph/ or harness/, and both queries that touch `files` name their columns (`SELECT path, indexed_at` and `SELECT path, content_hash`, integrity.py:28,57). (3) All eleven db.py/integrity.py read paths were run against a live schema-9 index — nodes_for_lines, nodes_in_file, file_node_id, closure_files, impacted_closure with and without reasons, caller_edge_count, top_fanin_nodes, resolve_symbol, refresh_ambiguous_names, stale_by_mtime — 11/11 with no error. (4) End-to-end `select` at pin 9 against all three registered repos returned sane answers, not just non-errors: testgraph 26 seeds/176 impacted/4 journeys, honeyslate 5/422/8, signedintake 39/384/11. NOT COVERED, and worth knowing: the test fixtures write `schema_versions` = 8 (tests/test_core.py:40, tests/test_propose.py:101,311), so the suite exercises the PIN LOGIC but never a schema-9 shaped database. The verification above is the only thing standing behind this bump; a fixture at 9 would be better and is deliberately left as separate work, since the drift tests construct explicit mismatches and changing the base number moves their meaning too. The migration was NOT caused by any single sync: all 33 codegraph indexes on this box read schema 9, and the ones nobody touched were rewritten in a batch at 19:57, so this was a codegraph upgrade, not a per-repo action.",
   "blind_spots": [
     "app/cli.py — management CLI (seed-users, magic-link, digest, add-types). CLI entry points are the first item on testgraph.propose's own blind-spot list; signedintake and testgraph declare the same class. `digest` is a mailer with no HTTP surface at all.",
     "alembic/env.py and alembic/versions/*.py — schema migrations, no runtime journey.",
@@ -8,36 +8,136 @@
   ],
   "approved": true,
   "journeys": {
-    "J1": {"name": "submit task",   "entries": [{"name": "create_task", "file": "routers/tasks.py"}]},
-    "J2": {"name": "browse tasks",  "entries": [
-      {"name": "list_tasks", "file": "routers/tasks.py"},
-      {"name": "get_task", "file": "routers/tasks.py"},
-      {"name": "list_task_types", "file": "routers/tasks.py"}]},
-    "J3": {"name": "edit task",     "entries": [
-      {"name": "patch_task", "file": "routers/tasks.py"},
-      {"name": "delete_task", "file": "routers/tasks.py"}]},
-    "J4": {"name": "reschedule",    "entries": [{"name": "reschedule_task", "file": "routers/tasks.py"}]},
-    "J5": {"name": "comments",      "entries": [
-      {"name": "list_comments", "file": "routers/tasks.py"},
-      {"name": "add_comment", "file": "routers/tasks.py"}]},
-    "J6": {"name": "auth / sign-in", "entries": [
-      {"name": "mint_magic_link", "file": "routers/auth.py"},
-      {"name": "request_link", "file": "routers/auth.py"},
-      {"name": "consume", "file": "routers/auth.py"},
-      {"name": "logout", "file": "routers/auth.py"},
-      {"name": "me", "file": "routers/auth.py"}]},
-    "J7": {"name": "gcal sync",     "entries": [
-      {"name": "gcal_push", "file": "routers/webhooks.py"},
-      {"name": "google_status", "file": "routers/google.py"},
-      {"name": "google_selftest", "file": "routers/google.py"}]},
-    "J8": {"name": "auto-scheduler", "entries": [
-      {"name": "sweep", "file": "scheduler.py"},
-      {"name": "start", "file": "scheduler.py"},
-      {"name": "lifespan", "file": "app/main.py"}]}
+    "J1": {
+      "name": "submit task",
+      "entries": [
+        {
+          "name": "create_task",
+          "file": "routers/tasks.py"
+        }
+      ]
+    },
+    "J2": {
+      "name": "browse tasks",
+      "entries": [
+        {
+          "name": "list_tasks",
+          "file": "routers/tasks.py"
+        },
+        {
+          "name": "get_task",
+          "file": "routers/tasks.py"
+        },
+        {
+          "name": "list_task_types",
+          "file": "routers/tasks.py"
+        }
+      ]
+    },
+    "J3": {
+      "name": "edit task",
+      "entries": [
+        {
+          "name": "patch_task",
+          "file": "routers/tasks.py"
+        },
+        {
+          "name": "delete_task",
+          "file": "routers/tasks.py"
+        }
+      ]
+    },
+    "J4": {
+      "name": "reschedule",
+      "entries": [
+        {
+          "name": "reschedule_task",
+          "file": "routers/tasks.py"
+        }
+      ]
+    },
+    "J5": {
+      "name": "comments",
+      "entries": [
+        {
+          "name": "list_comments",
+          "file": "routers/tasks.py"
+        },
+        {
+          "name": "add_comment",
+          "file": "routers/tasks.py"
+        }
+      ]
+    },
+    "J6": {
+      "name": "auth / sign-in",
+      "entries": [
+        {
+          "name": "mint_magic_link",
+          "file": "routers/auth.py"
+        },
+        {
+          "name": "request_link",
+          "file": "routers/auth.py"
+        },
+        {
+          "name": "consume",
+          "file": "routers/auth.py"
+        },
+        {
+          "name": "logout",
+          "file": "routers/auth.py"
+        },
+        {
+          "name": "me",
+          "file": "routers/auth.py"
+        }
+      ]
+    },
+    "J7": {
+      "name": "gcal sync",
+      "entries": [
+        {
+          "name": "gcal_push",
+          "file": "routers/webhooks.py"
+        },
+        {
+          "name": "google_status",
+          "file": "routers/google.py"
+        },
+        {
+          "name": "google_selftest",
+          "file": "routers/google.py"
+        }
+      ]
+    },
+    "J8": {
+      "name": "auto-scheduler",
+      "entries": [
+        {
+          "name": "sweep",
+          "file": "scheduler.py"
+        },
+        {
+          "name": "start",
+          "file": "scheduler.py"
+        },
+        {
+          "name": "lifespan",
+          "file": "app/main.py"
+        }
+      ]
+    }
   },
-  "codegraph_schema_version": 8,
+  "codegraph_schema_version": 9,
   "spot_checks": {
-    "get_settings": {"min_caller_edges": 10, "file": "config.py"},
-    "Task": {"min_caller_edges": 8, "file": "models.py"}
+    "get_settings": {
+      "min_caller_edges": 10,
+      "file": "config.py"
+    },
+    "Task": {
+      "min_caller_edges": 8,
+      "file": "models.py"
+    }
   }
 }
