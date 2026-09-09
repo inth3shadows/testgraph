@@ -205,6 +205,30 @@ class RenderTest(unittest.TestCase):
         text = hook.render(_result(0), SIGNEDINTAKE)
         self.assertIn("no journeys selected", text)
 
+    def test_a_none_over_a_trust_warning_is_not_called_a_clean_bill(self):
+        """Issue #75, and the phrasing is the whole fix.
+
+        "no journeys selected" is a claim about the tool and is always true.
+        What used to follow it — "no product-behavior change detected" — is a
+        claim about the PRODUCT, and a reader who skims the headline and skips
+        the WARN lines below it gets a clean bill on the run where it is most
+        wrong. That is exactly what happened on the commit adding mcp.py.
+        """
+        text = hook.render(
+            _result(0, warnings=["33 source file(s) newer than the index"]),
+            SIGNEDINTAKE,
+        )
+        self.assertIn("no journeys selected", text)
+        self.assertIn("UNKNOWN, not verified-safe", text)
+        self.assertNotIn("no product-behavior change detected", text)
+
+    def test_a_clean_none_keeps_the_original_wording(self):
+        """Softening every NONE would train the reader to ignore the qualifier."""
+        text = hook.render(
+            _result(0, warnings=[], entries_unchecked=[]), SIGNEDINTAKE
+        )
+        self.assertIn("no product-behavior change detected", text)
+
 
 class NeverBlocksTest(unittest.TestCase):
     """Rule 1: every path exits 0. A hook that can fail a push gets uninstalled,

@@ -429,7 +429,59 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         impacted_symbols=len(impacted),
         journeys=journeys,
     )
+    result["unknown_because"] = none_is_unknown(result)
     return result
+
+
+def none_is_unknown(result):
+    """Reasons an empty journey list must be read as UNKNOWN, not as safe.
+
+    `journeys: []` is a claim about the PRODUCT — "nothing you changed reaches a
+    registered behavior". It is only that claim when nothing is telling the tool
+    its own input may be wrong. When something is, the honest answer is a claim
+    about the TOOL: it found nothing, and it cannot vouch for having looked
+    properly (issue #75).
+
+    Found by dogfooding: the pre-push hook printed `no journeys selected (no
+    product-behavior change detected)` on the commit that added `mcp.py` — a new
+    module, a new CLI surface, a new journey — with a staleness warning two lines
+    below it. Post-`codegraph sync` the same query returned 22 seeds and J7. The
+    warning fired; the headline still read as a clean bill.
+
+    Returns a list of short reason strings, empty when the NONE is trustworthy.
+    Non-empty is the signal; the strings are for display.
+
+    Every warning that can COEXIST with an empty journey list is a trust signal,
+    so `warnings` is taken wholesale rather than pattern-matched. The one warning
+    that is not — unbounded impact — appends every journey in the registry, so it
+    can never reach here. Being conservative in this direction is the recall-first
+    choice: a false UNKNOWN costs a re-read, a false ALL-CLEAR costs the bug.
+
+    Deliberately NOT blocking, and deliberately not a `warnings` entry.
+    `integrity.py` argues at length that mtime staleness is wrong often enough
+    (any `git checkout`) that nothing may be DECIDED on it — this decides nothing
+    and changes no exit code. It only stops the renderer from making a claim the
+    result does not support.
+    """
+    if result.get("journeys"):
+        return []
+    reasons = []
+    if result.get("warnings"):
+        n = len(result["warnings"])
+        reasons.append(
+            f"{n} trust warning(s) above — the index may not see this change"
+        )
+    if result.get("closure_confined"):
+        reasons.append(
+            f"{len(result['closure_confined'])} changed file(s) whose impact "
+            f"never left the file it started in"
+        )
+    if result.get("entries_unchecked"):
+        reasons.append(
+            f"{len(result['entries_unchecked'])} journey entry symbol(s) never "
+            f"verified against source — no parser for that file type"
+        )
+    return reasons
 
 
 def _render(result):
@@ -464,7 +516,19 @@ def _render(result):
             f"UNKNOWN, not verified-safe"
         )
     if not result["journeys"]:
-        lines.append("journeys to test: NONE (no product-behavior change detected)")
+        # Two different sentences, because they are two different claims. See
+        # `none_is_unknown`.
+        unknown = result.get("unknown_because") or none_is_unknown(result)
+        if unknown:
+            lines.append(
+                "journeys to test: NONE — but UNKNOWN, not verified-safe:"
+            )
+            for reason in unknown:
+                lines.append(f"    {reason}")
+        else:
+            lines.append(
+                "journeys to test: NONE (no product-behavior change detected)"
+            )
     else:
         lines.append(f"journeys to test ({len(result['journeys'])}), ranked:")
         for j in result["journeys"]:

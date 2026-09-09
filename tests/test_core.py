@@ -2009,5 +2009,97 @@ class ChangedFileContentDriftTests(unittest.TestCase):
         self.assertEqual({"J1"}, {j["id"] for j in res["journeys"]})
 
 
+class NoneMeansUnknownTests(unittest.TestCase):
+    """Issue #75: `journeys: []` is a claim about the PRODUCT, and only earns
+    that when nothing says the tool's own input may be wrong.
+
+    Found by dogfooding, not constructed: the pre-push hook printed `no journeys
+    selected (no product-behavior change detected)` on the commit that added
+    testgraph/mcp.py — a new module, a new CLI surface, a new journey — with a
+    staleness warning two lines below. After `codegraph sync` the same query
+    returned 22 seeds and J7. The warning fired; the headline still read clean.
+    """
+
+    @staticmethod
+    def _result(**over):
+        base = {
+            "status": "OK", "base": "aaa", "head": "bbb",
+            "warnings": [], "entries_unchecked": [], "entry_drift": [],
+            "unresolved_journeys": [], "changed_files": ["a.py"],
+            "whole_file_changes": {}, "recall_degraded": False,
+            "closure_confined": [], "seed_symbols": 3,
+            "impacted_symbols": 9, "journeys": [],
+        }
+        base.update(over)
+        return base
+
+    def test_a_clean_none_is_still_a_finding_about_the_product(self):
+        """The wording only changes when something is actually wrong.
+
+        If every trust signal is quiet, NONE means what it always meant, and
+        softening it unconditionally would train the reader to ignore the
+        qualifier on the runs that matter.
+        """
+        res = self._result()
+        self.assertEqual([], sel.none_is_unknown(res))
+        self.assertIn("no product-behavior change detected", sel._render(res))
+
+    def test_a_none_over_a_trust_warning_is_unknown(self):
+        res = self._result(warnings=["33 source file(s) newer than the index"])
+        self.assertTrue(sel.none_is_unknown(res))
+        text = sel._render(res)
+        self.assertIn("UNKNOWN, not verified-safe", text)
+        self.assertNotIn("no product-behavior change detected", text)
+
+    def test_a_confined_closure_makes_a_none_unknown(self):
+        res = self._result(closure_confined=["testgraph/db.py"])
+        self.assertTrue(sel.none_is_unknown(res))
+
+    def test_an_unverified_entry_symbol_makes_a_none_unknown(self):
+        res = self._result(
+            entries_unchecked=[{"journey": "J1", "entry": "x", "file": "a.tsx"}]
+        )
+        self.assertTrue(sel.none_is_unknown(res))
+
+    def test_warnings_alongside_a_real_selection_are_not_unknown(self):
+        """The qualifier attaches to SILENCE, not to warnings in general.
+
+        A stale index under a non-empty journey list already shows its warnings
+        and its journeys; there is no missing claim to correct.
+        """
+        res = self._result(warnings=["stale"], journeys=[{"id": "J1"}])
+        self.assertEqual([], sel.none_is_unknown(res))
+
+    def test_the_reason_is_carried_on_the_result_for_non_cli_consumers(self):
+        """The MCP tool returns this dict verbatim.
+
+        An agent reading `journeys: []` has exactly the problem the renderer
+        has, so the signal has to live on the result rather than in the prose.
+        """
+        res = self._result(warnings=["stale"])
+        res["unknown_because"] = sel.none_is_unknown(res)
+        self.assertTrue(res["unknown_because"])
+        self.assertIn("index may not see this change", res["unknown_because"][0])
+
+    def test_select_populates_the_field(self):
+        """End-to-end: the key exists on a real select() result, always."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        db = _db_on_disk(tmp, build_fixture())
+        registry = _registry_file(tmp, {
+            "J1": {"name": "one",
+                   "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+        })
+        repo, run = _git_repo(tmp, {"app/svc.py": 22})
+        # _git_repo leaves a single commit, so HEAD~1 does not resolve yet.
+        with open(os.path.join(repo, "app", "svc.py"), "a") as fh:
+            fh.write("# touched\n")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "touch")
+        res = sel.select(repo, "HEAD~1", "HEAD", db, registry)
+        self.assertIn("unknown_because", res)
+        self.assertIsInstance(res["unknown_because"], list)
+
+
 if __name__ == "__main__":
     unittest.main()
