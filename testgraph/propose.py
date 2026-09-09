@@ -743,9 +743,14 @@ def main(argv=None):
         target = os.path.basename(os.path.dirname(repo)) if base == "main" else base
 
     result = propose(repo, db_path, target)
+    # Default into the REPO the draft describes, not into testgraph's own
+    # checkout. A registry is a claim about one repo, so it versions with that
+    # repo and travels with a clone — and the package-relative path it used to
+    # write to is `site-packages/journeys` on an installed wheel, which is not a
+    # place anyone would look for their own draft. Matches the read order in
+    # `registry.search_dirs`.
     out_path = args.out or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "journeys", f"{target}.draft.json",
+        args.repo, reg.REPO_JOURNEYS_SUBDIR, f"{target}.draft.json",
     )
     # A draft with no journeys is NOT written. It would be a valid, approvable
     # registry that answers a confident NONE for every change — the worst artifact

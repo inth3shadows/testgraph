@@ -14,7 +14,45 @@ def load(path):
         return json.load(f)
 
 
-JOURNEYS_DIR = os.path.join(os.path.dirname(__file__), "..", "journeys")
+# Where a registry lives, in search order. See `search_dirs`.
+#
+# This used to be the package-relative directory ALONE, which works only in a
+# source checkout and is silently useless anywhere else: the wheel ships
+# `testgraph/` and nothing beside it, so on a `pip install testgraph` the path
+# resolves to `site-packages/journeys`, which does not exist. Every repo then
+# answered "no journey registry found" forever — including through the MCP
+# server, which would have returned that to every agent that ever called it.
+# Measured on a real wheel install before this changed, not inferred.
+REPO_JOURNEYS_SUBDIR = os.path.join(".testgraph", "journeys")
+PACKAGE_JOURNEYS_DIR = os.path.join(os.path.dirname(__file__), "..", "journeys")
+JOURNEYS_DIR = PACKAGE_JOURNEYS_DIR  # kept: the name existing callers import
+
+ENV_JOURNEYS_DIR = "TESTGRAPH_JOURNEYS_DIR"
+
+
+def search_dirs(repo=None):
+    """Directories a registry may live in, most specific first.
+
+    1. `$TESTGRAPH_JOURNEYS_DIR` — the escape hatch, for a registry kept outside
+       the repo it describes (a monorepo, or a registry under review elsewhere).
+    2. `<repo>/.testgraph/journeys` — where a consumer's registry belongs. It
+       describes THAT repo, so it versions with it and travels with a clone.
+    3. The package-relative `journeys/` — this project's own checkout, where the
+       three dogfood registries live. Nonexistent in an installed wheel, which is
+       exactly why it is last rather than only.
+
+    Order is first-hit-wins, not merge: two registries claiming one target is a
+    conflict, and picking the more specific one is the only answer that does not
+    depend on filename sort order.
+    """
+    dirs = []
+    env = os.environ.get(ENV_JOURNEYS_DIR)
+    if env:
+        dirs.append(env)
+    if repo:
+        dirs.append(os.path.join(repo, REPO_JOURNEYS_SUBDIR))
+    dirs.append(PACKAGE_JOURNEYS_DIR)
+    return dirs
 
 
 def repo_name(repo):
@@ -46,23 +84,46 @@ def resolve_for_repo(repo, journeys_dir=None):
     than guessing — a WRONG registry is worse than no registry, because every
     downstream check then reports disagreement with the code as staleness. That
     was the real behaviour before this existed: `select --repo <signedintake>`
-    silently loaded honeyslate's registry and blamed the index."""
-    directory = journeys_dir or JOURNEYS_DIR
+    silently loaded honeyslate's registry and blamed the index.
+
+    `journeys_dir` searches that directory and NOTHING else — an explicit path is
+    an instruction, not a hint. With it unset, `search_dirs(repo)` is walked in
+    order and the first target match wins.
+
+    The target check applies to every directory, including the repo's own
+    `.testgraph/journeys`. A registry copied from another project and left
+    unedited is precisely the case that used to blame the index for its own
+    mismatch, and being repo-local does not make it right."""
+    directories = [journeys_dir] if journeys_dir else search_dirs(repo)
     name = repo_name(repo)
-    if not name or not os.path.isdir(directory):
+    if not name:
         return None
-    for fname in sorted(os.listdir(directory)):
-        if not fname.endswith(".json"):
+    for directory in directories:
+        if not os.path.isdir(directory):
             continue
-        path = os.path.join(directory, fname)
-        try:
-            with open(path) as f:
-                target = json.load(f).get("target")
-        except (OSError, ValueError):
-            continue
-        if target == name:
-            return path
+        for fname in sorted(os.listdir(directory)):
+            if not fname.endswith(".json"):
+                continue
+            path = os.path.join(directory, fname)
+            try:
+                with open(path) as f:
+                    target = json.load(f).get("target")
+            except (OSError, ValueError):
+                continue
+            if target == name:
+                return path
     return None
+
+
+def where_it_looked(repo):
+    """The search path, rendered for a 'not found' message.
+
+    A registry that cannot be found is the most common way this tool does
+    nothing, and "no journey registry found" without saying WHERE it looked is
+    unactionable — the reader cannot tell a missing file from a target typo from
+    a directory the installed package can never see.
+    """
+    return ", ".join(os.path.normpath(d) for d in search_dirs(repo))
 
 
 def resolve_entries(conn, registry):

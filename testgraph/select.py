@@ -498,10 +498,12 @@ def main(argv=None):
     # resulting disagreement as a stale index — a confidently wrong diagnosis.
     registry_path = args.registry or reg.resolve_for_repo(args.repo)
     if registry_path is None:
+        name = reg.repo_name(args.repo)
         print(
-            f"no journey registry found for repo `{reg.repo_name(args.repo)}` "
-            f"({args.repo}) — add journeys/<name>.json with \"target\": "
-            f"\"{reg.repo_name(args.repo)}\", draft one with `python3 -m "
+            f"no journey registry found for repo `{name}` ({args.repo}).\n"
+            f"  looked in: {reg.where_it_looked(args.repo)}\n"
+            f"  add {reg.REPO_JOURNEYS_SUBDIR}/<name>.json with "
+            f"\"target\": \"{name}\", draft one with `python3 -m "
             f"testgraph.propose --repo {args.repo}`, or pass --registry",
             file=sys.stderr,
         )

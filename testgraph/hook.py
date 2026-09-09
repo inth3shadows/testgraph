@@ -141,7 +141,8 @@ def run(repo, base, head, registry_path=None, caller="pre-push"):
         record["status"] = "NO_REGISTRY"
         return (
             f"testgraph[{reg.repo_name(repo)}]: no journey registry for this repo "
-            f"— draft one with `python3 -m testgraph.propose --repo {repo}`",
+            f"— looked in {reg.where_it_looked(repo)}; draft one with "
+            f"`python3 -m testgraph.propose --repo {repo}`",
             record,
         )
 
