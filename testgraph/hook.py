@@ -59,10 +59,23 @@ def render(result, repo, more_cmd=None):
 
     journeys = result.get("journeys", [])
     if not journeys:
-        lines = [
-            f"testgraph[{name}]: no journeys selected for {span} "
-            f"(no product-behavior change detected)"
-        ]
+        # "no journeys selected" is a claim about the tool and is always true;
+        # what follows it is a claim about the PRODUCT and is only sometimes
+        # earned. See select.none_is_unknown (issue #75) — a NONE printed over a
+        # staleness warning read as a clean bill on the one push where it was
+        # most wrong.
+        unknown = result.get("unknown_because") or sel.none_is_unknown(result)
+        if unknown:
+            lines = [
+                f"testgraph[{name}]: no journeys selected for {span} — "
+                f"UNKNOWN, not verified-safe:"
+            ]
+            lines.extend(f"  ? {reason}" for reason in unknown)
+        else:
+            lines = [
+                f"testgraph[{name}]: no journeys selected for {span} "
+                f"(no product-behavior change detected)"
+            ]
     else:
         lines = [
             f"testgraph[{name}]: {len(journeys)} journey(s) this push could break, "
