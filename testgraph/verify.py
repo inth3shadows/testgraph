@@ -113,6 +113,33 @@ def validate(conn, registry, trace, verdicts):
     return credited, unvalidated, per_journey
 
 
+def _summary(repo, head, selection, **extra):
+    """Every exit from `run` goes through here.
+
+    The three returns — refused, nothing-selected, and the full run — used to
+    build their dicts independently, and the short two omitted `repo`, so the
+    report rendered `testgraph verify[?]` for a NONE answer. Cosmetic in the
+    text; not cosmetic in `--json`, where a consumer reading `summary["repo"]`
+    gets a KeyError on exactly the quiet runs it is most likely to be
+    aggregating. A shared shape is the fix, not a fourth copy of the key."""
+    base = {
+        "repo": reg.repo_name(repo),
+        "commit": ledger.resolve_commit(repo, head),
+        "selection": selection,
+        "journeys": [],
+        "marker_expression": None,
+        "collected": 0,
+        "credited": {},
+        "unvalidated": [],
+        "per_journey": {},
+        "uncovered": [],
+        "rows_written": 0,
+        "pytest_exit": None,
+    }
+    base.update(extra)
+    return base
+
+
 def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         pytest_args=(), append=None, _runner=None):
     """Select, run the declared tests, validate the declarations, report.
@@ -137,7 +164,7 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     if selection.get("status") == "BLOCKED" or selection.get("blocking"):
         # The index is not trustworthy. Running tests off it would produce a
         # verdict about a journey set chosen from a graph the guard refused.
-        return {"selection": selection, "refused": True}, None
+        return _summary(repo, head, selection, refused=True), None
 
     # `select` returns journey dicts keyed `id` (with name/rank/confidence);
     # the plain-string form is what a caller passing a hand-built selection uses.
@@ -147,9 +174,7 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     conn = dbmod.connect(db_path)
 
     if not journeys:
-        return {"selection": selection, "journeys": [], "collected": 0,
-                "credited": {}, "unvalidated": [], "per_journey": {},
-                "uncovered": [], "rows_written": 0, "pytest_exit": None}, None
+        return _summary(repo, head, selection), None
 
     expr = marker_expression(journeys)
     with tempfile.TemporaryDirectory() as tmp:
@@ -191,20 +216,19 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         if append(row):
             written.append(row)
 
-    return {
-        "selection": selection,
-        "journeys": journeys,
-        "marker_expression": expr,
-        "collected": len(verdicts),
-        "credited": credited,
-        "unvalidated": unvalidated,
-        "per_journey": {k: sorted(v) for k, v in per_journey.items()},
-        "uncovered": uncovered,
-        "rows_written": len(written),
-        "pytest_exit": getattr(proc, "returncode", None),
-        "commit": sha,
-        "repo": reg.repo_name(repo),
-    }, None
+    return _summary(
+        repo, head, selection,
+        journeys=journeys,
+        marker_expression=expr,
+        collected=len(verdicts),
+        credited=credited,
+        unvalidated=unvalidated,
+        per_journey={k: sorted(v) for k, v in per_journey.items()},
+        uncovered=uncovered,
+        rows_written=len(written),
+        pytest_exit=getattr(proc, "returncode", None),
+        commit=sha,
+    ), None
 
 
 def exit_code(summary):
@@ -232,7 +256,8 @@ def exit_code(summary):
 
 def render(summary, registry=None):
     if summary.get("refused"):
-        lines = ["testgraph verify: REFUSED — the index is not trustworthy"]
+        lines = [f"testgraph verify[{summary.get('repo', '?')}]: REFUSED — "
+                 f"the index is not trustworthy"]
         lines += [f"  BLOCKED: {b}"
                   for b in summary["selection"].get("blocking", [])]
         lines.append("  No tests were run. A verdict off a graph the guard "
