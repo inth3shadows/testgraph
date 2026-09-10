@@ -461,6 +461,120 @@ class IntegrityTests(unittest.TestCase):
         blocking, _ = integrity.check(self.conn, "/nonexistent", {})
         self.assertTrue(any("pending" in b for b in blocking))
 
+    # --- stale edges (#85) -------------------------------------------------
+    #
+    # The gap every other check in this class is blind to. `codegraph sync`
+    # re-extracts CHANGED FILES ONLY, so when the extractor itself changes, the
+    # edges it produced for unchanged files are never re-derived. Measured on
+    # this repo: an index synced two hours AFTER the fixed extractor was
+    # deployed still carried all seven of #66's fabricated `ledger.append`
+    # edges, because none of those files had changed. `stale_by_mtime` cannot
+    # see it and never could — it asks whether a FILE changed, and every file
+    # whose edges were wrong was, by construction, unchanged.
+
+    def _with_extraction(self, value):
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS project_metadata"
+            "(key TEXT, value TEXT, updated_at INT)"
+        )
+        self.conn.execute(
+            "INSERT INTO project_metadata VALUES "
+            "('indexed_with_extraction_version', ?, 0)",
+            (value,),
+        )
+        return self.conn
+
+    def _extraction_warnings(self, warnings):
+        return [w for w in warnings if "extraction version" in w]
+
+    def test_an_index_older_than_the_pin_warns_and_names_index_not_sync(self):
+        self._with_extraction("25")
+        blocking, warnings = integrity.check(
+            self.conn, "/nonexistent", {}, schema_pin=8, extraction_pin=26
+        )
+        self.assertEqual(blocking, [], "stale edges degrade recall, not trust "
+                                       "in the schema — this must not block")
+        found = self._extraction_warnings(warnings)
+        self.assertEqual(len(found), 1, warnings)
+        # The remedy is the whole point: `sync` is what CAUSED this, so a
+        # warning that suggests it would send the reader in a circle.
+        self.assertIn("codegraph index", found[0])
+        self.assertIn("NOT sync", found[0])
+
+    def test_a_stale_edge_warning_makes_an_empty_answer_read_as_unknown(self):
+        """The teeth. `none_is_unknown` takes warnings wholesale (#75), so this
+        check needs no special wiring to matter: with it firing, `journeys: []`
+        stops reading as a clean bill. Without that, a stale-edge index answers
+        NONE with STATUS OK for a change it should have flagged — which is the
+        exact failure this project exists to prevent."""
+        self._with_extraction("25")
+        _blocking, warnings = integrity.check(
+            self.conn, "/nonexistent", {}, schema_pin=8, extraction_pin=26
+        )
+        reasons = sel.none_is_unknown({"journeys": [], "warnings": warnings})
+        self.assertTrue(reasons, "an empty answer off a stale-edge index still "
+                                 "read as safe")
+
+    def test_an_index_newer_than_the_pin_says_the_pin_is_behind(self):
+        """The benign direction, and it must not read like the dangerous one.
+        Fresher edges than the registry was pinned against are fine; the fix is
+        to bump the pin, not to rebuild the index."""
+        self._with_extraction("27")
+        _blocking, warnings = integrity.check(
+            self.conn, "/nonexistent", {}, schema_pin=8, extraction_pin=26
+        )
+        found = self._extraction_warnings(warnings)
+        self.assertEqual(len(found), 1, warnings)
+        self.assertIn("the pin is behind", found[0])
+        self.assertNotIn("NOT sync", found[0])
+
+    def test_a_matching_extraction_pin_is_silent(self):
+        """An always-on warning trains people to ignore the channel, which
+        would cost the stale-file warning next to it as well."""
+        self._with_extraction("26")
+        _blocking, warnings = integrity.check(
+            self.conn, "/nonexistent", {}, schema_pin=8, extraction_pin=26
+        )
+        self.assertEqual(self._extraction_warnings(warnings), [])
+
+    def test_an_unpinned_extraction_version_asks_for_the_pin(self):
+        """Same shape as the schema pin: the remedy always clears it, so this
+        cannot become the permanent warning that `unchecked_entries` documents."""
+        self._with_extraction("26")
+        _blocking, warnings = integrity.check(
+            self.conn, "/nonexistent", {}, schema_pin=8
+        )
+        found = self._extraction_warnings(warnings)
+        self.assertEqual(len(found), 1, warnings)
+        self.assertIn("codegraph_extraction_version", found[0])
+        self.assertIn("26", found[0])
+
+    def test_a_pin_against_an_index_that_records_nothing_warns(self):
+        """An older codegraph never wrote the row. Silence would let a pinned
+        registry believe it was checking something it was not."""
+        _blocking, warnings = integrity.check(
+            self.conn, "/nonexistent", {}, schema_pin=8, extraction_pin=26
+        )
+        found = self._extraction_warnings(warnings)
+        self.assertEqual(len(found), 1, warnings)
+        self.assertIn("records none", found[0])
+
+    def test_no_pin_and_no_recorded_version_is_silent(self):
+        """The pre-#85 world. Nothing to say and nobody asked."""
+        _blocking, warnings = integrity.check(self.conn, "/nonexistent", {},
+                                              schema_pin=8)
+        self.assertEqual(self._extraction_warnings(warnings), [])
+
+    def test_extraction_version_survives_an_index_without_the_table(self):
+        """`db.extraction_version` runs against whatever codegraph wrote,
+        including versions predating `project_metadata`. A traceback here would
+        take down the pre-push hook, which must never fail a push."""
+        self.assertIsNone(dbmod.extraction_version(self.conn))
+
+    def test_a_non_numeric_extraction_version_is_none_not_a_crash(self):
+        self._with_extraction("not-a-number")
+        self.assertIsNone(dbmod.extraction_version(self.conn))
+
     def test_matching_schema_pin_passes(self):
         blocking, warnings = integrity.check(
             self.conn, "/nonexistent", {}, schema_pin=8

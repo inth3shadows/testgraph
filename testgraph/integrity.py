@@ -68,7 +68,8 @@ def content_drift(conn, repo_root, paths):
     return drifted
 
 
-def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None):
+def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None,
+          extraction_pin=None):
     blocking, warnings = [], []
 
     # 0. schema pin (plan risk R1). codegraph's SQLite layout is an internal
@@ -92,6 +93,72 @@ def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None):
             f"codegraph schema {found} != pinned {schema_pin} — column semantics "
             f"may have changed; re-verify testgraph's queries against the new "
             f"schema, then update the registry pin"
+        )
+
+    # 0b. STALE EDGES — the gap every other check here is blind to (issue #85).
+    #
+    #     `sync` re-extracts CHANGED FILES ONLY. When the EXTRACTOR changes, the
+    #     edges it previously produced for unchanged files are never re-derived,
+    #     so an index can be newer than a fix and contain none of its output,
+    #     indefinitely. Measured here: the fixed extractor became the default at
+    #     18:12, the index was synced at 20:40, and it still carried all seven of
+    #     #66's fabricated `ledger.append` edges. A fresh `codegraph index` of
+    #     the same commit had none.
+    #
+    #     Check 2 below cannot see this and never could. It asks whether a FILE
+    #     changed; every file whose edges were wrong was, by construction,
+    #     unchanged. There is no file-level check that catches an edge produced
+    #     by a superseded reader of an unchanged file.
+    #
+    #     WARN, never block. A stale-edge index still answers — it answers
+    #     NARROWLY, which is a recall risk, not corruption. The teeth are
+    #     `select.none_is_unknown`, which takes warnings wholesale: with this
+    #     firing, an empty journey list reads UNKNOWN instead of as a clean bill.
+    #     That is the whole point, and it is the #75 fix doing the work.
+    #
+    #     Pinned in the registry rather than read from the `codegraph` binary.
+    #     `codegraph status --json` does expose the comparison already
+    #     (`builtWithExtractionVersion` / `currentExtractionVersion`, and even a
+    #     `reindexRecommended` flag nothing acts on) — but `select` reads the
+    #     index directly and deliberately does not require the CLI on PATH (see
+    #     `db.py`'s module docstring), and shelling out here would add a
+    #     subprocess to a path the pre-push hook runs, which must never fail a
+    #     push.
+    #
+    #     The pin means "the extractor this index SHOULD be built with", not
+    #     "the one this registry's measurements were taken against". Those two
+    #     readings diverge and the operational one has to win: honeyslate's and
+    #     signedintake's numbers were measured against an extractor several
+    #     versions back, and pinning provenance would make the check silent on
+    #     exactly the two indexes that need it — both sat at 25 against a
+    #     current 26 when this was written.
+    extraction = dbmod.extraction_version(conn)
+    if extraction is None:
+        if extraction_pin is not None:
+            warnings.append(
+                f"registry pins codegraph extraction version {extraction_pin} "
+                f"but the index records none — cannot tell whether its edges "
+                f"predate the current extractor"
+            )
+    elif extraction_pin is None:
+        warnings.append(
+            f"codegraph extraction version unpinned (index built with "
+            f"{extraction}) — add \"codegraph_extraction_version\": "
+            f"{extraction} to the registry to detect stale edges"
+        )
+    elif extraction < extraction_pin:
+        warnings.append(
+            f"index built with codegraph extraction version {extraction}, "
+            f"registry pins {extraction_pin} — its edges may predate the "
+            f"current extractor and `sync` will NOT fix that (it re-extracts "
+            f"changed files only). Run `codegraph index` (NOT sync)"
+        )
+    elif extraction > extraction_pin:
+        warnings.append(
+            f"index built with codegraph extraction version {extraction}, "
+            f"newer than the registry's pin of {extraction_pin} — the edges "
+            f"are fine; the pin is behind. Re-verify and bump it to "
+            f"{extraction}"
         )
 
     # 1. pending unresolved refs (terminal 'failed' refs are external stdlib —

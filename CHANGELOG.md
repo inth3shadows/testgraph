@@ -58,6 +58,24 @@ below is on `main` or in the branch that introduced this file.
   handshake, against 62–69 MB for a typical SDK-based Python server. Register it
   per repo, not globally.
 
+- **Stale-edge integrity check** (#85). `codegraph sync` re-extracts changed
+  files only, so when the extractor itself changes, edges it produced for
+  *unchanged* files are never re-derived — an index can be newer than a fix
+  and contain none of its output, indefinitely. The existing freshness check
+  cannot see this and never could: it asks whether a **file** changed, and
+  every file whose edges are wrong is by construction unchanged.
+
+  Registries now pin `codegraph_extraction_version` alongside
+  `codegraph_schema_version`, and `integrity.check` warns when the index was
+  built by an older extractor, naming `codegraph index` (**not** `sync`, which
+  is what caused it). A warning rather than a block — stale edges cost recall,
+  not trust in the schema — but `select.none_is_unknown` takes warnings
+  wholesale, so an empty journey list off a stale-edge index now reads UNKNOWN
+  instead of as a clean bill.
+
+  It found two on its first run: honeyslate and signedintake were both at
+  extraction version 25 against a current 26.
+
 ### Changed
 
 - **The registry is looked for in the repo it describes.** Search order is

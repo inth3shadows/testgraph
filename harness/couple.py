@@ -146,6 +146,7 @@ def build_registry(draft, jids, target, note):
         "approved": False,
         "proposed_by": "harness/couple.py",
         "codegraph_schema_version": draft.get("codegraph_schema_version"),
+        "codegraph_extraction_version": draft.get("codegraph_extraction_version"),
         "journeys": journeys,
         "spot_checks": draft.get("spot_checks", {}),
         "spot_check_basis": draft.get("spot_check_basis"),

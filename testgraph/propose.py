@@ -636,6 +636,7 @@ def propose(repo, db_path, target):
         "proposed_by": "testgraph.propose",
         "journeys": journeys,
         "codegraph_schema_version": dbmod.schema_version(conn),
+        "codegraph_extraction_version": dbmod.extraction_version(conn),
         "spot_checks": checks,
         # Shipped beside the picks so the reviewer can swap one without
         # re-deriving anything -- the same "tool discovers, agent judges" split
