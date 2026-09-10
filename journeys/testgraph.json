@@ -8,7 +8,7 @@
     "append": {
       "min_caller_edges": 5,
       "file": "testgraph/ledger.py",
-      "suspended": "all 7 of its inbound edges are fabricated by codegraph's Python resolver (#66); the floor passes on them exactly as it would on real callers, so it detects nothing. Re-enable when a codegraph release carries the fix — re-verified live in 1.5.0 and 1.6.0 on 2026-09-03."
+      "suspended": "7 of its 8 inbound edges are fabricated by codegraph's Python resolver (#66), so the floor passes on them exactly as it would on real callers and detects nothing. MEASURED, not asserted: `python3 -m testgraph.reconcile` classified them on 2026-09-09 — 6 PHANTOM EDGE (confirmed), 1 out of footprint scope, and `pytest_adapter.write_outcomes` REAL (it binds `append` from `ledger.append`, so the edge at its shadowed call site happens to be true). Re-enable when a codegraph release carries the fix; still present in 1.5.0 and 1.6.0."
     },
     "StampError": {
       "min_caller_edges": 4,
