@@ -130,6 +130,7 @@
     }
   },
   "codegraph_schema_version": 9,
+  "codegraph_extraction_version": 26,
   "spot_checks": {
     "get_settings": {
       "min_caller_edges": 10,

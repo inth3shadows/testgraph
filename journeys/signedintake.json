@@ -4,6 +4,7 @@
   "approved": true,
   "proposed_by": "testgraph.propose",
   "codegraph_schema_version": 9,
+  "codegraph_extraction_version": 26,
   "journeys": {
     "J1": {
       "name": "claimant submits a signed form",

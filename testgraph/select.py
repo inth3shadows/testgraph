@@ -151,6 +151,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         repo,
         registry.get("spot_checks", {}),
         schema_pin=registry.get("codegraph_schema_version"),
+        extraction_pin=registry.get("codegraph_extraction_version"),
     )
     # Provenance of the registry itself. Everything below checks whether the
     # registry AGREES with the code; this checks whether anyone ever read it. A

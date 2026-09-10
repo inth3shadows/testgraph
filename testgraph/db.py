@@ -102,6 +102,35 @@ def schema_version(conn):
         return None
 
 
+def extraction_version(conn):
+    """The extractor version that BUILT this index, or None.
+
+    `project_metadata.indexed_with_extraction_version` — written by codegraph
+    at index time, and the only field that distinguishes an index whose edges
+    came from a superseded extractor. The release version does NOT: measured
+    on this repo, a synced index and a freshly built one of the same commit
+    both reported `indexed_with_version` 1.6.0 while their extraction versions
+    were 25 and 26, and the 25 index still carried seven fabricated edges a
+    fix had already removed (issue #85).
+
+    None on an older codegraph that never wrote the row — indistinguishable
+    from a codegraph that wrote it and shouldn't have, so callers warn rather
+    than block."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM project_metadata "
+            "WHERE key = 'indexed_with_extraction_version'"
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or row[0] is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
 def nodes_for_lines(conn, file_path, lo, hi):
     """Symbol nodes in `file_path` whose [start_line, end_line] overlaps the
     changed hunk [lo, hi]."""

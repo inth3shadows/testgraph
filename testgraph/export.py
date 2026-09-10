@@ -340,6 +340,7 @@ def main(argv=None):
         args.repo,
         registry.get("spot_checks", {}),
         schema_pin=registry.get("codegraph_schema_version"),
+        extraction_pin=registry.get("codegraph_extraction_version"),
     )
     # Live-drift BEFORE the print loop: appended after it, drift warnings reached
     # neither the terminal nor — on a run that then blocked — the file, discarding
