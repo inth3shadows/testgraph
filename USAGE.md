@@ -203,6 +203,15 @@ reported separately so it can never be quoted as a phantom count.
 Findings are reported, never suppressed inside `select`. A tool that quietly
 routed around its own audit would have no audit.
 
+**A phantom count that changes between two indexes of the same commit is about
+the index, not the code.** `codegraph sync` re-extracts changed files only, so
+edges produced by an older extractor survive a version upgrade indefinitely —
+measured on testgraph itself, where a synced index reported 6 fabricated
+`ledger.append` edges and a freshly built one reported none. The integrity
+guard catches a stale *file*; nothing catches a stale *edge*. If the findings
+look wrong, rebuild with `codegraph index` (not `sync`) and re-run before
+believing either answer.
+
 ## What to Do When Something Breaks
 
 - **"STATUS: BLOCKED — index not trustworthy"** — the underlying code map is

@@ -25,13 +25,20 @@ below is on `main` or in the branch that introduced this file.
   callee *only* through it.
 
   Run against testgraph itself, this measures the two limitations recorded at
-  0.1.0 rather than asserting them: 95 static misses across 7 journeys — the
-  alias blind spot, e.g. `hook.py`'s `reg.repo_name(repo)` has no inbound edge
-  at all — and 6 confirmed fabricated `ledger.append` edges, each a
-  `.append(...)` on a subscript or a call expression. J2/J3/J4/J6 depend on
-  `ledger.append` *only* through those, while J1 and J5 — which actually write
-  the ledger — do not select on it. Still present after the upstream fix for
-  that extractor bug.
+  0.1.0 rather than asserting them — and the answer differs by index, which is
+  the finding. On a **freshly built** index: 91 static misses across 7
+  journeys and **zero** phantom edges. The alias blind spot is still real
+  (`db.resolve_symbol` and `db.connect` have no inbound caller at all, so
+  `hook.py`'s `reg.repo_name(repo)` reaches no journey), but `ledger.append`'s
+  inbound edges are now all genuine — the extractor fix landed.
+
+  On the same commit's **incrementally synced** index, the same run reported 6
+  confirmed phantom `ledger.append` edges, every one hand-verified as a real
+  fabrication. `codegraph sync` re-extracts changed files only, so edges
+  produced by a superseded extractor survive a version upgrade indefinitely.
+  The integrity guard catches a *stale file*; it does not catch a stale
+  *edge*. A phantom count that drops to zero after a full `codegraph index`
+  is that defect showing itself.
 
 - **pytest adapter** (`python3 -m testgraph.pytest_adapter`) — runs a suite
   once and records which journeys it exercised, from the runtime trace rather
