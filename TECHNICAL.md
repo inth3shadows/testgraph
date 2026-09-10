@@ -347,9 +347,40 @@ exist and a stale excuse would suppress a real miss — this project's own failu
 mode, reintroduced inside its harness. Mismatches print as `STALE EXCUSES` and
 fail under `--strict-adjudications`.
 
-Current result: **20 sites, adjudicated recall 1.00, mean worst rank 3.17, mean
-3.33 of 8 journeys named.** Three disagreements, all adjudicated as oracle false
-positives with sole-caller evidence.
+**Current result, re-measured 2026-09-09 at base `3f46a54` on a freshly built
+index (codegraph extraction version 26): 20 sites, adjudicated recall 1.00,
+mean worst rank 2.64, mean 8.00 of 8 journeys named, 0 disagreements, VERDICT
+PASS.** Three `STALE EXCUSES` print — adjudicated at `1cd0385` — which fails
+under `--strict-adjudications` and is a provenance failure, not a recall one.
+
+Two things about that line are worth reading carefully rather than quoting.
+
+**`8.00 of 8` means recall is satisfied trivially here, so it measures nothing.**
+Selecting the whole registry at every site cannot drop a journey. At this base
+that is not a regression and not new: the A/B near the end of this document
+records *both* arms of an earlier registry comparison at `3f46a54` selecting 8
+of 8 as well. What the eval still measures at this base is RANK, and rank is
+where the movement is.
+
+**Worst rank halved, and the extractor is the variable.** The earlier figures on
+the same base, same 20 sites (the site spread is deterministic — no RNG), same
+registry semantics:
+
+| run | min recall | mean worst rank | mean journeys named |
+|---|---|---|---|
+| published, base `1cd0385` | 1.00 | 3.17 | 3.33 / 8 |
+| A/B, base `3f46a54`, extraction 25 | 1.00 | 6.00 | 8.00 / 8 |
+| **this run, base `3f46a54`, extraction 26** | **1.00** | **2.64** | **8.00 / 8** |
+
+Rows 2 and 3 are like-for-like; row 1 is at a different base and is kept only to
+show what the published number was. `seed_regressions.py` indexes once with
+whatever `~/.local/bin/codegraph` is, so row 2 was built by the pre-fix extractor
+and row 3 by the fixed one (issues #66 / #85). The genuinely affected journeys
+now rank roughly twice as high inside the same 8-journey selection.
+
+The older "3.17 / 3.33 of 8" figure appears nowhere else in this document; it
+was measured at base `1cd0385` and the target repo has since moved, which is the
+staleness mechanism the A/B section describes.
 
 ## Registry Rot (issue #19)
 
@@ -615,6 +646,44 @@ Measured effect on the labeled set: none. Recall 1.00 and mean precision 0.68 ar
 byte-identical with the degrade reverted, because no labeled commit exercises the
 zero-seed path (`0b4135f` already degraded via a whole-file change). The guard is
 justified by the reproduced failure in #29, not by a metric move.
+
+## Re-verification After the Extractor Fix (2026-09-09)
+
+Both harnesses were re-run after `codegraph` was rebuilt at extraction version
+26 (the #66 fix, deployed; and the stale-index rebuild from #85, which had left
+honeyslate and signedintake carrying edges from extraction 25). The question was
+whether a change to the edge extractor moved the published accuracy numbers.
+
+`harness/accuracy.py`, 5 labeled commits, per-commit worktree and index:
+
+```
+1cd0385  health         oracle []           selected []               R=1.00 P=1.00
+e86bada  auth           oracle [J6]         selected [J6,J8]          R=1.00 P=0.50
+9961ef5  scheduler      oracle [J8]         selected [J8]             R=1.00 P=1.00
+0b4135f  gcal timeout   oracle [J4,J7,J8]   selected [J1..J8]         R=1.00 P=0.38
+d6ed34a  task comments  oracle [J1..J5]     selected [J1..J5,J8]      R=1.00 P=0.83
+
+MIN RECALL 1.00   mean precision 0.68   S1 VERDICT PASS
+```
+
+Byte-identical to the published figures — the extractor change moved neither
+number on this set. `0b4135f` contributes nothing to the recall claim (selecting
+all 8 satisfies any oracle), so four of five rows carry the evidence.
+
+The seeded eval is where something did move: worst rank 6.00 -> 2.64 at the same
+base, table near line 350. Recall held at 1.00 with 0 disagreements.
+
+**What this does NOT establish.** Neither harness reads the rebuilt
+`honeyslate/main/.codegraph` — both build their own indexes in throwaway
+worktrees. So this confirms the CURRENT extractor still selects correctly; it is
+not a validation of the rebuilt index itself. That check is `integrity.check`'s
+extraction pin, which now returns silent on both repos, plus the four spot-check
+floors, which all pass on the rebuilt edges (`get_settings` 21 >= 10, `Task`
+23 >= 8, `db` 69 >= 55, `FormDef` 26 >= 16). Those floors were set against
+extraction-25 edges, so a rebuild that had removed fabricated inbound edges the
+way testgraph's `ledger.append` rebuild did would have dropped them below the
+floor and blocked. It did not — honeyslate and signedintake never carried the
+`append`-shaped defect, only the staleness.
 
 ## Path Confidence (B1)
 
@@ -1512,6 +1581,13 @@ journeys named" figures near line 350. Re-run, A/B at the same base:
 |---|---|---|---|---|
 | before, base `3f46a54` | 1.00 | 6.00 | **8.00 / 8** | PASS |
 | after, base `3f46a54` | 1.00 | 6.07 | **8.00 / 8** | PASS |
+| **re-run 2026-09-09, extraction 26** | **1.00** | **2.64** | **8.00 / 8** | **PASS** |
+
+The third row is not part of the registry A/B — it holds the registry fixed and
+changes the EXTRACTOR, after the fork's #66 fix and the stale-index rebuild
+(#85). Worth having beside the other two because it is the only line in this
+table where worst rank moved by more than a rounding error, and it moved the
+right way.
 
 This change moves worst rank by 0.07 and nothing else. **But note what the A/B exposed
 that has nothing to do with this change:** the published "3.33 of 8, worst rank 3.17" was
