@@ -196,6 +196,41 @@ class ExitCodeTests(unittest.TestCase):
         )
 
 
+class SummaryShapeTests(unittest.TestCase):
+    """Every exit from `run` carries the same keys.
+
+    The three returns used to build their dicts independently and the two short
+    ones omitted `repo`, so a NONE answer rendered `testgraph verify[?]`.
+    Cosmetic in the text, not in `--json`: a consumer reading `summary["repo"]`
+    got a KeyError on exactly the quiet runs it is most likely aggregating."""
+
+    KEYS = {"repo", "commit", "selection", "journeys", "marker_expression",
+            "collected", "credited", "unvalidated", "per_journey", "uncovered",
+            "rows_written", "pytest_exit"}
+
+    def test_the_empty_summary_carries_every_key(self):
+        got = verify._summary("/nonexistent", "HEAD", {"base": "a", "head": "b"})
+        self.assertTrue(self.KEYS <= set(got), self.KEYS - set(got))
+
+    def test_a_refused_summary_carries_them_too(self):
+        got = verify._summary("/nonexistent", "HEAD", {}, refused=True)
+        self.assertTrue(self.KEYS <= set(got), self.KEYS - set(got))
+        self.assertTrue(got["refused"])
+
+    def test_extras_override_the_defaults(self):
+        got = verify._summary("/nonexistent", "HEAD", {}, journeys=["J2"],
+                              collected=3)
+        self.assertEqual(got["journeys"], ["J2"])
+        self.assertEqual(got["collected"], 3)
+
+    def test_the_repo_name_reaches_a_none_answer(self):
+        summary = verify._summary("/tmp/some-repo", "HEAD",
+                                  {"base": "a", "head": "b", "warnings": []})
+        out = verify.render(summary, REGISTRY)
+        self.assertIn("some-repo", out)
+        self.assertNotIn("[?]", out)
+
+
 class RenderTests(unittest.TestCase):
     def test_uncovered_journeys_are_named_loudly_and_denied_a_pass(self):
         out = verify.render({
@@ -217,6 +252,7 @@ class RenderTests(unittest.TestCase):
     def test_a_refused_run_says_no_tests_were_run(self):
         out = verify.render({
             "refused": True,
+            "repo": "demo",
             "selection": {"blocking": ["index likely corrupt"]},
         })
         self.assertIn("REFUSED", out)
