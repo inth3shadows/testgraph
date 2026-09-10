@@ -207,7 +207,20 @@ def selection_row(record):
     return row
 
 
-def outcome_row(repo, commit, journey, verdict, note=None, ts=None):
+def outcome_row(repo, commit, journey, verdict, note=None, ts=None,
+                edge_provenance=None):
+    """One outcome row. `edge_provenance` names HOW this journey attribution
+    was arrived at, and is OMITTED rather than defaulted for the rows this
+    ledger has always carried.
+
+    That asymmetry is the point. Every row written before #12's Phase 4 came
+    from a human (or /autorun) asserting "J3 failed" — a claim with a person
+    behind it. `testgraph.pytest_adapter` writes rows INFERRED from a runtime
+    trace intersecting a journey's static footprint, which can be wrong in
+    ways a human's assertion cannot (a footprint is only as precise as the
+    graph under it). A reader that cannot tell the two apart would average a
+    measured claim together with an inferred one and report the result as one
+    number. Absence means human; a value names the machine that guessed."""
     row = {
         "kind": OUTCOME,
         "ts": int(ts if ts is not None else time.time()),
@@ -218,6 +231,8 @@ def outcome_row(repo, commit, journey, verdict, note=None, ts=None):
     }
     if note:
         row["note"] = note
+    if edge_provenance:
+        row["edge_provenance"] = edge_provenance
     return row
 
 
