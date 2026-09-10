@@ -247,12 +247,17 @@ def plugin_dir(start=None):
 
 
 def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
-        append=None, _runner=None):
+        append=None, trace_out=None, _runner=None):
     """Run the suite, attribute journeys from the trace, write the rows.
 
     Returns (summary, error). `error` is a string on any refusal; a suite whose
     tests FAIL is not an error — a red suite is exactly the signal this exists
-    to record."""
+    to record.
+
+    `trace_out` copies the raw tgtrace payload out of the temp dir before it is
+    discarded. `testgraph.reconcile` needs the trace itself, not this module's
+    reduction of it, and re-running a whole suite to get a second view of the
+    same run would compare two different runs."""
     registry_path = registry_path or reg.resolve_for_repo(repo)
     if registry_path is None:
         return None, (
@@ -313,6 +318,9 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
         import json
         with open(trace_path) as f:
             trace = json.load(f)
+        if trace_out:
+            with open(trace_out, "w") as f:
+                json.dump(trace, f, indent=1, sort_keys=True)
         verdicts = parse_junit(junit_path)
 
     conn = dbmod.connect(db_path)
@@ -420,6 +428,11 @@ def main(argv=None):
     )
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument(
+        "--trace-out",
+        default=None,
+        help="also write the raw tgtrace payload here, for testgraph.reconcile",
+    )
+    ap.add_argument(
         "pytest_args",
         nargs="*",
         help="passed through to pytest (e.g. tests/ -q -k foo)",
@@ -432,6 +445,7 @@ def main(argv=None):
         db_path=args.db,
         commit=args.commit,
         pytest_args=tuple(args.pytest_args),
+        trace_out=args.trace_out,
         # Refusing the write keeps `rows_written` truthful (0) rather than
         # counting rows that never reached the file — a dry run must not
         # report the same number a real one would.

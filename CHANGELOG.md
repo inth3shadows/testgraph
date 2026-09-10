@@ -14,6 +14,43 @@ below is on `main` or in the branch that introduced this file.
 
 ### Added
 
+- **`testgraph.reconcile`** — two-sided reconciliation of the static graph
+  against a real test run, classifying every disagreement as a **STATIC MISS**
+  (a symbol the journey's tests executed, outside its static footprint) or a
+  **PHANTOM EDGE** (a `calls` edge no syntax in the caller can denote, which
+  the run never exercised). Each defect carries its own burden of proof: a
+  trace proves presence and never absence, a source oracle proves absence of
+  support and never presence, so a phantom needs both witnesses and a static
+  miss needs only the run. Every phantom reports which journeys depend on the
+  callee *only* through it.
+
+  Run against testgraph itself, this measures the two limitations recorded at
+  0.1.0 rather than asserting them — and the answer differs by index, which is
+  the finding. On a **freshly built** index: 91 static misses across 7
+  journeys and **zero** phantom edges. The alias blind spot is still real
+  (`db.resolve_symbol` and `db.connect` have no inbound caller at all, so
+  `hook.py`'s `reg.repo_name(repo)` reaches no journey), but `ledger.append`'s
+  inbound edges are now all genuine — the extractor fix landed.
+
+  On the same commit's **incrementally synced** index, the same run reported 6
+  confirmed phantom `ledger.append` edges, every one hand-verified as a real
+  fabrication. `codegraph sync` re-extracts changed files only, so edges
+  produced by a superseded extractor survive a version upgrade indefinitely.
+  The integrity guard catches a *stale file*; it does not catch a stale
+  *edge*. A phantom count that drops to zero after a full `codegraph index`
+  is that defect showing itself.
+
+- **pytest adapter** (`python3 -m testgraph.pytest_adapter`) — runs a suite
+  once and records which journeys it exercised, from the runtime trace rather
+  than from a static guess or a test tag. Rows are tagged
+  `edge_provenance: "trace"`; rows a human wrote carry no such field. Journeys
+  with no covering test are named as loudly as covered ones.
+  `--trace-out` keeps the raw trace for `reconcile`.
+
+- **Normalized result record** (`testgraph.results`) — the per-test-run shape
+  every runner adapter produces, the `tg_{journey}` tag convention, and a
+  `runners:` spec, kept separate from any one adapter's mechanics.
+
 - **MCP stdio server** (`python3 -m testgraph.mcp`), exposing `testgraph_impact`
   and `testgraph_journeys` to a coding agent. Hand-rolled rather than built on
   the `mcp` SDK: MCP servers are spawned once per agent session, so idle size is

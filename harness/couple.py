@@ -60,48 +60,14 @@ from testgraph import db as dbmod  # noqa: E402
 CORE_SHARE = 0.5
 
 
-def load_graph(conn):
-    """(reach, contained_by) adjacency for the two inverted rules.
-
-    reach[n]        -> nodes n depends on directly (edge n -> t over REACH_KINDS)
-    contained_by[n] -> the file node that `contains` n
-    """
-    reach = collections.defaultdict(set)
-    kinds = ",".join("'%s'" % k for k in dbmod.REACH_KINDS)
-    for source, target in conn.execute(
-        f"SELECT source, target FROM edges WHERE kind IN ({kinds})"
-    ):
-        reach[source].add(target)
-
-    contained_by = {}
-    for source, target in conn.execute(
-        "SELECT source, target FROM edges WHERE kind = 'contains'"
-    ):
-        # Only file containment participates in `impacted_closure`'s rule 2, so
-        # only file containment inverts. A class containing a method is a
-        # `contains` edge too and must not be walked here, or every method would
-        # drag its whole class into the footprint by structure alone.
-        if source.startswith("file:"):
-            contained_by[target] = source
-    return reach, contained_by
-
-
-def footprint(start_ids, reach, contained_by):
-    """`Dep(E)` — everything whose change would put one of `start_ids` in the
-    impacted closure. Seeds included; BFS, cycle-safe by the seen set."""
-    seen = set(start_ids)
-    queue = collections.deque(start_ids)
-    while queue:
-        n = queue.popleft()
-        nxt = set(reach.get(n, ()))
-        f = contained_by.get(n)
-        if f:
-            nxt.add(f)
-        for t in nxt:
-            if t not in seen:
-                seen.add(t)
-                queue.append(t)
-    return seen
+# `load_graph`/`footprint` moved into `testgraph/db.py` (2026-09-09, Phase 5).
+# The derivation and its justification live in `db.dependency_graph`'s
+# docstring; these two names stay because `harness/ground_truth.py`,
+# `harness/selectivity.py` and `tests/test_couple.py` read this module, and a
+# second copy of a graph walk is a second thing to keep correct. The tests in
+# `tests/test_couple.py` are unchanged and now pin the shipped implementation.
+load_graph = dbmod.dependency_graph
+footprint = dbmod.footprint
 
 
 def score_journeys(conn, draft):

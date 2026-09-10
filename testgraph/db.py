@@ -4,6 +4,7 @@ We own the traversal rather than shelling out to `codegraph impact`, because
 that CLI returns only immediate dependents + a file-level cross-file bucket,
 not a transitive symbol closure (verified on honeyslate 2026-07-17).
 """
+import collections
 import sqlite3
 
 # Edge kinds that carry a behavior-reachability signal, walked in REVERSE
@@ -367,3 +368,67 @@ def resolve_symbol(conn, name, file_suffix=None):
             "SELECT id FROM nodes WHERE name = ? AND kind != 'file'", (name,)
         )
     return [r[0] for r in rows]
+
+
+def dependency_graph(conn, drop_edges=()):
+    """`(reach, contained_by)` — the adjacency `footprint` walks.
+
+    The INVERSE derivation of `impacted_closure`'s two propagation rules, so
+    `footprint(E)` is exactly the set whose members would put `E` in the
+    impacted closure:
+
+        impacted:  t in I, edge(s -> t, REACH_KIND)      => s in I
+                   f in I, f is a file, contains(f -> x) => x in I
+
+        inverted:  from n, add every t with edge(n -> t, REACH_KIND)
+                   from n, add the file f with contains(f -> n)
+
+    Only FILE containment inverts. A class containing a method is a `contains`
+    edge too, and walking it would drag a whole class into every footprint by
+    structure alone.
+
+    `drop_edges` is an iterable of `(source, target)` pairs to omit. It exists
+    for `testgraph.reconcile`, which answers "would this journey still depend
+    on that symbol if the fabricated edges were not there" by building the
+    graph twice and diffing. Rebuilding without them is the only honest way to
+    ask: subtracting a node after the fact cannot tell whether some OTHER path
+    still reaches it.
+
+    Lifted here from `harness/couple.py` (which now delegates) because
+    `reconcile` ships in the wheel and `harness/` does not.
+    """
+    drop = {tuple(pair) for pair in drop_edges}
+    reach = collections.defaultdict(set)
+    kinds = ",".join("'%s'" % k for k in REACH_KINDS)  # constants, safe to inline
+    for source, target in conn.execute(
+        f"SELECT source, target FROM edges WHERE kind IN ({kinds})"
+    ):
+        if (source, target) in drop:
+            continue
+        reach[source].add(target)
+
+    contained_by = {}
+    for source, target in conn.execute(
+        "SELECT source, target FROM edges WHERE kind = 'contains'"
+    ):
+        if source.startswith("file:"):
+            contained_by[target] = source
+    return reach, contained_by
+
+
+def footprint(start_ids, reach, contained_by):
+    """`Dep(E)` — everything whose change would put one of `start_ids` in the
+    impacted closure. Seeds included; BFS, cycle-safe by the seen set."""
+    seen = set(start_ids)
+    queue = collections.deque(start_ids)
+    while queue:
+        n = queue.popleft()
+        nxt = set(reach.get(n, ()))
+        f = contained_by.get(n)
+        if f:
+            nxt.add(f)
+        for t in nxt:
+            if t not in seen:
+                seen.add(t)
+                queue.append(t)
+    return seen

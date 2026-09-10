@@ -152,6 +152,66 @@ Ranking does **not** consult this history yet. It will be worth wiring once 20
 commits carry both a selection and an outcome; below that the ledger reports how far
 off it is rather than inventing a signal from three rows.
 
+## Recording a Journey Run Automatically (pytest)
+
+`record` needs a person to say what happened. A pytest suite already knows, and
+`harness/plugin/tgtrace.py` already sees which symbols each test executed — so a
+plain, untagged suite can say which journeys it covered with no test author
+doing anything:
+
+```bash
+python3 -m testgraph.pytest_adapter --repo . --dry-run -- tests/ -q
+```
+
+Put pytest's own flags after `--`, or argparse claims them. Drop `--dry-run` to
+write the rows. Every row written this way carries
+`edge_provenance: "trace"`; rows a human wrote through `record` carry no such
+field, and that asymmetry is deliberate — a person asserting "J3 failed" is a
+different kind of claim from a trace implying it.
+
+A journey with **no covering test** is named as loudly as a covered one. That is
+the actionable half: on testgraph's own 389-test suite, J6 has zero covering
+tests, and nothing but that line would say so.
+
+This adapter needs a source checkout — `harness/` is not in the wheel.
+
+## Checking the Graph Against Reality
+
+`reconcile` puts CodeGraph's edges on trial, using the same run:
+
+```bash
+python3 -m testgraph.pytest_adapter --repo . --dry-run \
+    --trace-out /tmp/trace.json -- tests/ -q
+python3 -m testgraph.reconcile --repo . --trace /tmp/trace.json
+```
+
+It reports two defects, with two different burdens of proof:
+
+- **STATIC MISS** — a symbol a journey's tests actually executed, sitting
+  outside that journey's static footprint. Runtime presence is proof, so this
+  is proof-grade: edit that symbol and the selector stays silent about a
+  journey the change can break.
+- **PHANTOM EDGE** — a `calls` edge whose caller contains no syntax that could
+  denote the callee, cross-checked against a run in which the two never
+  co-occurred. Neither witness alone is enough to accuse.
+
+Read the counts before the findings. `not judged` is edges the source oracle
+could not read (non-Python, a wildcard import), and `oracle gap` is edges it
+could not support that the suite executed anyway — the oracle's own error rate,
+reported separately so it can never be quoted as a phantom count.
+
+Findings are reported, never suppressed inside `select`. A tool that quietly
+routed around its own audit would have no audit.
+
+**A phantom count that changes between two indexes of the same commit is about
+the index, not the code.** `codegraph sync` re-extracts changed files only, so
+edges produced by an older extractor survive a version upgrade indefinitely —
+measured on testgraph itself, where a synced index reported 6 fabricated
+`ledger.append` edges and a freshly built one reported none. The integrity
+guard catches a stale *file*; nothing catches a stale *edge*. If the findings
+look wrong, rebuild with `codegraph index` (not `sync`) and re-run before
+believing either answer.
+
 ## What to Do When Something Breaks
 
 - **"STATUS: BLOCKED — index not trustworthy"** — the underlying code map is
