@@ -18,7 +18,17 @@ CLI surface, and a target with `addopts` or a strict conftest can reject it.
     TGTRACE_ROOT  only record functions defined under this directory
     TGTRACE_SKIP  colon-separated path fragments to ignore (default: the test dirs)
 
-Output: {"root": ..., "tests": {"<test nodeid>": [["<relpath>", "<qualname>"], ...]}}
+Output: {"root": ..., "tests": {"<test nodeid>": [["<relpath>", "<qualname>"], ...]},
+         "declared": {"<test nodeid>": ["J2", ...]}}
+
+`declared` records which journeys each test CLAIMS, read from a plain
+`tg_journeys` attribute (`testgraph.results.covers` sets it). Read by NAME, not
+by importing that function: this plugin loads into the target repo's
+interpreter and imports nothing from testgraph, which is the property that lets
+it run against a repo that has never heard of this project. The claim is also
+turned into a real `tg_J*` pytest marker at collection time, so
+`pytest -m 'tg_J1 or tg_J2'` works natively and `testgraph.verify` needs no
+stored attribution map.
 
 Why `sys.monitoring` (PEP 669) when available: it is the low-overhead path, and
 the point of tracing a whole suite is that doing so has to stay affordable. It
@@ -48,6 +58,11 @@ _skip = tuple(
 
 _current = None          # set() while a test body is running, else None
 _results = {}
+_declared = {}           # nodeid -> [journey id, ...] the test CLAIMS to cover
+
+# The attribute `testgraph.results.covers` sets. Duplicated as a literal rather
+# than imported, deliberately -- see the module docstring on standalone-ness.
+JOURNEY_ATTR = "tg_journeys"
 _seen_files = {}         # abspath -> relpath or None (None = outside root/skipped)
 
 
@@ -156,6 +171,7 @@ def pytest_unconfigure(config):
         "root": _root,
         "backend": "sys.monitoring" if _HAVE_MONITORING else "sys.setprofile",
         "tests": {tid: sorted(map(list, syms)) for tid, syms in _results.items()},
+        "declared": {tid: list(j) for tid, j in sorted(_declared.items())},
     }
     directory = os.path.dirname(os.path.abspath(_out_path))
     if directory:
@@ -184,6 +200,40 @@ def pytest_runtest_call(item):
     finally:
         _results.setdefault(item.nodeid, set()).update(_current)
         _current = None
+
+
+def _declared_for(item):
+    """Journeys `item` claims, from the test function then its class.
+
+    Both levels, because a whole TestCase class exercising one journey is the
+    common shape and repeating the decorator on every method invites the two to
+    drift apart. Method and class declarations UNION rather than override: a
+    method that adds a journey to its class's claim is adding a claim, not
+    replacing one."""
+    found = []
+    for holder in (getattr(item, "function", None), getattr(item, "cls", None)):
+        for jid in (getattr(holder, JOURNEY_ATTR, ()) or ()):
+            if jid not in found:
+                found.append(jid)
+    return found
+
+
+def pytest_collection_modifyitems(config, items):
+    """Turn `tg_journeys` into real `tg_J*` markers so `-m` can select on them.
+
+    This is the whole reason `verify` needs no stored attribution map: pytest
+    owns discovery, and a map that is not stored cannot go stale.
+
+    Registering the marker as it is added keeps `--strict-markers` runs and the
+    unknown-mark warning quiet without asking the target repo to edit its own
+    pytest config -- the same reasoning as configuring this plugin by
+    environment variable instead of adding CLI flags to someone else's run."""
+    for item in items:
+        for jid in _declared_for(item):
+            name = f"tg_{jid}"
+            config.addinivalue_line("markers", f"{name}: testgraph journey {jid}")
+            item.add_marker(getattr(pytest.mark, name))
+        _declared[item.nodeid] = _declared_for(item)
 
 
 if pytest is not None:

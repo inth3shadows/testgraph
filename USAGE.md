@@ -212,6 +212,48 @@ guard catches a stale *file*; nothing catches a stale *edge*. If the findings
 look wrong, rebuild with `codegraph index` (not `sync`) and re-run before
 believing either answer.
 
+## Running Only the Tests a Change Endangers
+
+```bash
+python3 -m testgraph.verify --repo . --base origin/main -- tests/ -q
+```
+
+Selects the journeys the diff could break, runs the tests **declared** to cover
+them, and reports. Declare one with:
+
+```python
+from testgraph.results import covers
+
+@covers("J2")
+class SelectorEndToEndTests(unittest.TestCase):
+    ...
+```
+
+`covers` sets a plain attribute — it is deliberately not `@pytest.mark.tg_J2`,
+because that needs `import pytest` in the test module and this project's own CI
+runs `unittest` on a stdlib-only checkout. The tgtrace plugin converts it to a
+real marker at collection time, so `pytest -m 'tg_J1 or tg_J2'` works and
+nothing has to store an attribution map.
+
+**Declaring is not evidence.** A marked test whose trace never enters the
+journey's entry symbols is reported as an unsupported declaration and does not
+credit the journey. The deeper check — that a test which *does* enter the
+journey is not then mocking everything beneath it — is
+`harness/unit_vs_journey.py`, which executes one journey for real and compares.
+Run it when you add journey markers, not on every commit; it needs a real index.
+
+Exit codes, and the third one is the point:
+
+```
+0  every selected journey ran and passed
+1  a selected journey failed
+2  refused — the index is not trustworthy, so no tests were run
+3  incomplete — at least one selected journey had no declared test
+```
+
+A selected journey with nothing to run is not a pass, and sharing an exit code
+with success is how that would be read as one.
+
 ## What to Do When Something Breaks
 
 - **"STATUS: BLOCKED — index not trustworthy"** — the underlying code map is

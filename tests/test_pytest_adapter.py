@@ -14,6 +14,7 @@ import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
+from testgraph.results import covers  # noqa: E402
 from testgraph import ledger  # noqa: E402
 from testgraph import pytest_adapter as pa  # noqa: E402
 
@@ -167,6 +168,8 @@ class ResolveTracedTests(unittest.TestCase):
         self.assertEqual(amb, [("app/a.py", "helper")])
 
 
+# Journey-level: exercises the real trace-to-journey join the adapter exists for.
+@covers("J8")
 class AttributeTests(unittest.TestCase):
     def setUp(self):
         self.conn = build_conn()

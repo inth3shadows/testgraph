@@ -78,6 +78,53 @@ def format_tag(template, journey):
     return template.format(journey=journey)
 
 
+#: Attribute name a decorated test carries. A bare string, not an import, is
+#: the whole contract between this module and `harness/plugin/tgtrace.py` —
+#: the plugin loads into the TARGET repo's interpreter and deliberately imports
+#: nothing from this package, so it reads this attribute by name.
+JOURNEY_ATTR = "tg_journeys"
+
+
+def covers(*journeys):
+    """Declare that a test exercises `journeys` end to end.
+
+    Sets a plain attribute and nothing else. It cannot be `@pytest.mark.tg_J2`
+    even though that DOES work on `unittest.TestCase` subclasses (verified —
+    both method- and class-level marks select correctly under `-m`), because
+    spelling it that way requires `import pytest` in the test module and this
+    project's CI is `python3 -m unittest discover` on a stdlib-only checkout
+    with no pytest installed. A decorator that breaks the test suite for the
+    runner the suite actually uses is not a decorator.
+
+    `harness/plugin/tgtrace.py` turns the attribute into a real `tg_J*` marker
+    at collection time, so `pytest -m 'tg_J1 or tg_J2'` works natively and
+    pytest owns discovery — which is what lets `testgraph.verify` avoid storing
+    an attribution map at all.
+
+    A declaration is an ASSERTION, not evidence. `verify` checks each marked
+    test's trace against the journey's entry symbols and reports the ones that
+    never entered; `harness/unit_vs_journey.py` checks the deeper claim, that a
+    test which does enter the journey is not then mocking everything beneath it
+    (measured: J1's 20 credited tests miss 34 of the 40 symbols the real
+    journey runs).
+    """
+    if not journeys:
+        raise ValueError("covers() needs at least one journey id")
+
+    def decorate(obj):
+        setattr(obj, JOURNEY_ATTR, tuple(journeys))
+        return obj
+
+    return decorate
+
+
+def declared_journeys(obj):
+    """The journeys `obj` declares, or (). Reads the attribute rather than
+    assuming the decorator ran, so an object carrying it by any other route
+    is treated the same."""
+    return tuple(getattr(obj, JOURNEY_ATTR, ()) or ())
+
+
 _JOURNEY_GROUP = r"(?P<journey>[A-Za-z0-9_]+)"
 
 

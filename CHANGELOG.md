@@ -76,6 +76,45 @@ below is on `main` or in the branch that introduced this file.
   It found two on its first run: honeyslate and signedintake were both at
   extraction version 25 against a current 26.
 
+- **`testgraph.verify`** — a diff in, the tests for the journeys it endangers
+  run, a verdict out.
+
+  ```bash
+  python3 -m testgraph.verify --repo . --base origin/main -- tests/ -q
+  ```
+
+  Attribution is **declared**, not inferred. `testgraph.results.covers("J2")`
+  marks a test as exercising a journey end to end; the tgtrace plugin turns
+  that into a real `tg_J2` pytest marker at collection time, so
+  `pytest -m 'tg_J1 or tg_J2'` does the selection and no attribution map is
+  stored (a map that is not stored cannot go stale).
+
+  Inferred attribution was measured and rejected for this job.
+  `harness/unit_vs_journey.py` executes one journey both ways and compares:
+  for J1, the 20 tests Phase 4 credits reach 14 symbols where a real invocation
+  reaches 40, sharing 6, because `tests/test_hook.py` stubs out `sel.select`
+  and `reg.resolve_for_repo` on every real path. Selecting tests from that
+  would take a diff touching `db.py:impacted_closure`, select J1, run 20 tests
+  that never execute it, and print PASS.
+
+  A declaration is an assertion, so it is checked twice: every run, a marked
+  test's trace must reach the journey's entry symbols (unsupported claims are
+  reported, not credited); and periodically, `unit_vs_journey.py` checks the
+  deeper claim that a test entering the journey is not mocking everything
+  beneath it.
+
+  **A selected journey with no declared test is the headline and has its own
+  exit code** — 0 every selected journey ran and passed, 1 a journey failed,
+  2 refused (untrustworthy index), 3 incomplete. Measured on this repo, a
+  full-registry selection reports `NO JOURNEY-LEVEL TEST: J1, J5, J6, J7` and
+  exits 3.
+
+- **`covers()` cannot be `@pytest.mark`** — CI is `python3 -m unittest discover`
+  on a stdlib-only checkout with no pytest, so importing pytest in a test module
+  would break the runner the suite actually uses. It sets a plain attribute; the
+  plugin reads it by name and never imports this package, which is what lets
+  tgtrace keep running against repos that have never heard of testgraph.
+
 ### Changed
 
 - **The registry is looked for in the repo it describes.** Search order is
