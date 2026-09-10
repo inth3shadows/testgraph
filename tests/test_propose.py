@@ -15,6 +15,7 @@ import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
+from testgraph.results import covers  # noqa: E402
 from testgraph import db as dbmod  # noqa: E402
 from testgraph import export as exp  # noqa: E402
 from testgraph import propose as prop  # noqa: E402
@@ -178,6 +179,9 @@ class ProposeScanTests(unittest.TestCase):
         self.assertEqual(routes["create_task"], [("POST", "/tasks")])
 
 
+# Journey-level: drafts a registry through the real `propose` path and then
+# resolves it against the index -- the journey's whole point.
+@covers("J3")
 class ProposeDraftTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

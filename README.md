@@ -187,7 +187,8 @@ the selector — as is one where nothing records the journey passing at that pus
 - `testgraph/` — the package: `db.py` (graph traversal), `integrity.py` (the
   guard), `registry.py` (journey resolution), `select.py` (the CLI),
   `pytest_adapter.py` (a suite run -> ledger rows, from the trace),
-  `reconcile.py` (the graph's edges on trial against that run).
+  `reconcile.py` (the graph's edges on trial against that run),
+  `verify.py` (a diff in, the declared tests for the endangered journeys out).
 - `journeys/honeyslate.json` — the hand-authored journey registry for the first
   dogfood target.
 - `harness/` — `accuracy.py` (recall/precision on labeled commits),

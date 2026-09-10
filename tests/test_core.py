@@ -19,6 +19,7 @@ import unittest.mock
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
+from testgraph.results import covers  # noqa: E402
 from testgraph import db as dbmod  # noqa: E402
 from testgraph import integrity  # noqa: E402
 from testgraph import registry as reg  # noqa: E402
@@ -970,6 +971,9 @@ class UnresolvedJourneyTests(unittest.TestCase):
         self.assertEqual(reg.unresolved(self.conn, spec), [])
 
 
+# Journey-level: drives `export.main` end to end into a real target directory
+# and reads the written file back.
+@covers("J4")
 class IntoTargetTests(unittest.TestCase):
     """`--into-target` is what makes the skill's in-repo lookup work, so its path
     construction and its refusal to litter a blocked target are both load-bearing."""
@@ -1692,6 +1696,12 @@ _settings = object()
         return d
 
 
+# Journey-level: runs the real `select.select` and the real `export.build_map`
+# against a real fixture index with no mocking, and asserts the two agree. Its
+# trace reaches 34 symbols -- the same count a REAL `select` invocation reaches
+# (harness/unit_vs_journey.py, 2026-09-09), which is what makes this claim
+# evidence rather than an assertion.
+@covers("J2", "J4")
 class MapAgreesWithSelectorTests(unittest.TestCase):
     """The invariant the whole design rests on: for a given change, the map and
     the selector name the same journeys. A map that disagrees is worse than no
