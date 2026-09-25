@@ -207,12 +207,19 @@ the selector — as is one where nothing records the journey passing at that pus
 
 ## Status
 
-Phase-1 spike plus B1 (confidence-weighted paths), working and validated on
-honeyslate: recall 1.00 across 5 hand-labeled commits (mean precision 0.68, down
+Selector (Phase 1 + B1) plus a verification layer (Phases 3–6): a pytest
+adapter that writes ledger rows from runtime traces, `reconcile` (the graph's edges
+on trial against a real run), and `verify` (a diff in, the declared tests for the
+endangered journeys run, a verdict out). The selector is validated on honeyslate:
+recall 1.00 across 5 hand-labeled commits (mean precision 0.68, down
 from 0.84 when frontend files began being seeded — see TECHNICAL.md) and 1.00
 across 20 seeded mutation sites scored against an independent AST oracle;
-integrity guard tested and schema-pinned. Scoped to honeyslate; backend and
-frontend files are both analysed, journeys are registered on backend entry points.
+integrity guard tested and schema- and extractor-pinned. `verify` attributes tests
+to journeys by **declaration** (`covers("J2")`), not trace inference — measured, a
+mocked unit suite credited to the pre-push journey reached 6 of the 40 symbols a
+real run does. On testgraph itself it currently reports four journeys with no
+journey-level test and exits 3; TECHNICAL.md "From selection to verification" has
+the measurements.
 The gap was not capability, it was **consumption**: `skills/testgraph-verify` had
 never been invoked — 0 times across every session on this machine, which is what
 issue #49 measured. The `pre-push` hook above is the answer to that: it calls the

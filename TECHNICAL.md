@@ -1,8 +1,10 @@
 # Technical Reference: testgraph
 
-Phase-1 spike. This documents the built selector; the broader roadmap (ledger,
-trace discovery) lives in the private plan
-`~/.claude/plans/testgraph-phase1-graph-traversal-spike.md`.
+Documents the selector (Phase 1 + B1) and the verification layer built on it
+(Phases 3–6: result record, pytest adapter, reconciliation, `verify`) — the
+last four are under [From selection to verification](#from-selection-to-verification-phases-36).
+The roadmap lives in the private plan
+`~/.claude/plans/testgraph-verification-direction.md`.
 
 ## Architecture
 
@@ -1728,6 +1730,132 @@ correctness.
 *replacing* hand-labeled journeys — is still untouched. This is the second
 measurement, not the replacement.
 
+## From selection to verification (Phases 3–6)
+
+`select` answers "which journeys could this diff break". Phases 3–6 answer the
+next question — "did they break" — without letting a test run become the
+confident green the selector was built to refuse. Command-level usage is in
+USAGE.md; this section records the design and what each phase measured.
+
+### Phase 3 — one result shape (`results.py`, PR #83)
+
+A normalized per-test record every runner adapter produces, the `tg_{journey}`
+tag convention, and a `runners:` spec in the registry
+(`pytest -m '{marker_or}' --junitxml={out}`). Kept separate from any one
+adapter so Phase 7+ runners (Playwright) emit the same rows.
+
+### Phase 4 — the ledger gets an automatic writer (`pytest_adapter.py`)
+
+Runs a suite once under `harness/plugin/tgtrace.py` and records which journeys
+each test's *runtime trace* reached. Rows carry `edge_provenance: "trace"`;
+human-written rows carry none.
+
+**Attribution is against journey ENTRY symbols, not footprints** — the plan got
+this wrong and the first run showed it. Intersecting a test's trace with a
+journey's footprint (`Dep(E)`, everything the journey depends on) credited the
+34 tests of `tests/test_record.py` to all six journeys, because every journey
+depends on `ledger.py`. Coverage that says "everything" says nothing. Against
+entry symbols — the same set `select` intersects (`registry.resolve_entries`),
+so a journey means one thing in both directions — the same file covers J5 only.
+A footprint answers "what could a change break"; an entry set answers "what did
+this test run".
+
+First measurement, 359 tests: `J1 20 · J2 20 · J3 12 · J4 26 · J5 10 · J7 17 ·
+J8 11`, **J6 — no covering test**, 249 tests covering no journey. J6 (the
+`harness/*` CLIs) genuinely has no automated coverage; it is recorded in the
+registry, not papered over.
+
+### Phase 5 — the graph on trial (`reconcile.py`, PR #84)
+
+Two named defects, each with its own burden of proof:
+
+| defect | meaning | evidence required |
+|---|---|---|
+| **STATIC MISS** | the journey's tests executed a symbol outside its static footprint | the run alone — a trace proves presence |
+| **PHANTOM EDGE** | a `calls` edge no syntax in the caller can denote, never exercised | both witnesses — the source oracle proves absence of support, the trace proves it never ran |
+
+Every phantom also reports which journeys depend on the callee *only* through
+it — the output that is about the product rather than the index.
+
+**The hermetic tests passed while the design was wrong.** The first live run
+reported 16 phantoms; nine were the oracle's fault, both from treating a nested
+`def` as not-a-symbol (inherited from `harness/ground_truth.py`, where dropping
+`<locals>` is correct for seeds and wrong here). Only the live run found it.
+
+**The second correction was bigger.** On testgraph's hook-synced index, the run
+reported 6 confirmed phantom `ledger.append` edges, each hand-verified as a real
+fabrication — and concluded the #66 extractor fix was not live. On a freshly
+built index of the same commit: **0 phantoms, 91 static misses.** `codegraph
+sync` re-extracts changed files only, so edges from a superseded extractor
+survive a version upgrade indefinitely. #66 is fixed; the alias blind spot
+(#62: `db.resolve_symbol` and `db.connect` have no inbound caller) is what the
+91 misses are. That finding became the stale-edge check (#85/#86):
+registries pin `codegraph_extraction_version`, and `integrity.check` warns —
+naming `codegraph index`, never `sync` — when the index predates it.
+
+### Phase 6 — `verify`, and the gate that redesigned it (PRs #88, #89)
+
+The plan was: select journeys, expand them to tests via Phase 4's stored trace
+attribution, run those. The parent plan required a gate first — execute one
+journey both ways and compare — **before** unit traces were trusted as ground
+truth. `harness/unit_vs_journey.py` is that gate.
+
+```
+J2 (select)    base HEAD~2..~4   unit 40  real 33–34  shared = real   real_only 0
+J1 (pre-push)  base HEAD~3       unit 14  real 40     shared 6        real_only 34
+```
+
+J2 passes: its tests call `select.select` unmocked. J1 fails decisively: the 34
+symbols a real hook run reaches and no credited test does are the entire
+selector, graph traversal, integrity guard and registry resolution —
+`tests/test_hook.py` carries 15 `mock.patch` calls and stubs `sel.select` and
+`reg.resolve_for_repo` on every real path. The inferred design would have taken
+a diff to `db.py:impacted_closure`, selected J1, run 20 tests that never execute
+it, and printed PASS. **Trace attribution's trustworthiness is a per-journey
+property, not a property of the technique**, so it was withdrawn as the basis
+for `verify`.
+
+**Decided: declared markers, gated.** `testgraph.results.covers("J2")` marks a
+test as exercising a journey end to end. It sets a plain `tg_journeys`
+attribute and nothing else, because CI runs `python3 -m unittest discover` on a
+stdlib-only checkout — `@pytest.mark` in a test module would break the runner
+the suite actually uses. tgtrace reads the attribute *by name* (it never imports
+this package, so it still runs against repos that have never heard of testgraph)
+and turns it into a real `tg_J*` marker at collection. `verify` then builds
+`-m 'tg_J1 or tg_J2'`; pytest does discovery, and no attribution map is stored,
+so none can go stale.
+
+A declaration is an assertion, checked at two levels:
+
+1. **Every run, free.** A marked test's own trace must reach the claimed
+   journey's entry symbols, or the claim is reported `unvalidated` and the
+   journey is not credited.
+2. **Periodically, `unit_vs_journey.py`.** Level 1 cannot catch a test that
+   enters the journey and then mocks everything beneath it — J1's tests do enter
+   `hook.run`. Stays a harness measurement: it needs a real index, CI has none.
+
+Rows from validated marked tests carry `edge_provenance: "trace-journey"`.
+Phase 4's bare `"trace"` stays as written — the ledger is append-only, and
+retro-labelling rows with a distinction that did not exist would fabricate
+provenance.
+
+**A selected journey with no declared test is the headline and has its own
+exit code:** 0 every selected journey ran and passed · 1 a journey failed · 2
+refused (untrustworthy index) · 3 incomplete. Every exit returns the same
+`--json` summary keys (#89: the refused and NONE paths used to omit `repo` and
+`commit`, a `KeyError` for any consumer aggregating the quiet runs). Today,
+testgraph declares J2, J3, J4 and J8; a full-registry selection reports
+`NO JOURNEY-LEVEL TEST: J1, J5, J6, J7` and exits 3 — the true state of this
+repo, surfaced rather than rounded up to green.
+
+**The gate itself had two bugs, both found by running it.** Its first run
+printed `real 0` and "REAL-ONLY: none" — a clean bill over a null measurement,
+because `TGTRACE_ROOT` pointed at the analysis target rather than the code being
+imported; `render` now refuses to compare when the real half recorded nothing.
+And `real_only` was padded by the instrument tracing itself (`_stop`, the
+harness's `invoke` wrapper), now excluded via `TGTRACE_SKIP`, with anonymous
+frames filtered from both halves so the filter cannot shift the comparison.
+
 ## Known Limitations
 
 - **Scope:** three *approved* registries — honeyslate, signedintake, and
@@ -1778,3 +1906,13 @@ measurement, not the replacement.
   B1's flag firing on real data for the first time, exactly as predicted when it
   shipped. The labeled oracles were authored under a Python-only selector and may
   need re-labelling before 0.68 is read as a regression.
+- **`verify` is pytest-only, and only as good as its declarations.** Four of
+  testgraph's eight journeys (J1, J5, J6, J7) have no `covers()` test, so any
+  diff selecting them exits 3. Level-1 validation catches a marker that never
+  enters its journey; only a periodic `unit_vs_journey.py` run catches one that
+  enters and then mocks everything beneath it, and that needs a real index.
+- **Attribution and reconciliation match paths differently.**
+  `pytest_adapter` resolves traced frames with a bare suffix match; `reconcile`
+  uses `path_matches` with a path-component boundary. Left alone on purpose —
+  changing it moves Phase 4's measured numbers — and recorded in
+  `reconcile.path_matches`'s docstring.
