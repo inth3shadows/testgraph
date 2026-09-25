@@ -127,6 +127,12 @@ below is on `main` or in the branch that introduced this file.
 
 ### Fixed
 
+- **`verify --json` changed shape on its quiet exits** (#89). The refused and
+  nothing-selected paths built their own summary without `repo` and `commit`,
+  so a consumer aggregating runs hit a `KeyError` on exactly the runs most
+  likely to be aggregated, and the text rendered `testgraph verify[?]`. All
+  exits now go through one summary builder.
+
 - **A `pip install` could never find a registry.** `resolve_for_repo` searched
   only a package-relative `journeys/`, which resolves to `site-packages/journeys`
   in a wheel and does not exist — so every repo answered "no journey registry
