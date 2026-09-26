@@ -1,13 +1,29 @@
 # testgraph
 
-Journey-level test selection. Given a git diff, testgraph answers "which
-user-facing flows could this change have broken, and in what order should they
-be tested?" — reading the change, walking a CodeGraph index of how the code
-connects, and returning a short ranked list instead of "re-run everything."
+**A test selector that says when it doesn't know.** Given a diff, testgraph
+names the user journeys it could have broken and runs the tests for those. But
+unlike other test-impact tools, it refuses to hand you a confident green it
+can't back up. A stale or corrupted code index makes it refuse; a journey
+reached only through weak links is flagged `VERIFY MANUALLY`; and a selected
+journey with no test that exercises it end to end gets its own exit code
+instead of being folded into PASS.
+
+```bash
+python3 -m testgraph.verify --repo . --base origin/main -- tests/ -q
+# exit 0  every selected journey ran and passed
+# exit 1  a journey's tests failed
+# exit 2  refused: the index can't be trusted
+# exit 3  a selected journey has no journey-level test — named, not hidden
+```
+
+That last case is not hypothetical. Run on itself, testgraph found that the 20
+tests credited to its own pre-push hook mock out the code the hook actually
+runs, reaching 6 of the 40 symbols a real invocation does. It reports that
+journey as untested rather than green.
 
 It sits above the tools that already exist: it does NOT drive browsers, generate
-tests, or self-heal (Playwright's Planner/Generator/Healer agents commoditized
-that). Its job is the layer no driver has — deciding *what is worth testing*.
+tests, or self-heal. Its job is the layer no driver has — deciding *what is
+worth testing*, and being honest about how sure it is.
 
 ## Install
 
