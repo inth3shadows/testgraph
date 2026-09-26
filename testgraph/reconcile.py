@@ -1,6 +1,7 @@
 """Phase 5: two-sided reconciliation of the static graph against reality.
 
-Closes issue #12. Answers #66/#82 with a measurement instead of an assertion.
+Closes issue #12. Answers #66 and inth3shadows/codegraph#4 (formerly #82) with a
+measurement instead of an assertion.
 
 Every earlier phase trusted CodeGraph's edges. This one puts them on trial, and
 the whole design is about which witness is allowed to say what:
