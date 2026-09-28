@@ -106,8 +106,9 @@ below is on `main` or in the branch that introduced this file.
   **A selected journey with no declared test is the headline and has its own
   exit code** — 0 every selected journey ran and passed, 1 a journey failed,
   2 refused (untrustworthy index), 3 incomplete. Measured on this repo, a
-  full-registry selection reports `NO JOURNEY-LEVEL TEST: J1, J5, J6, J7` and
-  exits 3.
+  full-registry selection reports `NO JOURNEY-LEVEL TEST: J1, J6, J7` and
+  exits 3 (J5 gained a declared test in #92, driving `record.main()` against a
+  real two-commit git repo instead of a stubbed one).
 
 - **`covers()` cannot be `@pytest.mark`** — CI is `python3 -m unittest discover`
   on a stdlib-only checkout with no pytest, so importing pytest in a test module
