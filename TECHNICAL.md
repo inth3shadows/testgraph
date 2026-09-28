@@ -1844,9 +1844,10 @@ exit code:** 0 every selected journey ran and passed · 1 a journey failed · 2
 refused (untrustworthy index) · 3 incomplete. Every exit returns the same
 `--json` summary keys (#89: the refused and NONE paths used to omit `repo` and
 `commit`, a `KeyError` for any consumer aggregating the quiet runs). Today,
-testgraph declares J2, J3, J4 and J8; a full-registry selection reports
-`NO JOURNEY-LEVEL TEST: J1, J5, J6, J7` and exits 3 — the true state of this
-repo, surfaced rather than rounded up to green.
+testgraph declares J2, J3, J4, J5 and J8 (#92 added J5, driving `record.main()`
+against a real two-commit git repo instead of a stubbed one); a full-registry
+selection reports `NO JOURNEY-LEVEL TEST: J1, J6, J7` and exits 3 — the true
+state of this repo, surfaced rather than rounded up to green.
 
 **The gate itself had two bugs, both found by running it.** Its first run
 printed `real 0` and "REAL-ONLY: none" — a clean bill over a null measurement,
@@ -1906,8 +1907,8 @@ frames filtered from both halves so the filter cannot shift the comparison.
   B1's flag firing on real data for the first time, exactly as predicted when it
   shipped. The labeled oracles were authored under a Python-only selector and may
   need re-labelling before 0.68 is read as a regression.
-- **`verify` is pytest-only, and only as good as its declarations.** Four of
-  testgraph's eight journeys (J1, J5, J6, J7) have no `covers()` test, so any
+- **`verify` is pytest-only, and only as good as its declarations.** Three of
+  testgraph's eight journeys (J1, J6, J7) have no `covers()` test, so any
   diff selecting them exits 3. Level-1 validation catches a marker that never
   enters its journey; only a periodic `unit_vs_journey.py` run catches one that
   enters and then mocks everything beneath it, and that needs a real index.
