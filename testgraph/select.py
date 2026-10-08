@@ -150,13 +150,15 @@ def _parse_unified_diff(diff):
     A product-looking block that ends with no recognisable '+++' header is
     reported in `whole_files` ("unparseable diff header") rather than dropped:
     unknown, not absent. The one exception is a block git marks as a new or
-    deleted file without a header, which is an empty file — no content to seed.
+    deleted file without a header, which is an empty file — no content to seed,
+    and a mode-only change (`old mode`/`new mode`, no '+++'), which is a chmod.
     """
     ranges, whole_files, cur, prev = {}, {}, None, None
     blk = None  # state of the current `diff --git` block
 
     def close_block():
-        if blk and not blk["header"] and not blk["rename"] and not blk["empty"]:
+        if (blk and not blk["header"] and not blk["rename"] and not blk["empty"]
+                and not blk["mode"]):
             path = blk["path"]
             if path and _is_product(path):
                 whole_files.setdefault(path, "unparseable diff header")
@@ -166,7 +168,13 @@ def _parse_unified_diff(diff):
             close_block()
             cur = prev = None
             blk = {"path": _diff_git_path(line[len("diff --git "):]),
-                   "header": False, "rename": False, "empty": False}
+                   "header": False, "rename": False, "empty": False,
+                   "mode": False}
+        elif line.startswith(("old mode ", "new mode ")):
+            # A pure chmod: mode lines and no '+++' header. It changes no
+            # content, so it is not an unreadable header (C1 follow-up).
+            if blk:
+                blk["mode"] = True
         elif line.startswith("--- "):
             p = _header_path(line[4:])
             prev = p[2:] if p.startswith("a/") else None

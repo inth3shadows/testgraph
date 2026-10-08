@@ -2308,6 +2308,26 @@ class DiffInputRobustnessTests(unittest.TestCase):
         self.assertEqual(sel._unquote_git_path('"b/caf\\303\\251.py"'), "b/café.py")
         self.assertEqual(sel._unquote_git_path("b/plain.py"), "b/plain.py")
 
+    def test_mode_only_change_is_not_reported_as_unparseable(self):
+        diff = ("diff --git a/app/svc.py b/app/svc.py\n"
+                "old mode 100644\nnew mode 100755\n")
+        self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
+
+    def test_chmod_only_commit_does_not_degrade_recall(self):
+        conn = build_fixture()
+        registry = _registry_file(self.tmp, {
+            "J1": {"name": "one",
+                   "entries": [{"name": "handler_a", "file": "app/svc.py"}]}})
+        repo, run = _git_repo(self.tmp, {"app/svc.py": 22})
+        run("git", "update-index", "--chmod=+x", "app/svc.py")
+        run("git", "commit", "-qm", "chmod")
+        db = _db_on_disk(self.tmp, conn)
+        res = sel.select(repo, "HEAD~1", "HEAD", db, registry)
+        ranges, whole = sel.changed_ranges(repo, "HEAD~1", "HEAD")
+        self.assertEqual((ranges, whole), ({}, {}))
+        self.assertFalse([w for w in res["warnings"] if "unparseable" in w], res)
+        self.assertEqual(res["journeys"], [])
+
     def test_empty_new_file_is_not_reported_as_unparseable(self):
         diff = "diff --git a/app/__init__.py b/app/__init__.py\nnew file mode 100644\nindex 0..e69de29\n"
         self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
