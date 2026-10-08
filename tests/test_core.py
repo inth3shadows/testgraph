@@ -2227,3 +2227,88 @@ class NoneMeansUnknownTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiffInputRobustnessTests(unittest.TestCase):
+    """Audit C1: the diff parse silently dropped files under common git config or
+    path shapes, and `select` then answered a clean `journeys: []` -- no warning,
+    no `unknown_because`. Each case here used to be exactly that."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _run_case(self, rel, config=()):
+        conn = build_fixture()
+        conn.execute(
+            "INSERT INTO nodes VALUES (?,?,?,?,?,?,?)",
+            ("function:h", "function", "h", "h", rel, 10, 20),
+        )
+        conn.commit()
+        registry = _registry_file(
+            self.tmp, {"J1": {"name": "one", "entries": [{"name": "h", "file": rel}]}}
+        )
+        repo, run = _git_repo(self.tmp, {rel: 22})
+        for k, v in config:
+            run("git", "config", k, v)
+        full = os.path.join(repo, rel)
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[11] = "changed = 1\n"  # inside h (10-20)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "edit")
+        db = _db_on_disk(self.tmp, conn)
+        res = sel.select(repo, "HEAD~1", "HEAD", db, registry)
+        self.assertEqual(res["status"], "OK")
+        # Either selected outright or degraded to "everything, verify manually";
+        # never a clean NONE.
+        self.assertIn("J1", {j["id"] for j in res["journeys"]}, res)
+        return res
+
+    def test_diff_noprefix_config(self):
+        res = self._run_case("app/svc2.py", [("diff.noprefix", "true")])
+        self.assertIn("app/svc2.py", res["changed_files"])
+
+    def test_diff_mnemonicprefix_config(self):
+        self._run_case("app/svc2.py", [("diff.mnemonicPrefix", "true")])
+
+    def test_color_diff_always(self):
+        self._run_case("app/svc2.py", [("color.diff", "always")])
+
+    def test_non_ascii_path(self):
+        res = self._run_case("app/café.py")
+        self.assertIn("app/café.py", res["changed_files"])
+
+    def test_path_with_space(self):
+        res = self._run_case("app/my mod.py")
+        self.assertIn("app/my mod.py", res["changed_files"])
+
+    def test_path_with_double_quote(self):
+        res = self._run_case('app/a"b.py')
+        self.assertIn('app/a"b.py', res["changed_files"])
+
+    def test_unreadable_header_does_not_steal_the_next_files_hunks(self):
+        # First block is readable; the second has no recognisable '+++' header.
+        # Its hunk must not be credited to the first file, and the second file
+        # must still be reported rather than dropped.
+        diff = (
+            "diff --git a/app/a.py b/app/a.py\n--- a/app/a.py\n+++ b/app/a.py\n"
+            "@@ -3 +3 @@\n-x\n+y\n"
+            "diff --git a/app/b.py b/app/b.py\nindex 1..2 100644\n"
+            "--- a/app/b.py\n+++ garbled/app/b.py\n@@ -9 +9 @@\n-x\n+y\n"
+        )
+        ranges, whole = sel._parse_unified_diff(diff)
+        self.assertEqual(ranges, {"app/a.py": [(3, 3)]})
+        self.assertEqual(whole, {"app/b.py": "unparseable diff header"})
+
+    def test_unquote_git_path(self):
+        self.assertEqual(sel._unquote_git_path('"b/a\\"b.py"'), 'b/a"b.py')
+        self.assertEqual(sel._unquote_git_path('"b/caf\\303\\251.py"'), "b/café.py")
+        self.assertEqual(sel._unquote_git_path("b/plain.py"), "b/plain.py")
+
+    def test_empty_new_file_is_not_reported_as_unparseable(self):
+        diff = "diff --git a/app/__init__.py b/app/__init__.py\nnew file mode 100644\nindex 0..e69de29\n"
+        self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
+

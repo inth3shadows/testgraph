@@ -68,6 +68,64 @@ def _is_test(path):
     )
 
 
+_SIMPLE_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11,
+                   "\\": 92, '"': 34}
+
+
+def _unquote_git_path(p):
+    """Decode a git C-quoted path (`"b/a\\"b.py"`, `"a/caf\\303\\251.py"`).
+
+    git quotes a name containing `"`, `\\`, a control character, or (unless
+    `core.quotePath=false`) a non-ASCII byte. An unquoted path is returned as is.
+    Bytes are decoded as utf-8 with surrogateescape so a non-utf-8 name survives
+    as a distinct string instead of raising."""
+    if len(p) < 2 or not (p.startswith('"') and p.endswith('"')):
+        return p
+    body, out, i = p[1:-1], bytearray(), 0
+    while i < len(body):
+        c = body[i]
+        if c != "\\" or i + 1 >= len(body):
+            out += c.encode("utf-8", "surrogateescape")
+            i += 1
+            continue
+        n = body[i + 1]
+        if n in "01234567":
+            j = i + 1
+            while j < len(body) and j < i + 4 and body[j] in "01234567":
+                j += 1
+            out.append(int(body[i + 1:j], 8) & 0xFF)
+            i = j
+        else:
+            out += (bytes([_SIMPLE_ESCAPES[n]]) if n in _SIMPLE_ESCAPES
+                    else n.encode("utf-8", "surrogateescape"))
+            i += 2
+    return out.decode("utf-8", "surrogateescape")
+
+
+def _header_path(raw):
+    """Path from a '---'/'+++' line body: drop git's single trailing TAB (it marks
+    a name containing a space), then undo C-quoting."""
+    if raw.endswith("\t"):
+        raw = raw[:-1]
+    return _unquote_git_path(raw)
+
+
+def _diff_git_path(rest):
+    """Best-effort path from the tail of a `diff --git a/X b/Y` line, for a block
+    that never produced a readable '+++' header. Returns None if it cannot say."""
+    if '"' in rest:
+        toks = re.findall(r'"(?:[^"\\]|\\.)*"|\S+', rest)
+        if len(toks) == 2:
+            right = _unquote_git_path(toks[1])
+            return right[2:] if right.startswith("b/") else None
+        return None
+    n = (len(rest) - 1) // 2
+    left, right = rest[:n], rest[n + 1:]
+    if len(rest) % 2 == 1 and left.startswith("a/") and right.startswith("b/"):
+        return right[2:]
+    return None
+
+
 def _parse_unified_diff(diff):
     """Parse a `git diff --unified=0` into
     `(ranges, whole_files)` where
@@ -85,24 +143,55 @@ def _parse_unified_diff(diff):
     A '+++ ' line is only treated as a file header when it carries a 'b/' or
     '/dev/null' path, so a changed content line that renders as '+++ ...' is not
     misread as a header.
+
+    Every `diff --git` line starts a fresh block (audit C1). Without the reset a
+    block whose header could not be read left `cur` pointing at the PREVIOUS
+    file, so its hunks were credited to the wrong file and its own file vanished.
+    A product-looking block that ends with no recognisable '+++' header is
+    reported in `whole_files` ("unparseable diff header") rather than dropped:
+    unknown, not absent. The one exception is a block git marks as a new or
+    deleted file without a header, which is an empty file — no content to seed.
     """
     ranges, whole_files, cur, prev = {}, {}, None, None
+    blk = None  # state of the current `diff --git` block
+
+    def close_block():
+        if blk and not blk["header"] and not blk["rename"] and not blk["empty"]:
+            path = blk["path"]
+            if path and _is_product(path):
+                whole_files.setdefault(path, "unparseable diff header")
+
     for line in diff.splitlines():
-        if line.startswith("--- "):
-            p = line[4:]
+        if line.startswith("diff --git "):
+            close_block()
+            cur = prev = None
+            blk = {"path": _diff_git_path(line[len("diff --git "):]),
+                   "header": False, "rename": False, "empty": False}
+        elif line.startswith("--- "):
+            p = _header_path(line[4:])
             prev = p[2:] if p.startswith("a/") else None
+        elif line.startswith(("new file mode ", "deleted file mode ")):
+            if blk:
+                blk["empty"] = True
         elif line.startswith("rename from "):
-            p = line[len("rename from "):]
+            p = _unquote_git_path(line[len("rename from "):])
+            if blk:
+                blk["rename"] = True
             if _is_product(p):
                 whole_files[p] = "renamed from"
         elif line.startswith("rename to "):
-            p = line[len("rename to "):]
+            p = _unquote_git_path(line[len("rename to "):])
+            if blk:
+                blk["rename"] = True
             if _is_product(p):
                 whole_files[p] = "renamed to"
         elif line.startswith("+++ ") and (
-            line[4:].startswith("b/") or line[4:] == "/dev/null"
+            _header_path(line[4:]).startswith("b/")
+            or _header_path(line[4:]) == "/dev/null"
         ):
-            path = line[4:]
+            path = _header_path(line[4:])
+            if blk:
+                blk["header"] = True
             if path == "/dev/null":
                 # whole-file deletion: the surviving path is on the '---' line
                 if prev and _is_product(prev):
@@ -127,16 +216,28 @@ def _parse_unified_diff(diff):
                     # affected journey is still selected (recall-first).
                     lo = max(1, start)
                     ranges[cur].append((lo, lo + 1))
+    close_block()
     return {f: r for f, r in ranges.items() if r}, whole_files
 
 
 def changed_ranges(repo, base, head):
     diff = subprocess.run(
+        # Every flag pins something a user's git config could otherwise change
+        # under us (audit C1): diff.noprefix / mnemonicPrefix drop the `b/` the
+        # parser keys on, color.diff=always injects escapes into every line,
+        # core.quotePath quotes non-ASCII names, external/textconv drivers
+        # replace the patch text. A config-dependent parse reads as "no changes"
+        # -- a confident, wrong NONE.
         # -M: detect renames so a moved module is seeded whole rather than read
         # as an unrelated delete + add.
-        ["git", "-C", repo, "diff", "--unified=0", "-M", f"{base}..{head}"],
+        # --end-of-options: `base`/`head` are never parsed as git options (M2).
+        ["git", "-C", repo, "-c", "core.quotePath=false", "diff", "--no-color",
+         "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
+         "--unified=0", "-M", "--end-of-options", f"{base}..{head}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
         check=True,
     ).stdout
     return _parse_unified_diff(diff)
