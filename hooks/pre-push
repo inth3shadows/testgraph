@@ -40,9 +40,24 @@ while read -r tg_lref tg_local _remote_ref tg_remote; do
         # failing assignment ends the shell — which for a pre-push hook means
         # FAILING THE PUSH. The one thing this hook must never do, reached
         # through a non-zero exit we did not even want.
-        tg_base=$(git config wt.base 2>/dev/null) || true
-        [ -z "${tg_base:-}" ] && tg_base=main
-        tg_remote=$(git merge-base "$tg_local" "$tg_base" 2>/dev/null) || true
+        #
+        # Which branch is "the base" is not always `main`: a `master` repo with a
+        # hard-coded `main` found no base, fell through to the parent commit, and
+        # reported only the tip of a multi-commit first push without a word.
+        # Candidates in order of how much the repo itself said: an explicit
+        # `wt.base`, the remote's default branch, then the usual names. The first
+        # that resolves to a commit wins.
+        tg_cfg_base=$(git config wt.base 2>/dev/null) || true
+        tg_head_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || true
+        tg_base=""
+        for tg_cand in "${tg_cfg_base:-}" "${tg_head_base:-}" main master origin/main origin/master; do
+            case "$tg_cand" in ""|-*) continue ;; esac     # never let a value become an option
+            if git rev-parse --verify --quiet "${tg_cand}^{commit}" >/dev/null 2>&1; then
+                tg_base=$tg_cand
+                break
+            fi
+        done
+        [ -z "${tg_base:-}" ] && tg_remote="" || { tg_remote=$(git merge-base "$tg_local" "$tg_base" 2>/dev/null) || true; }
         # Pushing the base branch itself merge-bases to its own tip: fall back to
         # the parent commit rather than reporting an empty diff.
         [ "${tg_remote:-}" = "$tg_local" ] && tg_remote=""
