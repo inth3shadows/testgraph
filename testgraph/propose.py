@@ -729,7 +729,7 @@ def main(argv=None):
     ap.add_argument("--target", default=None,
                     help="registry target name (defaults to the repo dir name)")
     ap.add_argument("--out", default=None,
-                    help="draft registry path (default journeys/<target>.draft.json)")
+                    help="draft registry path (default <repo>/.testgraph/journeys/<target>.draft.json)")
     ap.add_argument("--json", dest="json_out", action="store_true",
                     help="print the full candidate bundle instead of a summary")
     args = ap.parse_args(argv)

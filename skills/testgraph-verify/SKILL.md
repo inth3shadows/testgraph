@@ -26,7 +26,10 @@ out of scope.
 
 1. List the product files you changed. Use `git diff --name-only HEAD` so
    **staged** work is included — plain `git diff` shows only unstaged changes and
-   would report nothing after a `git add`. Ignore test files.
+   would report nothing after a `git add`. That still misses brand-new files
+   that were never `git add`ed, so also run
+   `git ls-files --others --exclude-standard` (untracked, not ignored) and treat
+   those as changed too. Ignore test files.
 2. Open the map and find the `###` section for each changed file.
 3. **Match rows by symbol name first.** Find the symbols you edited and read
    their journey IDs. Line ranges are a *hint only* — they are frozen at the
@@ -115,6 +118,10 @@ python3 -m testgraph.export --repo <repo> --out maps/<target>.md
   unbounded), and a journey entry the index still resolves but the source no longer
   defines (selection ran on stale edges, so the journey set may be wrong in either
   direction). Check all three, then believe it.
+  **It additionally requires an approved registry**: if the output (or the map
+  header) carries an `UNAPPROVED REGISTRY` warning, `NONE` means "not registered",
+  not "not affected" — nobody has confirmed the registry lists every journey. Treat
+  it as *unknown*.
 - Do not edit the map by hand. It is generated, and a hand-edit that drops a
   journey is indistinguishable from a graph bug.
 
