@@ -307,5 +307,26 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(tgtrace._current, {("app.py", "handler")})
 
 
+    def test_a_worker_thread_is_recorded_by_the_setprofile_backend(self):
+        # Audit M10: sys.setprofile covers only the calling thread, so on 3.11
+        # (no sys.monitoring) a journey entry running in a worker thread was
+        # never recorded. Force the profile backend so this runs on every
+        # version.
+        import threading
+        path = os.path.join(self.root, "worker.py")
+        ns = {}
+        exec(compile("def work():\n    return 1\n", path, "exec"), ns)
+        tgtrace._current = set()
+        tgtrace._start_profile()
+        try:
+            t = threading.Thread(target=ns["work"])
+            t.start()
+            t.join()
+        finally:
+            tgtrace._stop_profile()
+        self.assertIn(("worker.py", "work"), tgtrace._current)
+        self.assertIsNone(sys.getprofile())
+
+
 if __name__ == "__main__":
     unittest.main()
