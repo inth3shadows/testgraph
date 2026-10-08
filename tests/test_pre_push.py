@@ -152,6 +152,9 @@ class PrePushHookTest(unittest.TestCase):
                              start_new_session=True)
         p.stdin.write(self._stdin(tip))
         p.stdin.close()
+        # communicate() flushes a still-referenced stdin and raises ValueError on
+        # a closed file before 3.13; drop the reference once it is closed.
+        p.stdin = None
         time.sleep(1.5)
         self.assertTrue(_stray_processes(), "the stub should be running by now")
         os.kill(p.pid, sig)          # the shell only: its child ignores SIGINT
