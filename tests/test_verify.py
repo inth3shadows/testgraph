@@ -10,14 +10,18 @@ run printed `NO JOURNEY-LEVEL TEST: J1, J5, J6, J7` and exited 0 — four journe
 unverified behind a green from the other four.
 """
 import os
+import shutil
 import sqlite3
 import sys
+import tempfile
+import types
 import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 from testgraph import results as res  # noqa: E402
 from testgraph import verify  # noqa: E402
+from test_core import _db_on_disk, _git_repo, _registry_file, build_fixture  # noqa: E402
 
 
 def build_conn():
@@ -194,6 +198,159 @@ class ExitCodeTests(unittest.TestCase):
         self.assertEqual(
             verify.exit_code({"refused": True}), verify.EXIT_REFUSED
         )
+
+
+def _summary_for(journeys, trace, verdicts, pytest_exit=0):
+    """What `run` would assemble from validate()'s output, for exit/render."""
+    conn = build_conn()
+    credited, unvalidated, per_journey = verify.validate(
+        conn, REGISTRY, trace, verdicts)
+    incomplete = []
+    for j in journeys:
+        if j in per_journey and credited.get(j) not in ("pass", "fail"):
+            incomplete.append(
+                (j, "skip" if credited.get(j) == "skip" else "no verdict"))
+    return {
+        "repo": "demo",
+        "selection": {"base": "a", "head": "b", "warnings": []},
+        "journeys": journeys, "marker_expression": " or ".join(
+            f"tg_{j}" for j in journeys),
+        "collected": len(verdicts), "credited": credited,
+        "unvalidated": unvalidated, "per_journey": per_journey,
+        "uncovered": [j for j in journeys if j not in per_journey],
+        "incomplete": incomplete, "rows_written": 0, "pytest_exit": pytest_exit,
+    }
+
+
+J2_TRACE = [["app/sel.py", "select_entry"]]
+
+
+class RedAndSkippedJourneyTests(unittest.TestCase):
+    """Audit C2: verify exited 0 over red, skipped, and verdict-less journeys."""
+
+    def test_a_journey_whose_only_test_skipped_in_its_body_is_not_ok(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::a": ["J2"]}, "tests": {"tests/t.py::a": J2_TRACE}},
+            junit(**{"tests.t.a": "skip"}))
+        self.assertEqual(s["credited"], {"J2": "skip"})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
+        self.assertIn("ran, but not a pass: J2 (skipped)", verify.render(s, REGISTRY))
+
+    def test_a_declared_test_that_failed_before_any_entry_makes_the_journey_red(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::ok": ["J2"], "tests/t.py::bad": ["J2"]},
+             "tests": {"tests/t.py::ok": J2_TRACE,
+                       "tests/t.py::bad": [["app/hook.py", "helper"]]}},
+            junit(**{"tests.t.ok": "pass", "tests.t.bad": "fail"}))
+        self.assertEqual(s["credited"], {"J2": "fail"})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_TESTS_FAILED)
+
+    def test_a_declared_test_that_errored_in_setup_makes_the_journey_red(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::ok": ["J2"], "tests/t.py::bad": ["J2"]},
+             "tests": {"tests/t.py::ok": J2_TRACE}},  # bad: no body trace
+            junit(**{"tests.t.ok": "pass", "tests.t.bad": "error"}))
+        self.assertEqual(s["credited"], {"J2": "fail"})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_TESTS_FAILED)
+
+    def test_an_unvalidated_passing_declaration_still_credits_nothing(self):
+        s = _summary_for(
+            ["J1"],
+            {"declared": {"tests/t.py::b": ["J1"]},
+             "tests": {"tests/t.py::b": [["app/hook.py", "helper"]]}},
+            junit(**{"tests.t.b": "pass"}))
+        self.assertEqual(s["credited"], {})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
+
+    def test_entered_the_journey_but_verdict_did_not_join_is_not_ok(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::a": ["J2"]}, "tests": {"tests/t.py::a": J2_TRACE}},
+            {})  # JUnit has nothing under this key
+        self.assertEqual(s["credited"], {})
+        self.assertEqual(s["uncovered"], [])
+        self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
+        self.assertIn("ran, but not a pass: J2 (no verdict)", verify.render(s, REGISTRY))
+
+    def test_abnormal_pytest_exit_downgrades_an_otherwise_ok_result(self):
+        base = {"journeys": ["J2"], "credited": {"J2": "pass"}, "uncovered": []}
+        self.assertEqual(verify.exit_code({**base, "pytest_exit": 0}), verify.EXIT_OK)
+        self.assertEqual(verify.exit_code({**base, "pytest_exit": 2}),
+                         verify.EXIT_INCOMPLETE)
+
+    def test_a_selected_journey_credited_only_skip_is_incomplete(self):
+        self.assertEqual(
+            verify.exit_code({"journeys": ["J2"], "credited": {"J2": "skip"},
+                              "uncovered": []}),
+            verify.EXIT_INCOMPLETE)
+
+
+class StrictRegistryTests(unittest.TestCase):
+    """Audit H1: live verify must not run off a registry some of whose journeys
+    can never be selected."""
+
+    def test_an_unresolvable_journey_refuses_the_run(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        db = _db_on_disk(tmp, build_fixture())
+        registry = _registry_file(tmp, {
+            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+            "J9": {"name": "gone", "entries": [{"name": "no_such_fn", "file": "app/svc.py"}]},
+        })
+        repo, run = _git_repo(tmp, {"app/svc.py": 22})
+        with open(os.path.join(repo, "app", "svc.py"), "a") as fh:
+            fh.write("# touched\n")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "touch")
+        summary, err = verify.run(repo, "HEAD~1", "HEAD", registry_path=registry,
+                                  db_path=db)
+        self.assertIsNone(err)
+        self.assertTrue(summary.get("refused"), summary)
+        self.assertEqual(verify.exit_code(summary), verify.EXIT_REFUSED)
+
+
+class ConnectionClosedTests(unittest.TestCase):
+    """Audit M6: `run` opens a db connection and must close it."""
+
+    def test_run_closes_its_connection(self):
+        import unittest.mock
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        db = _db_on_disk(tmp, build_fixture())
+        registry = _registry_file(tmp, {
+            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+        })
+        repo, run = _git_repo(tmp, {"app/svc.py": 22})
+        with open(os.path.join(repo, "app", "svc.py"), "a") as fh:
+            fh.write("# touched\n")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "touch")
+        closed, opened = [], []
+        real = verify.dbmod.connect
+
+        class Proxy:
+            def __init__(self, conn):
+                self._c = conn
+                opened.append(True)
+
+            def close(self):
+                closed.append(True)
+                self._c.close()
+
+            def __getattr__(self, n):
+                return getattr(self._c, n)
+
+        with unittest.mock.patch.object(
+                verify.dbmod, "connect", lambda p: Proxy(real(p))):
+            verify.run(repo, "HEAD~1", "HEAD", registry_path=registry, db_path=db,
+                       _runner=lambda: types.SimpleNamespace(returncode=0),
+                       append=lambda row: True)
+        # select opens one and verify opens one; both must be closed
+        self.assertEqual(len(opened), 2)
+        self.assertEqual(len(closed), len(opened))
 
 
 class SummaryShapeTests(unittest.TestCase):

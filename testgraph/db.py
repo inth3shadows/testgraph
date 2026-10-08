@@ -385,17 +385,32 @@ def top_fanin_nodes(conn, limit, exclude_source=None):
 
 def resolve_symbol(conn, name, file_suffix=None):
     """Node ids for a symbol by name, optionally constrained to a file suffix
-    (kills same-name duplicates like auth.me vs test.me)."""
+    (kills same-name duplicates like auth.me vs test.me).
+
+    The suffix is anchored at a directory boundary and case-sensitive:
+    `app/config.py` matches `app/config.py` and `backend/app/config.py`, never
+    `legacy/oldapp/config.py` or `APP/Config.py` (audit M1). SQL LIKE is only a
+    prefilter (with `\\ % _` escaped so they are literal); LIKE alone is
+    case-insensitive and has no boundary, so the exact test is done in Python.
+    """
     if file_suffix:
-        rows = conn.execute(
-            "SELECT id FROM nodes WHERE name = ? AND kind != 'file' "
-            "AND file_path LIKE ?",
-            (name, f"%{file_suffix}"),
+        suffix = file_suffix.lstrip("/")
+        esc = (
+            suffix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         )
-    else:
         rows = conn.execute(
-            "SELECT id FROM nodes WHERE name = ? AND kind != 'file'", (name,)
+            "SELECT id, file_path FROM nodes WHERE name = ? AND kind != 'file' "
+            "AND file_path LIKE ? ESCAPE '\\'",
+            (name, f"%{esc}"),
         )
+        return [
+            r[0]
+            for r in rows
+            if r[1] is not None and (r[1] == suffix or r[1].endswith("/" + suffix))
+        ]
+    rows = conn.execute(
+        "SELECT id FROM nodes WHERE name = ? AND kind != 'file'", (name,)
+    )
     return [r[0] for r in rows]
 
 

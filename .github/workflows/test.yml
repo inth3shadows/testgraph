@@ -15,6 +15,13 @@ on:
 jobs:
   unittest:
     runs-on: ubuntu-latest
+    # The package supports 3.11+ (pyproject) and has version-specific code paths
+    # (sys.monitoring vs sys.setprofile in the tracer), so a single-version run
+    # leaves the others untested (audit M4).
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       # Pinned to commit shas, matching release.yml. A floating tag is a
       # mutable reference to code that runs with this repo's token; the pins
@@ -23,5 +30,18 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+      - run: python3 -m unittest discover -s tests
+
+  # The package itself is stdlib-only, but the tests that drive a real pytest
+  # (the tracer plugin, verify, the adapter) need pytest importable. Without this
+  # job they never run in CI (audit M4).
+  unittest-with-pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install pytest
       - run: python3 -m unittest discover -s tests

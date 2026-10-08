@@ -1108,6 +1108,42 @@ class IntoTargetTests(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, ".testgraph")))
 
 
+    def _refusal(self, main, argv):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), \
+                unittest.mock.patch.object(
+                    dbmod, "connect",
+                    side_effect=AssertionError("must refuse before opening a db")), \
+                unittest.mock.patch.object(
+                    reg, "load",
+                    side_effect=AssertionError("must not load any registry")):
+            rc = main(argv)
+        return rc, err.getvalue()
+
+    def test_export_without_a_matching_registry_refuses(self):
+        """audit H2: `--registry` used to default to journeys/honeyslate.json for
+        every repo, so exporting any other project mapped it against the wrong
+        journeys without complaint. It now resolves by target, like select."""
+        rc, err = self._refusal(exp.main, ["--repo", self.tmp])
+        self.assertEqual(rc, 2)
+        self.assertIn("no journey registry found", err)
+        self.assertNotIn("honeyslate", err)
+
+    def test_repo_defaults_to_the_current_directory(self):
+        """audit H2: `--repo` defaulted to a personal honeyslate checkout path.
+        Both export and select now default to ".", so the refusal names the
+        directory the command ran in."""
+        old = os.getcwd()
+        os.chdir(self.tmp)
+        self.addCleanup(os.chdir, old)
+        for main in (exp.main, sel.main):
+            rc, err = self._refusal(main, [])
+            self.assertEqual(rc, 2)
+            self.assertIn("no journey registry found", err)
+            self.assertIn("(.)", err)
+            self.assertNotIn("honeyslate/main", err)
+
+
 class MarkdownRenderingTests(unittest.TestCase):
     """`render_markdown` produces the only artifact an agent actually reads, and
     it had no test at all — the unit tests asserted `build_map`'s dicts and the
@@ -2227,3 +2263,259 @@ class NoneMeansUnknownTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiffInputRobustnessTests(unittest.TestCase):
+    """Audit C1: the diff parse silently dropped files under common git config or
+    path shapes, and `select` then answered a clean `journeys: []` -- no warning,
+    no `unknown_because`. Each case here used to be exactly that."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _run_case(self, rel, config=()):
+        conn = build_fixture()
+        conn.execute(
+            "INSERT INTO nodes VALUES (?,?,?,?,?,?,?)",
+            ("function:h", "function", "h", "h", rel, 10, 20),
+        )
+        conn.commit()
+        registry = _registry_file(
+            self.tmp, {"J1": {"name": "one", "entries": [{"name": "h", "file": rel}]}}
+        )
+        repo, run = _git_repo(self.tmp, {rel: 22})
+        for k, v in config:
+            run("git", "config", k, v)
+        full = os.path.join(repo, rel)
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[11] = "changed = 1\n"  # inside h (10-20)
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "edit")
+        db = _db_on_disk(self.tmp, conn)
+        res = sel.select(repo, "HEAD~1", "HEAD", db, registry)
+        self.assertEqual(res["status"], "OK")
+        # Either selected outright or degraded to "everything, verify manually";
+        # never a clean NONE.
+        self.assertIn("J1", {j["id"] for j in res["journeys"]}, res)
+        return res
+
+    def test_diff_noprefix_config(self):
+        res = self._run_case("app/svc2.py", [("diff.noprefix", "true")])
+        self.assertIn("app/svc2.py", res["changed_files"])
+
+    def test_diff_mnemonicprefix_config(self):
+        self._run_case("app/svc2.py", [("diff.mnemonicPrefix", "true")])
+
+    def test_color_diff_always(self):
+        self._run_case("app/svc2.py", [("color.diff", "always")])
+
+    def test_non_ascii_path(self):
+        res = self._run_case("app/café.py")
+        self.assertIn("app/café.py", res["changed_files"])
+
+    def test_path_with_space(self):
+        res = self._run_case("app/my mod.py")
+        self.assertIn("app/my mod.py", res["changed_files"])
+
+    def test_path_with_double_quote(self):
+        res = self._run_case('app/a"b.py')
+        self.assertIn('app/a"b.py', res["changed_files"])
+
+    def test_unreadable_header_does_not_steal_the_next_files_hunks(self):
+        # First block is readable; the second has no recognisable '+++' header.
+        # Its hunk must not be credited to the first file, and the second file
+        # must still be reported rather than dropped.
+        diff = (
+            "diff --git a/app/a.py b/app/a.py\n--- a/app/a.py\n+++ b/app/a.py\n"
+            "@@ -3 +3 @@\n-x\n+y\n"
+            "diff --git a/app/b.py b/app/b.py\nindex 1..2 100644\n"
+            "--- a/app/b.py\n+++ garbled/app/b.py\n@@ -9 +9 @@\n-x\n+y\n"
+        )
+        ranges, whole = sel._parse_unified_diff(diff)
+        self.assertEqual(ranges, {"app/a.py": [(3, 3)]})
+        self.assertEqual(whole, {"app/b.py": "unparseable diff header"})
+
+    def test_unquote_git_path(self):
+        self.assertEqual(sel._unquote_git_path('"b/a\\"b.py"'), 'b/a"b.py')
+        self.assertEqual(sel._unquote_git_path('"b/caf\\303\\251.py"'), "b/café.py")
+        self.assertEqual(sel._unquote_git_path("b/plain.py"), "b/plain.py")
+
+    def test_mode_only_change_is_not_reported_as_unparseable(self):
+        diff = ("diff --git a/app/svc.py b/app/svc.py\n"
+                "old mode 100644\nnew mode 100755\n")
+        self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
+
+    def test_chmod_only_commit_does_not_degrade_recall(self):
+        conn = build_fixture()
+        registry = _registry_file(self.tmp, {
+            "J1": {"name": "one",
+                   "entries": [{"name": "handler_a", "file": "app/svc.py"}]}})
+        repo, run = _git_repo(self.tmp, {"app/svc.py": 22})
+        run("git", "update-index", "--chmod=+x", "app/svc.py")
+        run("git", "commit", "-qm", "chmod")
+        db = _db_on_disk(self.tmp, conn)
+        res = sel.select(repo, "HEAD~1", "HEAD", db, registry)
+        ranges, whole = sel.changed_ranges(repo, "HEAD~1", "HEAD")
+        self.assertEqual((ranges, whole), ({}, {}))
+        self.assertFalse([w for w in res["warnings"] if "unparseable" in w], res)
+        self.assertEqual(res["journeys"], [])
+
+    def test_empty_new_file_is_not_reported_as_unparseable(self):
+        diff = "diff --git a/app/__init__.py b/app/__init__.py\nnew file mode 100644\nindex 0..e69de29\n"
+        self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
+
+
+
+class RevisionOptionInjectionTests(unittest.TestCase):
+    """Audit M2: `base`/`head` reach git as arguments, and through the MCP tool
+    they come from the model. `--output=<path>` made `git diff` write (truncate)
+    an arbitrary file and return an empty diff -- a clean NONE."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.conn = build_fixture()
+        self.registry = _registry_file(
+            self.tmp, {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                                          "file": "app/svc.py"}]}}
+        )
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+        self.db = _db_on_disk(self.tmp, self.conn)
+        self.victim = os.path.join(self.tmp, "victim.txt")
+
+    def test_select_rejects_a_dash_revision_and_writes_nothing(self):
+        with self.assertRaises(ValueError) as caught:
+            sel.select(self.repo, f"--output={self.victim}", "HEAD", self.db,
+                       self.registry)
+        self.assertIn("may not start with '-'", str(caught.exception))
+        self.assertFalse(os.path.exists(self.victim))
+        with self.assertRaises(ValueError):
+            sel.select(self.repo, "HEAD", "-x", self.db, self.registry)
+
+    def test_mcp_impact_is_an_error_and_writes_nothing(self):
+        from testgraph import mcp
+        dbdir = os.path.join(self.repo, ".codegraph")
+        os.makedirs(dbdir)
+        shutil.copy(self.db, os.path.join(dbdir, "codegraph.db"))
+        with unittest.mock.patch.object(
+            reg, "resolve_for_repo", return_value=self.registry
+        ):
+            text, is_error = mcp.call_tool(
+                "testgraph_impact",
+                {"repo": self.repo, "base": f"--output={self.victim}", "head": "HEAD"},
+            )
+        self.assertTrue(is_error, text)
+        self.assertFalse(os.path.exists(self.victim))
+
+    def test_changed_ranges_passes_end_of_options(self):
+        # defence in depth: even without the select() guard, git must not parse a
+        # dash-leading revision as an option
+        victim = self.victim
+        with self.assertRaises(subprocess.CalledProcessError):
+            sel.changed_ranges(self.repo, f"--output={victim}", "HEAD")
+        self.assertFalse(os.path.exists(victim))
+
+    def test_resolve_commit_refuses_a_dash_revision(self):
+        from testgraph import ledger
+        self.assertIsNone(ledger.resolve_commit(self.repo, "-x"))
+        self.assertIsNone(ledger.resolve_commit(self.repo, "--output=/tmp/x"))
+        self.assertIsNotNone(ledger.resolve_commit(self.repo, "HEAD"))
+
+
+class ResolveSymbolSuffixTests(unittest.TestCase):
+    """Audit M1: a registry `file` is a path SUFFIX at a directory boundary,
+    case-sensitive, with no LIKE wildcards. A bare `%suffix` LIKE let
+    `app/config.py` resolve to `legacy/oldapp/config.py` and `APP/Config.py`."""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.execute(
+            "CREATE TABLE nodes(id TEXT, kind TEXT, name TEXT, "
+            "qualified_name TEXT, file_path TEXT, start_line INT, end_line INT)"
+        )
+        rows = [
+            ("a", "function", "f", "f", "app/config.py", 1, 2),
+            ("b", "function", "f", "f", "legacy/oldapp/config.py", 1, 2),
+            ("c", "function", "f", "f", "APP/Config.py", 1, 2),
+            ("d", "function", "f", "f", "backend/app/routers/tasks.py", 1, 2),
+            ("e", "function", "f", "f", "x/my_mod.py", 1, 2),
+            ("g", "function", "f", "f", "x/myXmod.py", 1, 2),
+        ]
+        self.conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?)", rows)
+
+    def test_directory_boundary_and_case(self):
+        self.assertEqual(dbmod.resolve_symbol(self.conn, "f", "app/config.py"), ["a"])
+
+    def test_suffix_still_matches_deeper_path(self):
+        self.assertEqual(
+            dbmod.resolve_symbol(self.conn, "f", "routers/tasks.py"), ["d"]
+        )
+
+    def test_underscore_is_literal(self):
+        self.assertEqual(dbmod.resolve_symbol(self.conn, "f", "my_mod.py"), ["e"])
+
+    def test_percent_is_literal(self):
+        self.assertEqual(dbmod.resolve_symbol(self.conn, "f", "%.py"), [])
+
+
+class ConnectionsAreClosedTests(unittest.TestCase):
+    """Audit M6: the MCP server is long-lived and the module docstring says
+    connections are closed; select/export opened one per call and never did."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.registry = _registry_file(
+            self.tmp, {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                                          "file": "app/svc.py"}]}}
+        )
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.opened = []
+        real = dbmod.connect
+
+        def tracking(path):
+            conn = real(path)
+            closed = []
+            self.opened.append(closed)
+            return _ClosingProxy(conn, closed)
+
+        patcher = unittest.mock.patch.object(dbmod, "connect", tracking)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_select_closes_its_connection(self):
+        sel.select(self.repo, "HEAD", "HEAD", self.db, self.registry)
+        self.assertEqual([c for c in self.opened], [[True]])
+
+    def test_select_closes_its_connection_when_it_raises(self):
+        with self.assertRaises(Exception):
+            sel.select(self.repo, "HEAD", "HEAD", self.db,
+                       os.path.join(self.tmp, "missing.json"))
+        self.assertTrue(self.opened and all(self.opened))
+
+    def test_export_closes_its_connection(self):
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            exp.main(["--repo", self.repo, "--registry", self.registry,
+                      "--db", self.db, "--out", os.path.join(self.tmp, "m.md")])
+        self.assertTrue(self.opened and all(self.opened))
+
+
+class _ClosingProxy:
+    """Delegates to a sqlite connection and records `close()`."""
+
+    def __init__(self, conn, closed):
+        self._conn = conn
+        self._closed = closed
+
+    def close(self):
+        self._closed.append(True)
+        self._conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)

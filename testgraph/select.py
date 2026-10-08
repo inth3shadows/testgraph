@@ -68,6 +68,64 @@ def _is_test(path):
     )
 
 
+_SIMPLE_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11,
+                   "\\": 92, '"': 34}
+
+
+def _unquote_git_path(p):
+    """Decode a git C-quoted path (`"b/a\\"b.py"`, `"a/caf\\303\\251.py"`).
+
+    git quotes a name containing `"`, `\\`, a control character, or (unless
+    `core.quotePath=false`) a non-ASCII byte. An unquoted path is returned as is.
+    Bytes are decoded as utf-8 with surrogateescape so a non-utf-8 name survives
+    as a distinct string instead of raising."""
+    if len(p) < 2 or not (p.startswith('"') and p.endswith('"')):
+        return p
+    body, out, i = p[1:-1], bytearray(), 0
+    while i < len(body):
+        c = body[i]
+        if c != "\\" or i + 1 >= len(body):
+            out += c.encode("utf-8", "surrogateescape")
+            i += 1
+            continue
+        n = body[i + 1]
+        if n in "01234567":
+            j = i + 1
+            while j < len(body) and j < i + 4 and body[j] in "01234567":
+                j += 1
+            out.append(int(body[i + 1:j], 8) & 0xFF)
+            i = j
+        else:
+            out += (bytes([_SIMPLE_ESCAPES[n]]) if n in _SIMPLE_ESCAPES
+                    else n.encode("utf-8", "surrogateescape"))
+            i += 2
+    return out.decode("utf-8", "surrogateescape")
+
+
+def _header_path(raw):
+    """Path from a '---'/'+++' line body: drop git's single trailing TAB (it marks
+    a name containing a space), then undo C-quoting."""
+    if raw.endswith("\t"):
+        raw = raw[:-1]
+    return _unquote_git_path(raw)
+
+
+def _diff_git_path(rest):
+    """Best-effort path from the tail of a `diff --git a/X b/Y` line, for a block
+    that never produced a readable '+++' header. Returns None if it cannot say."""
+    if '"' in rest:
+        toks = re.findall(r'"(?:[^"\\]|\\.)*"|\S+', rest)
+        if len(toks) == 2:
+            right = _unquote_git_path(toks[1])
+            return right[2:] if right.startswith("b/") else None
+        return None
+    n = (len(rest) - 1) // 2
+    left, right = rest[:n], rest[n + 1:]
+    if len(rest) % 2 == 1 and left.startswith("a/") and right.startswith("b/"):
+        return right[2:]
+    return None
+
+
 def _parse_unified_diff(diff):
     """Parse a `git diff --unified=0` into
     `(ranges, whole_files)` where
@@ -85,24 +143,63 @@ def _parse_unified_diff(diff):
     A '+++ ' line is only treated as a file header when it carries a 'b/' or
     '/dev/null' path, so a changed content line that renders as '+++ ...' is not
     misread as a header.
+
+    Every `diff --git` line starts a fresh block (audit C1). Without the reset a
+    block whose header could not be read left `cur` pointing at the PREVIOUS
+    file, so its hunks were credited to the wrong file and its own file vanished.
+    A product-looking block that ends with no recognisable '+++' header is
+    reported in `whole_files` ("unparseable diff header") rather than dropped:
+    unknown, not absent. The one exception is a block git marks as a new or
+    deleted file without a header, which is an empty file — no content to seed,
+    and a mode-only change (`old mode`/`new mode`, no '+++'), which is a chmod.
     """
     ranges, whole_files, cur, prev = {}, {}, None, None
+    blk = None  # state of the current `diff --git` block
+
+    def close_block():
+        if (blk and not blk["header"] and not blk["rename"] and not blk["empty"]
+                and not blk["mode"]):
+            path = blk["path"]
+            if path and _is_product(path):
+                whole_files.setdefault(path, "unparseable diff header")
+
     for line in diff.splitlines():
-        if line.startswith("--- "):
-            p = line[4:]
+        if line.startswith("diff --git "):
+            close_block()
+            cur = prev = None
+            blk = {"path": _diff_git_path(line[len("diff --git "):]),
+                   "header": False, "rename": False, "empty": False,
+                   "mode": False}
+        elif line.startswith(("old mode ", "new mode ")):
+            # A pure chmod: mode lines and no '+++' header. It changes no
+            # content, so it is not an unreadable header (C1 follow-up).
+            if blk:
+                blk["mode"] = True
+        elif line.startswith("--- "):
+            p = _header_path(line[4:])
             prev = p[2:] if p.startswith("a/") else None
+        elif line.startswith(("new file mode ", "deleted file mode ")):
+            if blk:
+                blk["empty"] = True
         elif line.startswith("rename from "):
-            p = line[len("rename from "):]
+            p = _unquote_git_path(line[len("rename from "):])
+            if blk:
+                blk["rename"] = True
             if _is_product(p):
                 whole_files[p] = "renamed from"
         elif line.startswith("rename to "):
-            p = line[len("rename to "):]
+            p = _unquote_git_path(line[len("rename to "):])
+            if blk:
+                blk["rename"] = True
             if _is_product(p):
                 whole_files[p] = "renamed to"
         elif line.startswith("+++ ") and (
-            line[4:].startswith("b/") or line[4:] == "/dev/null"
+            _header_path(line[4:]).startswith("b/")
+            or _header_path(line[4:]) == "/dev/null"
         ):
-            path = line[4:]
+            path = _header_path(line[4:])
+            if blk:
+                blk["header"] = True
             if path == "/dev/null":
                 # whole-file deletion: the surviving path is on the '---' line
                 if prev and _is_product(prev):
@@ -127,311 +224,336 @@ def _parse_unified_diff(diff):
                     # affected journey is still selected (recall-first).
                     lo = max(1, start)
                     ranges[cur].append((lo, lo + 1))
+    close_block()
     return {f: r for f, r in ranges.items() if r}, whole_files
 
 
 def changed_ranges(repo, base, head):
     diff = subprocess.run(
+        # Every flag pins something a user's git config could otherwise change
+        # under us (audit C1): diff.noprefix / mnemonicPrefix drop the `b/` the
+        # parser keys on, color.diff=always injects escapes into every line,
+        # core.quotePath quotes non-ASCII names, external/textconv drivers
+        # replace the patch text. A config-dependent parse reads as "no changes"
+        # -- a confident, wrong NONE.
         # -M: detect renames so a moved module is seeded whole rather than read
         # as an unrelated delete + add.
-        ["git", "-C", repo, "diff", "--unified=0", "-M", f"{base}..{head}"],
+        # --end-of-options: `base`/`head` are never parsed as git options (M2).
+        ["git", "-C", repo, "-c", "core.quotePath=false", "diff", "--no-color",
+         "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
+         "--unified=0", "-M", "--end-of-options", f"{base}..{head}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
         check=True,
     ).stdout
     return _parse_unified_diff(diff)
 
 
 def select(repo, base, head, db_path, registry_path, strict_registry=True):
+    # A revision starting with '-' is an option, not a revision (audit M2):
+    # `--output=<path>` made `git diff` truncate an arbitrary file and return an
+    # empty diff -- a clean NONE. Reachable from the MCP tool, where the model
+    # supplies base/head. `--end-of-options` in changed_ranges is the second
+    # layer; this refuses before ANY git call and says why.
+    for label, rev in (("base", base), ("head", head)):
+        if str(rev).startswith("-"):
+            raise ValueError(f"revision may not start with '-': {label}={rev!r}")
     conn = dbmod.connect(db_path)
-    registry = reg.load(registry_path)
+    try:
+        registry = reg.load(registry_path)
 
-    blocking, warnings = integrity.check(
-        conn,
-        repo,
-        registry.get("spot_checks", {}),
-        schema_pin=registry.get("codegraph_schema_version"),
-        extraction_pin=registry.get("codegraph_extraction_version"),
-    )
-    # Provenance of the registry itself. Everything below checks whether the
-    # registry AGREES with the code; this checks whether anyone ever read it. A
-    # machine-drafted registry (issue #6) is runnable on purpose, so this is a
-    # warning, not a block -- but a `NONE` answer computed from an unreviewed
-    # registry means "not registered", not "not affected".
-    approval = reg.approval_warning(registry)
-    if approval:
-        warnings.append(approval)
-
-    # A journey whose entries do not resolve can never be selected -- silent
-    # under-selection. Blocking is right for live use. But when ANALYSING HISTORY
-    # (the accuracy harness checks out old commits) a journey that simply did not
-    # exist yet is expected, not rot, and blocking would just shrink the scored
-    # set. `strict_registry=False` downgrades it to a reported field so the
-    # distinction is explicit rather than accidental.
-    unresolved = [jid for jid, _ in reg.unresolved(conn, registry)]
-    if unresolved:
-        detail = ", ".join(
-            f"{jid} ({reg.journey_name(registry, jid)})" for jid in unresolved
+        blocking, warnings = integrity.check(
+            conn,
+            repo,
+            registry.get("spot_checks", {}),
+            schema_pin=registry.get("codegraph_schema_version"),
+            extraction_pin=registry.get("codegraph_extraction_version"),
         )
-        if strict_registry:
-            blocking.append(
-                f"journeys with no resolvable entry symbol: {detail} — registry is "
-                f"stale against the index; they can never be selected"
+        # Provenance of the registry itself. Everything below checks whether the
+        # registry AGREES with the code; this checks whether anyone ever read it. A
+        # machine-drafted registry (issue #6) is runnable on purpose, so this is a
+        # warning, not a block -- but a `NONE` answer computed from an unreviewed
+        # registry means "not registered", not "not affected".
+        approval = reg.approval_warning(registry)
+        if approval:
+            warnings.append(approval)
+
+        # A journey whose entries do not resolve can never be selected -- silent
+        # under-selection. Blocking is right for live use. But when ANALYSING HISTORY
+        # (the accuracy harness checks out old commits) a journey that simply did not
+        # exist yet is expected, not rot, and blocking would just shrink the scored
+        # set. `strict_registry=False` downgrades it to a reported field so the
+        # distinction is explicit rather than accidental.
+        unresolved = [jid for jid, _ in reg.unresolved(conn, registry)]
+        if unresolved:
+            detail = ", ".join(
+                f"{jid} ({reg.journey_name(registry, jid)})" for jid in unresolved
             )
-        else:
-            warnings.append(
-                f"journeys absent from this index (not scored): {detail}"
-            )
-
-    # Drift the index cannot see: the registry and the index can agree while both
-    # are stale against the source. A live parse is the only check in this pipeline
-    # that reads the working tree, so it is the only one that catches a handler
-    # renamed since the last `codegraph index` (issue #7). Reported as a
-    # first-class field AND a warning, never blocking — see registry.live_drift.
-    drift = reg.live_drift(repo, registry)
-    for jid, name, rel, why in drift:
-        # Remedy per reason, not one hard-coded "re-index". live_drift reads the
-        # WORKING TREE while everything else here reads committed history, so an
-        # uncommitted rename — the common case — would otherwise send an agent off
-        # to rebuild an index that cannot change this answer.
-        warnings.append(
-            f"journey {jid} entry `{name}` ({rel}): {why} — {reg.remedy_for(why)}"
-        )
-    # Entries no parser covers are NOT drift and must not ride the warning channel:
-    # re-indexing can never clear them, so a permanent warning would train the
-    # reader to ignore warnings. Reported as their own field instead.
-    unchecked = reg.unchecked_entries(registry)
-
-    result = {"base": base, "head": head, "warnings": warnings,
-              "unresolved_journeys": unresolved,
-              "entry_drift": [
-                  {"journey": jid, "entry": name, "file": rel, "reason": why}
-                  for jid, name, rel, why in drift
-              ],
-              "entries_unchecked": [
-                  {"journey": jid, "entry": name, "file": rel}
-                  for jid, name, rel in unchecked
-              ]}
-    if blocking:
-        result["status"] = "BLOCKED"
-        result["blocking"] = blocking
-        return result
-
-    ranges, whole_files = changed_ranges(repo, base, head)
-
-    # A changed file whose hunks resolve to NO node is the same failure as an
-    # unmappable whole-file change, and it used to pass silently: seeds stayed
-    # empty, no warning was raised, and the answer was a confident
-    # "journeys to test: NONE" (issue #29). It happens whenever the index
-    # predates the file (a newly added module) or covers the extension in
-    # PRODUCT_EXT but not in this repo's graph. Per-file node sets, not one
-    # running total, so one mapped file cannot mask an unmapped one.
-    unmapped = []
-    unmapped_files = set()
-
-    def _mark_unmapped(path, detail):
-        # `unmapped_files` gates the confinement check below (an untrusted
-        # seed must not read as evidence of confinement) — one helper instead
-        # of three independent append/add pairs means that gate can't drift
-        # out of sync with `unmapped` itself.
-        unmapped.append(f"{path} ({detail})")
-        unmapped_files.add(path)
-
-    seeds = set()
-    seeds_by_file = {}
-    for f, rs in sorted(ranges.items()):
-        in_file = set()
-        for lo, hi in rs:
-            in_file.update(dbmod.nodes_for_lines(conn, f, lo, hi))
-        if in_file:
-            seeds.update(in_file)
-            seeds_by_file[f] = in_file
-        else:
-            _mark_unmapped(f, "changed lines map to no indexed symbol")
-
-    # Whole-file changes (deletions, renames) have no line ranges to map: seed
-    # every symbol the file contains. A file deleted in `head` is usually absent
-    # from an index built at `head`, so this resolves only when the index still
-    # predates the deletion (e.g. the per-commit harness). When it does not
-    # resolve, impact is UNBOUNDED — we cannot know what depended on it — and
-    # recall-first means saying so loudly rather than returning a narrow answer.
-    for path, reason in whole_files.items():
-        nodes = dbmod.nodes_in_file(conn, path)
-        if nodes:
-            seeds.update(nodes)
-            # A rename that ALSO carries edited hunks lands in both `ranges`
-            # and `whole_files` for the new path. `seeds` above always gets
-            # the full file (recall-first: a rename changes the module path
-            # for every importer, so the whole file is in play regardless of
-            # which lines moved) — but for the confinement check specifically,
-            # letting the broader whole-file set clobber a precise range-based
-            # entry can mask a real issue-#63 confinement in the lines that
-            # actually changed behind unrelated untouched symbols that happen
-            # to reach elsewhere. Keep the narrower, already-set entry.
-            if path not in seeds_by_file:
-                seeds_by_file[path] = set(nodes)
-        else:
-            _mark_unmapped(path, reason)
-
-    # A changed file that is NEWER than its index row is a third way to be
-    # unmappable, and the quietest. The other two resolve to no node and are
-    # obvious; this one resolves to the WRONG node. Seeds come from line ranges
-    # (`nodes_for_lines`), so a file that gained twenty lines above a function
-    # since it was indexed hands the diff's line numbers to whatever symbol used
-    # to live there — a neighbouring function, or nothing. The answer stays
-    # confident and can be narrower than the truth, which is the one failure
-    # this selector is built to refuse.
-    #
-    # The seeds computed above are KEPT, not discarded: whatever they resolved to
-    # is still evidence, and recall-first means adding doubt, not removing rows.
-    # Joining `unmapped` degrades the answer to "every journey, verify manually"
-    # — the same treatment issue #29 established for a file with no symbols.
-    #
-    # The `pre-push` hook runs `codegraph sync` first precisely so this stays the
-    # exceptional path rather than every push.
-    drifted = integrity.content_drift(conn, repo, set(ranges) | set(whole_files))
-    for path in sorted(drifted):
-        _mark_unmapped(path, "bytes differ from the indexed copy — line spans are stale")
-
-    impacted, impacted_caps = dbmod.impacted_closure(conn, seeds, with_reasons=True)
-    entry_map = reg.resolve_entries(conn, registry)
-
-    # A closure that resolves fine but never leaves the file(s) its seeds
-    # started in is a second, silent way to be blind (issue #63) — distinct
-    # from `unmapped` above (no node at all). The seeds have symbols; those
-    # symbols just have no recorded outbound reach. Checked per file, not
-    # against the union of every seeded file in this diff, so a genuinely
-    # cross-file change cannot mask a same-diff file that stayed confined.
-    # Files already in `unmapped` are skipped: their seeds are untrusted, not
-    # evidence of confinement.
-    #
-    # NOT flagged when the file's own closure already lands on a registered
-    # entry point (`entry_map`): a route handler with no callers on record is
-    # not a blind spot, it's a correctly-confident answer — the seed IS the
-    # thing the registry names, so there is nothing "unknown" left to say.
-    # Reproduced against this repo's own index before this guard existed: 7
-    # of 11 "confined" files had already selected a journey at confidence
-    # 1.0, and the warning called that UNKNOWN anyway.
-    #
-    # One recursive traversal per seeded file (beyond the single-file reuse
-    # below), and `closure_files` scans every resulting node rather than
-    # short-circuiting on the first one outside `f`: a mechanical
-    # rename/refactor touching many files pays for it on every one. Accepted
-    # for the same reason `journeys` already loops `caller_edge_count` per
-    # entry above — this selector is recall-first and already spends
-    # per-item DB round trips elsewhere; a diff wide enough to feel this is
-    # also wide enough to be a whole-file/`unmapped` case on the commonest
-    # paths. Revisit if this ever shows up in profiling.
-    confined_files = []
-    for f, file_seeds in sorted(seeds_by_file.items()):
-        if f in unmapped_files:
-            continue
-        # Judged per SEED, not per file: a file can carry both a registered
-        # entry (correctly confident on its own) and an unrelated edited
-        # symbol that is the actual blind spot. Clearing the whole file
-        # because ANY of its seeds happens to be an entry point silently
-        # swallowed the NOTE for the seed that needed it — reproduced with
-        # two unrelated edited symbols in one file, one an entry, one not.
-        uncovered = file_seeds - entry_map.keys()
-        if not uncovered:
-            continue
-        # `impacted` is already this closure whenever the uncovered seeds are
-        # the full seed set — reuse it instead of re-running the same
-        # recursive traversal. Checked by value, not by file/seed counts:
-        # inferring it silently breaks if a future seed source desyncs from
-        # `seeds`.
-        file_impacted = (
-            impacted if uncovered == seeds else dbmod.impacted_closure(conn, uncovered)
-        )
-        # `file_impacted` always contains at least the seeds themselves
-        # (`impacted_closure` seeds every id at 1.0), and every seed in
-        # `uncovered` came from a `nodes` row whose own `file_path == f` — so
-        # `closure_files` here can never come back empty, UNLESS the closure
-        # reached an id with no matching `nodes` row (a dangling edge / stale
-        # index), which `closure_files` reports as `None` rather than
-        # silently reading as "resolves to no other file". An index
-        # inconsistent enough to produce that is not evidence of anything.
-        reached_files = dbmod.closure_files(conn, file_impacted.keys())
-        if reached_files is not None and reached_files <= {f}:
-            confined_files.append(f)
-
-    touched = {}
-    for nid in impacted.keys() & set(entry_map):
-        for jid in entry_map[nid]:
-            touched.setdefault(jid, set()).add(nid)
-
-    journeys = []
-    for jid, ents in touched.items():
-        fanin = sum(dbmod.caller_edge_count(conn, e) for e in ents)
-        # Strongest route into the journey: if ANY entry is reached confidently,
-        # the selection is trustworthy.
-        best = max(ents, key=lambda e: impacted[e])
-        conf = impacted[best]
-        journeys.append(
-            {
-                "id": jid,
-                "name": reg.journey_name(registry, jid),
-                "entries_hit": len(ents),
-                "rank": fanin,
-                "confidence": round(conf, 3),
-                "verify_manually": conf <= dbmod.LOW_CONFIDENCE,
-            }
-        )
-        # A flag nobody can act on is noise. Say which kind of weak edge held
-        # the surviving route down, so the reader knows whether to distrust the
-        # graph (name collision) or the runtime (synthesized dispatch).
-        #
-        # Deliberately NOT the `reason` key: that one means "why this row is
-        # here at all" and appears only on the bare degrade rows below, whose
-        # `entries_hit` is 0. Two tests read its ABSENCE as proof a journey was
-        # genuinely selected by the closure, so reusing it would quietly make a
-        # real selection look like a degrade row.
-        weak_reason = dbmod.weak_edge_reason(impacted_caps.get(best, ""))
-        if weak_reason and journeys[-1]["verify_manually"]:
-            journeys[-1]["weak_reason"] = weak_reason
-    # Unmappable whole-file change -> unbounded impact. Add every journey the
-    # closure did not already select, flagged for manual verification, so the
-    # answer degrades toward "test everything" instead of toward silence.
-    if unmapped:
-        warnings.append(
-            f"{len(unmapped)} changed file(s) the index cannot be trusted for "
-            f"({', '.join(unmapped)}) — impact is unbounded; all journeys listed"
-        )
-        selected = {j["id"] for j in journeys}
-        for jid in sorted(registry.get("journeys", {}), key=reg.journey_sort_key):
-            if jid not in selected:
-                journeys.append(
-                    {
-                        "id": jid,
-                        "name": reg.journey_name(registry, jid),
-                        "entries_hit": 0,
-                        "rank": 0,
-                        "confidence": 0.0,
-                        "verify_manually": True,
-                        "reason": "change with no resolvable symbols",
-                    }
+            if strict_registry:
+                blocking.append(
+                    f"journeys with no resolvable entry symbol: {detail} — registry is "
+                    f"stale against the index; they can never be selected"
+                )
+            else:
+                warnings.append(
+                    f"journeys absent from this index (not scored): {detail}"
                 )
 
-    journeys.sort(key=lambda j: (-j["rank"], reg.journey_sort_key(j["id"])))
+        # Drift the index cannot see: the registry and the index can agree while both
+        # are stale against the source. A live parse is the only check in this pipeline
+        # that reads the working tree, so it is the only one that catches a handler
+        # renamed since the last `codegraph index` (issue #7). Reported as a
+        # first-class field AND a warning, never blocking — see registry.live_drift.
+        drift = reg.live_drift(repo, registry)
+        for jid, name, rel, why in drift:
+            # Remedy per reason, not one hard-coded "re-index". live_drift reads the
+            # WORKING TREE while everything else here reads committed history, so an
+            # uncommitted rename — the common case — would otherwise send an agent off
+            # to rebuild an index that cannot change this answer.
+            warnings.append(
+                f"journey {jid} entry `{name}` ({rel}): {why} — {reg.remedy_for(why)}"
+            )
+        # Entries no parser covers are NOT drift and must not ride the warning channel:
+        # re-indexing can never clear them, so a permanent warning would train the
+        # reader to ignore warnings. Reported as their own field instead.
+        unchecked = reg.unchecked_entries(registry)
 
-    # Not appended to `warnings`: this is its own signal, deliberately kept
-    # off the capped, generic channel. `_render` below and `hook.render` each
-    # give it a dedicated, uncapped line (`closure_confined` on the result is
-    # the data both read from) — riding `warnings` would let it silently drop
-    # off a push whose other warnings already filled hook.py's MAX_WARNINGS.
+        result = {"base": base, "head": head, "warnings": warnings,
+                  "unresolved_journeys": unresolved,
+                  "entry_drift": [
+                      {"journey": jid, "entry": name, "file": rel, "reason": why}
+                      for jid, name, rel, why in drift
+                  ],
+                  "entries_unchecked": [
+                      {"journey": jid, "entry": name, "file": rel}
+                      for jid, name, rel in unchecked
+                  ]}
+        if blocking:
+            result["status"] = "BLOCKED"
+            result["blocking"] = blocking
+            return result
 
-    result.update(
-        status="OK",
-        changed_files=sorted(ranges),
-        whole_file_changes=whole_files,
-        recall_degraded=bool(unmapped),
-        closure_confined=confined_files,
-        seed_symbols=len(seeds),
-        impacted_symbols=len(impacted),
-        journeys=journeys,
-    )
-    result["unknown_because"] = none_is_unknown(result)
-    return result
+        ranges, whole_files = changed_ranges(repo, base, head)
+
+        # A changed file whose hunks resolve to NO node is the same failure as an
+        # unmappable whole-file change, and it used to pass silently: seeds stayed
+        # empty, no warning was raised, and the answer was a confident
+        # "journeys to test: NONE" (issue #29). It happens whenever the index
+        # predates the file (a newly added module) or covers the extension in
+        # PRODUCT_EXT but not in this repo's graph. Per-file node sets, not one
+        # running total, so one mapped file cannot mask an unmapped one.
+        unmapped = []
+        unmapped_files = set()
+
+        def _mark_unmapped(path, detail):
+            # `unmapped_files` gates the confinement check below (an untrusted
+            # seed must not read as evidence of confinement) — one helper instead
+            # of three independent append/add pairs means that gate can't drift
+            # out of sync with `unmapped` itself.
+            unmapped.append(f"{path} ({detail})")
+            unmapped_files.add(path)
+
+        seeds = set()
+        seeds_by_file = {}
+        for f, rs in sorted(ranges.items()):
+            in_file = set()
+            for lo, hi in rs:
+                in_file.update(dbmod.nodes_for_lines(conn, f, lo, hi))
+            if in_file:
+                seeds.update(in_file)
+                seeds_by_file[f] = in_file
+            else:
+                _mark_unmapped(f, "changed lines map to no indexed symbol")
+
+        # Whole-file changes (deletions, renames) have no line ranges to map: seed
+        # every symbol the file contains. A file deleted in `head` is usually absent
+        # from an index built at `head`, so this resolves only when the index still
+        # predates the deletion (e.g. the per-commit harness). When it does not
+        # resolve, impact is UNBOUNDED — we cannot know what depended on it — and
+        # recall-first means saying so loudly rather than returning a narrow answer.
+        for path, reason in whole_files.items():
+            nodes = dbmod.nodes_in_file(conn, path)
+            if nodes:
+                seeds.update(nodes)
+                # A rename that ALSO carries edited hunks lands in both `ranges`
+                # and `whole_files` for the new path. `seeds` above always gets
+                # the full file (recall-first: a rename changes the module path
+                # for every importer, so the whole file is in play regardless of
+                # which lines moved) — but for the confinement check specifically,
+                # letting the broader whole-file set clobber a precise range-based
+                # entry can mask a real issue-#63 confinement in the lines that
+                # actually changed behind unrelated untouched symbols that happen
+                # to reach elsewhere. Keep the narrower, already-set entry.
+                if path not in seeds_by_file:
+                    seeds_by_file[path] = set(nodes)
+            else:
+                _mark_unmapped(path, reason)
+
+        # A changed file that is NEWER than its index row is a third way to be
+        # unmappable, and the quietest. The other two resolve to no node and are
+        # obvious; this one resolves to the WRONG node. Seeds come from line ranges
+        # (`nodes_for_lines`), so a file that gained twenty lines above a function
+        # since it was indexed hands the diff's line numbers to whatever symbol used
+        # to live there — a neighbouring function, or nothing. The answer stays
+        # confident and can be narrower than the truth, which is the one failure
+        # this selector is built to refuse.
+        #
+        # The seeds computed above are KEPT, not discarded: whatever they resolved to
+        # is still evidence, and recall-first means adding doubt, not removing rows.
+        # Joining `unmapped` degrades the answer to "every journey, verify manually"
+        # — the same treatment issue #29 established for a file with no symbols.
+        #
+        # The `pre-push` hook runs `codegraph sync` first precisely so this stays the
+        # exceptional path rather than every push.
+        drifted = integrity.content_drift(conn, repo, set(ranges) | set(whole_files))
+        for path in sorted(drifted):
+            _mark_unmapped(path, "bytes differ from the indexed copy — line spans are stale")
+
+        impacted, impacted_caps = dbmod.impacted_closure(conn, seeds, with_reasons=True)
+        entry_map = reg.resolve_entries(conn, registry)
+
+        # A closure that resolves fine but never leaves the file(s) its seeds
+        # started in is a second, silent way to be blind (issue #63) — distinct
+        # from `unmapped` above (no node at all). The seeds have symbols; those
+        # symbols just have no recorded outbound reach. Checked per file, not
+        # against the union of every seeded file in this diff, so a genuinely
+        # cross-file change cannot mask a same-diff file that stayed confined.
+        # Files already in `unmapped` are skipped: their seeds are untrusted, not
+        # evidence of confinement.
+        #
+        # NOT flagged when the file's own closure already lands on a registered
+        # entry point (`entry_map`): a route handler with no callers on record is
+        # not a blind spot, it's a correctly-confident answer — the seed IS the
+        # thing the registry names, so there is nothing "unknown" left to say.
+        # Reproduced against this repo's own index before this guard existed: 7
+        # of 11 "confined" files had already selected a journey at confidence
+        # 1.0, and the warning called that UNKNOWN anyway.
+        #
+        # One recursive traversal per seeded file (beyond the single-file reuse
+        # below), and `closure_files` scans every resulting node rather than
+        # short-circuiting on the first one outside `f`: a mechanical
+        # rename/refactor touching many files pays for it on every one. Accepted
+        # for the same reason `journeys` already loops `caller_edge_count` per
+        # entry above — this selector is recall-first and already spends
+        # per-item DB round trips elsewhere; a diff wide enough to feel this is
+        # also wide enough to be a whole-file/`unmapped` case on the commonest
+        # paths. Revisit if this ever shows up in profiling.
+        confined_files = []
+        for f, file_seeds in sorted(seeds_by_file.items()):
+            if f in unmapped_files:
+                continue
+            # Judged per SEED, not per file: a file can carry both a registered
+            # entry (correctly confident on its own) and an unrelated edited
+            # symbol that is the actual blind spot. Clearing the whole file
+            # because ANY of its seeds happens to be an entry point silently
+            # swallowed the NOTE for the seed that needed it — reproduced with
+            # two unrelated edited symbols in one file, one an entry, one not.
+            uncovered = file_seeds - entry_map.keys()
+            if not uncovered:
+                continue
+            # `impacted` is already this closure whenever the uncovered seeds are
+            # the full seed set — reuse it instead of re-running the same
+            # recursive traversal. Checked by value, not by file/seed counts:
+            # inferring it silently breaks if a future seed source desyncs from
+            # `seeds`.
+            file_impacted = (
+                impacted if uncovered == seeds else dbmod.impacted_closure(conn, uncovered)
+            )
+            # `file_impacted` always contains at least the seeds themselves
+            # (`impacted_closure` seeds every id at 1.0), and every seed in
+            # `uncovered` came from a `nodes` row whose own `file_path == f` — so
+            # `closure_files` here can never come back empty, UNLESS the closure
+            # reached an id with no matching `nodes` row (a dangling edge / stale
+            # index), which `closure_files` reports as `None` rather than
+            # silently reading as "resolves to no other file". An index
+            # inconsistent enough to produce that is not evidence of anything.
+            reached_files = dbmod.closure_files(conn, file_impacted.keys())
+            if reached_files is not None and reached_files <= {f}:
+                confined_files.append(f)
+
+        touched = {}
+        for nid in impacted.keys() & set(entry_map):
+            for jid in entry_map[nid]:
+                touched.setdefault(jid, set()).add(nid)
+
+        journeys = []
+        for jid, ents in touched.items():
+            fanin = sum(dbmod.caller_edge_count(conn, e) for e in ents)
+            # Strongest route into the journey: if ANY entry is reached confidently,
+            # the selection is trustworthy.
+            best = max(ents, key=lambda e: impacted[e])
+            conf = impacted[best]
+            journeys.append(
+                {
+                    "id": jid,
+                    "name": reg.journey_name(registry, jid),
+                    "entries_hit": len(ents),
+                    "rank": fanin,
+                    "confidence": round(conf, 3),
+                    "verify_manually": conf <= dbmod.LOW_CONFIDENCE,
+                }
+            )
+            # A flag nobody can act on is noise. Say which kind of weak edge held
+            # the surviving route down, so the reader knows whether to distrust the
+            # graph (name collision) or the runtime (synthesized dispatch).
+            #
+            # Deliberately NOT the `reason` key: that one means "why this row is
+            # here at all" and appears only on the bare degrade rows below, whose
+            # `entries_hit` is 0. Two tests read its ABSENCE as proof a journey was
+            # genuinely selected by the closure, so reusing it would quietly make a
+            # real selection look like a degrade row.
+            weak_reason = dbmod.weak_edge_reason(impacted_caps.get(best, ""))
+            if weak_reason and journeys[-1]["verify_manually"]:
+                journeys[-1]["weak_reason"] = weak_reason
+        # Unmappable whole-file change -> unbounded impact. Add every journey the
+        # closure did not already select, flagged for manual verification, so the
+        # answer degrades toward "test everything" instead of toward silence.
+        if unmapped:
+            warnings.append(
+                f"{len(unmapped)} changed file(s) the index cannot be trusted for "
+                f"({', '.join(unmapped)}) — impact is unbounded; all journeys listed"
+            )
+            selected = {j["id"] for j in journeys}
+            for jid in sorted(registry.get("journeys", {}), key=reg.journey_sort_key):
+                if jid not in selected:
+                    journeys.append(
+                        {
+                            "id": jid,
+                            "name": reg.journey_name(registry, jid),
+                            "entries_hit": 0,
+                            "rank": 0,
+                            "confidence": 0.0,
+                            "verify_manually": True,
+                            "reason": "change with no resolvable symbols",
+                        }
+                    )
+
+        journeys.sort(key=lambda j: (-j["rank"], reg.journey_sort_key(j["id"])))
+
+        # Not appended to `warnings`: this is its own signal, deliberately kept
+        # off the capped, generic channel. `_render` below and `hook.render` each
+        # give it a dedicated, uncapped line (`closure_confined` on the result is
+        # the data both read from) — riding `warnings` would let it silently drop
+        # off a push whose other warnings already filled hook.py's MAX_WARNINGS.
+
+        result.update(
+            status="OK",
+            changed_files=sorted(ranges),
+            whole_file_changes=whole_files,
+            recall_degraded=bool(unmapped),
+            closure_confined=confined_files,
+            seed_symbols=len(seeds),
+            impacted_symbols=len(impacted),
+            journeys=journeys,
+        )
+        result["unknown_because"] = none_is_unknown(result)
+        return result
+    finally:
+        # Close deterministically (audit M6): a long-lived MCP server calls this per
+        # request and would otherwise hold one sqlite handle per call until GC.
+        conn.close()
 
 
 def none_is_unknown(result):
@@ -544,7 +666,7 @@ def _render(result):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="testgraph.select")
-    ap.add_argument("--repo", default="/home/ericm/personal_projects/honeyslate/main")
+    ap.add_argument("--repo", default=".")
     ap.add_argument("--base", default="HEAD~1")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--db", default=None, help="defaults to <repo>/.codegraph/codegraph.db")
@@ -563,15 +685,7 @@ def main(argv=None):
     # resulting disagreement as a stale index — a confidently wrong diagnosis.
     registry_path = args.registry or reg.resolve_for_repo(args.repo)
     if registry_path is None:
-        name = reg.repo_name(args.repo)
-        print(
-            f"no journey registry found for repo `{name}` ({args.repo}).\n"
-            f"  looked in: {reg.where_it_looked(args.repo)}\n"
-            f"  add {reg.REPO_JOURNEYS_SUBDIR}/<name>.json with "
-            f"\"target\": \"{name}\", draft one with `python3 -m "
-            f"testgraph.propose --repo {args.repo}`, or pass --registry",
-            file=sys.stderr,
-        )
+        print(reg.not_found_message(args.repo), file=sys.stderr)
         return 2
     result = select(args.repo, args.base, args.head, db_path, registry_path)
     if args.json:

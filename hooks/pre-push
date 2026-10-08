@@ -20,6 +20,86 @@ tg_repo=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 # All-zeros sha, whatever the hash length: a ref being created or deleted.
 tg_is_zero() { case "$1" in *[!0]*) return 1 ;; *) return 0 ;; esac; }
 
+# Run a command with a watchdog, in plain POSIX sh. The hook used to call GNU
+# `timeout`, which macOS does not ship: there `timeout 20 python3 ...` failed with
+# "command not found", the failure was swallowed by `2>/dev/null` / `|| true`, and
+# the whole hook became a silent no-op — the exact state issue #49 exists to end.
+# A shell watchdog needs nothing but sh, kill and sleep.
+#
+#   tg_run_bounded <seconds> <label> <cmd> [args...]
+#
+# The command runs in the background, in $tg_cd (default: the current directory),
+# with stdin from /dev/null, stdout to the terminal (or /dev/null if $tg_quiet=1)
+# and stderr to $tg_err (default /dev/null). Afterwards $tg_rc is its exit status
+# (124 when the watchdog killed it, 130 when Ctrl-C did). `exec` makes $! the command itself,
+# not a subshell around it, so the kill below reaches the real process.
+# Every TESTGRAPH_HOOK_HEARTBEAT seconds (5) it says on stderr that it is still
+# going, because a push that sits silent for 20 s looks hung; at the limit it
+# kills the command (TERM, then KILL after 2 s) and says so.
+#
+# ALWAYS returns 0 — the caller's `|| true` reasoning below applies to this too.
+# A non-background `sleep`/`kill`/`wait` that fails is absorbed here, never
+# propagated, so a hook file that already ran `set -e` cannot be ended by it.
+#
+# Ctrl-C: a background job started by a non-interactive shell ignores SIGINT, so
+# the terminal's Ctrl-C would reach this shell and `sleep` but NOT the command.
+# The trap kills it explicitly. INT skips the step that is running (the message
+# promises "Ctrl-C skips it"); TERM ends the whole hook. Neither leaves a child.
+tg_child=""
+tg_skip=0
+tg_tmp=""
+tg_kill_child() {
+    [ -n "${tg_child:-}" ] || return 0
+    kill "$tg_child" 2>/dev/null || true
+    if kill -0 "$tg_child" 2>/dev/null; then
+        sleep 1
+        kill -9 "$tg_child" 2>/dev/null || true
+    fi
+    wait "$tg_child" 2>/dev/null || true
+    tg_child=""
+}
+tg_cleanup() { tg_kill_child; [ -n "${tg_tmp:-}" ] && rm -f "$tg_tmp" 2>/dev/null; return 0; }
+trap 'tg_skip=1; tg_kill_child' INT
+trap 'tg_cleanup; exit 0' TERM
+trap 'tg_cleanup' EXIT
+
+tg_uint() { case "${1:-}" in ''|*[!0-9]*|0) echo "$2" ;; *) echo "$1" ;; esac; }
+
+tg_run_bounded() {
+    tg_limit=$1; tg_label=$2; shift 2
+    tg_beat=$(tg_uint "${TESTGRAPH_HOOK_HEARTBEAT:-}" 5)
+    tg_skip=0
+    tg_rc=0
+    if [ "${tg_quiet:-0}" = 1 ]; then
+        ( cd "${tg_cd:-.}" 2>/dev/null && exec "$@" ) </dev/null >/dev/null 2>"${tg_err:-/dev/null}" &
+    else
+        ( cd "${tg_cd:-.}" 2>/dev/null && exec "$@" ) </dev/null 2>"${tg_err:-/dev/null}" &
+    fi
+    tg_child=$!
+    tg_n=0
+    while kill -0 "$tg_child" 2>/dev/null; do
+        if [ "$tg_n" -ge "$tg_limit" ]; then
+            tg_kill_child
+            tg_rc=124
+            echo "testgraph: $tg_label skipped (timed out after ${tg_limit}s)" >&2
+            return 0
+        fi
+        sleep 1
+        tg_n=$((tg_n + 1))
+        if [ "$tg_skip" = 1 ]; then
+            tg_rc=130
+            echo "testgraph: $tg_label skipped (interrupted)" >&2
+            return 0
+        fi
+        if [ $((tg_n % tg_beat)) -eq 0 ] && kill -0 "$tg_child" 2>/dev/null; then
+            echo "testgraph: $tg_label still running (${tg_n}s) — Ctrl-C skips it" >&2
+        fi
+    done
+    wait "$tg_child" 2>/dev/null || tg_rc=$?   # reap, and keep the status for the caller
+    tg_child=""
+    return 0
+}
+
 while read -r tg_lref tg_local _remote_ref tg_remote; do
     [ -z "$tg_local" ] && continue
     tg_is_zero "$tg_local" && continue          # branch deletion: nothing to test
@@ -40,9 +120,24 @@ while read -r tg_lref tg_local _remote_ref tg_remote; do
         # failing assignment ends the shell — which for a pre-push hook means
         # FAILING THE PUSH. The one thing this hook must never do, reached
         # through a non-zero exit we did not even want.
-        tg_base=$(git config wt.base 2>/dev/null) || true
-        [ -z "${tg_base:-}" ] && tg_base=main
-        tg_remote=$(git merge-base "$tg_local" "$tg_base" 2>/dev/null) || true
+        #
+        # Which branch is "the base" is not always `main`: a `master` repo with a
+        # hard-coded `main` found no base, fell through to the parent commit, and
+        # reported only the tip of a multi-commit first push without a word.
+        # Candidates in order of how much the repo itself said: an explicit
+        # `wt.base`, the remote's default branch, then the usual names. The first
+        # that resolves to a commit wins.
+        tg_cfg_base=$(git config wt.base 2>/dev/null) || true
+        tg_head_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || true
+        tg_base=""
+        for tg_cand in "${tg_cfg_base:-}" "${tg_head_base:-}" main master origin/main origin/master; do
+            case "$tg_cand" in ""|-*) continue ;; esac     # never let a value become an option
+            if git rev-parse --verify --quiet "${tg_cand}^{commit}" >/dev/null 2>&1; then
+                tg_base=$tg_cand
+                break
+            fi
+        done
+        [ -z "${tg_base:-}" ] && tg_remote="" || { tg_remote=$(git merge-base "$tg_local" "$tg_base" 2>/dev/null) || true; }
         # Pushing the base branch itself merge-bases to its own tip: fall back to
         # the parent commit rather than reporting an empty diff.
         [ "${tg_remote:-}" = "$tg_local" ] && tg_remote=""
@@ -61,12 +156,27 @@ while read -r tg_lref tg_local _remote_ref tg_remote; do
     # precondition. Missing, slow or broken, the selector still runs — and now
     # degrades the answer loudly instead of quietly trusting a stale span.
     if command -v codegraph >/dev/null 2>&1; then
-        timeout 60 codegraph sync -q "$tg_repo" >/dev/null 2>&1 </dev/null || true
+        tg_quiet=1; tg_run_bounded "$(tg_uint "${TESTGRAPH_HOOK_SYNC_TIMEOUT:-}" 60)" "codegraph sync" \
+            codegraph sync -q "$tg_repo"
+        tg_quiet=0
     fi
 
-    # </dev/null so the selector cannot eat the ref lines still on stdin.
-    ( cd "$TESTGRAPH_HOME" && timeout 20 python3 -m testgraph.hook \
-        --repo "$tg_repo" --base "$tg_remote" --head "$tg_local" ) </dev/null 2>/dev/null
+    # </dev/null (inside tg_run_bounded) so the selector cannot eat the ref lines
+    # still on stdin. Its stdout is the answer and goes straight to the terminal.
+    # Its stderr used to be thrown away, which made a crash look like "nothing to
+    # report"; keep it in a temp file and show the first line if it failed.
+    tg_tmp=$(mktemp "${TMPDIR:-/tmp}/testgraph-hook.XXXXXX" 2>/dev/null) || tg_tmp=""
+    # (Plain assignments, not `VAR=x func`: dash and bash disagree on whether a
+    # prefix assignment outlives a function call.)
+    tg_cd="$TESTGRAPH_HOME"; tg_err="${tg_tmp:-/dev/null}"
+    tg_run_bounded "$(tg_uint "${TESTGRAPH_HOOK_TIMEOUT:-}" 20)" "selector" \
+        python3 -m testgraph.hook --repo "$tg_repo" --base "$tg_remote" --head "$tg_local"
+    tg_cd="."; tg_err="/dev/null"
+    if [ "${tg_rc:-0}" -ne 0 ] && [ -n "${tg_tmp:-}" ] && [ -s "$tg_tmp" ]; then
+        { IFS= read -r tg_line < "$tg_tmp"; echo "testgraph: selector: ${tg_line:-}" >&2; } || true
+    fi
+    [ -n "${tg_tmp:-}" ] && rm -f "$tg_tmp" 2>/dev/null
+    tg_tmp=""
     break                                        # one answer per push, not one per ref
 done
 exit 0

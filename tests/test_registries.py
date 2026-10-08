@@ -287,6 +287,20 @@ class RegistryDiscoveryTests(unittest.TestCase):
         ):
             self.assertEqual(want, reg.resolve_for_repo(self.repo))
 
+    def test_an_approved_registry_beats_its_draft_in_the_same_directory(self):
+        """audit H5: `proj.draft.json` sorts BEFORE `proj.json` ('d' < 'j'), so
+        the first-match scan returned the draft and silently shadowed the
+        approved registry sitting next to it."""
+        self._write(self._repo_dir(), "widget.draft.json", "widget")
+        want = self._write(self._repo_dir(), "widget.json", "widget")
+        self.assertEqual(want, reg.resolve_for_repo(self.repo))
+
+    def test_a_draft_is_still_returned_when_it_is_the_only_match(self):
+        """Unapproved registries run loudly by design, so a lone draft stays
+        reachable."""
+        want = self._write(self._repo_dir(), "widget.draft.json", "widget")
+        self.assertEqual(want, reg.resolve_for_repo(self.repo))
+
     def test_a_mismatched_target_in_the_repo_is_still_refused(self):
         """Being repo-local does not make a copied registry correct.
 
