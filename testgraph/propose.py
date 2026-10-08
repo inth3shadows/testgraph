@@ -137,7 +137,14 @@ def scan(repo):
             continue
         for name, routes in _handlers(tree):
             hits.append((rel, name, routes))
-    return hits, unparsed
+    # Two decorated module-level `def handler()` in one file (a copy-pasted
+    # stub, a conditional redefinition) are two hits for one (file, symbol).
+    # `assign_ids` keys on that pair, so both took the same id and `propose`
+    # died on its uniqueness assertion (audit H6). Merge them, exactly as the
+    # TypeScript scan does: the registry entry is the symbol, which is what
+    # resolves in the index, so one journey per symbol carrying every route
+    # label keeps one journey per distinct route without a second id scheme.
+    return _merge_duplicate_hits(hits), unparsed
 
 
 # --- TypeScript / Next.js (issue #46) -------------------------------------
