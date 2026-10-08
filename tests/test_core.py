@@ -1108,6 +1108,42 @@ class IntoTargetTests(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, ".testgraph")))
 
 
+    def _refusal(self, main, argv):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), \
+                unittest.mock.patch.object(
+                    dbmod, "connect",
+                    side_effect=AssertionError("must refuse before opening a db")), \
+                unittest.mock.patch.object(
+                    reg, "load",
+                    side_effect=AssertionError("must not load any registry")):
+            rc = main(argv)
+        return rc, err.getvalue()
+
+    def test_export_without_a_matching_registry_refuses(self):
+        """audit H2: `--registry` used to default to journeys/honeyslate.json for
+        every repo, so exporting any other project mapped it against the wrong
+        journeys without complaint. It now resolves by target, like select."""
+        rc, err = self._refusal(exp.main, ["--repo", self.tmp])
+        self.assertEqual(rc, 2)
+        self.assertIn("no journey registry found", err)
+        self.assertNotIn("honeyslate", err)
+
+    def test_repo_defaults_to_the_current_directory(self):
+        """audit H2: `--repo` defaulted to a personal honeyslate checkout path.
+        Both export and select now default to ".", so the refusal names the
+        directory the command ran in."""
+        old = os.getcwd()
+        os.chdir(self.tmp)
+        self.addCleanup(os.chdir, old)
+        for main in (exp.main, sel.main):
+            rc, err = self._refusal(main, [])
+            self.assertEqual(rc, 2)
+            self.assertIn("no journey registry found", err)
+            self.assertIn("(.)", err)
+            self.assertNotIn("honeyslate/main", err)
+
+
 class MarkdownRenderingTests(unittest.TestCase):
     """`render_markdown` produces the only artifact an agent actually reads, and
     it had no test at all — the unit tests asserted `build_map`'s dicts and the

@@ -661,7 +661,7 @@ def _render(result):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="testgraph.select")
-    ap.add_argument("--repo", default="/home/ericm/personal_projects/honeyslate/main")
+    ap.add_argument("--repo", default=".")
     ap.add_argument("--base", default="HEAD~1")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--db", default=None, help="defaults to <repo>/.codegraph/codegraph.db")
@@ -680,15 +680,7 @@ def main(argv=None):
     # resulting disagreement as a stale index — a confidently wrong diagnosis.
     registry_path = args.registry or reg.resolve_for_repo(args.repo)
     if registry_path is None:
-        name = reg.repo_name(args.repo)
-        print(
-            f"no journey registry found for repo `{name}` ({args.repo}).\n"
-            f"  looked in: {reg.where_it_looked(args.repo)}\n"
-            f"  add {reg.REPO_JOURNEYS_SUBDIR}/<name>.json with "
-            f"\"target\": \"{name}\", draft one with `python3 -m "
-            f"testgraph.propose --repo {args.repo}`, or pass --registry",
-            file=sys.stderr,
-        )
+        print(reg.not_found_message(args.repo), file=sys.stderr)
         return 2
     result = select(args.repo, args.base, args.head, db_path, registry_path)
     if args.json:

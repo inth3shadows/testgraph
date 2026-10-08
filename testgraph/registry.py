@@ -128,6 +128,22 @@ def resolve_for_repo(repo, journeys_dir=None):
     return None
 
 
+def not_found_message(repo):
+    """The refusal text for a repo with no matching registry.
+
+    One definition for `select` and `export` (audit H2): export used to default
+    to honeyslate's registry instead of refusing, so any other repo was mapped
+    against the wrong journeys with no complaint."""
+    name = repo_name(repo)
+    return (
+        f"no journey registry found for repo `{name}` ({repo}).\n"
+        f"  looked in: {where_it_looked(repo)}\n"
+        f"  add {REPO_JOURNEYS_SUBDIR}/<name>.json with "
+        f"\"target\": \"{name}\", draft one with `python3 -m "
+        f"testgraph.propose --repo {repo}`, or pass --registry"
+    )
+
+
 def where_it_looked(repo):
     """The search path, rendered for a 'not found' message.
 

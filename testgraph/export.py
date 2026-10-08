@@ -303,12 +303,12 @@ def render_markdown(rows_by_file, registry, meta):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="testgraph.export")
-    ap.add_argument("--repo", default="/home/ericm/personal_projects/honeyslate/main")
+    ap.add_argument("--repo", default=".")
     ap.add_argument("--db", default=None)
     ap.add_argument(
         "--registry",
-        default=os.path.join(os.path.dirname(__file__), "..", "journeys",
-                             "honeyslate.json"),
+        default=None,
+        help="defaults to the journeys/*.json whose `target` matches <repo>",
     )
     ap.add_argument("--out", default=None, help="markdown output path (default stdout)")
     ap.add_argument(
@@ -329,9 +329,18 @@ def main(argv=None):
         # that printed "map NOT written", and it is deliberately not gitignored.
         args.out = os.path.join(args.repo, ".testgraph", "journey-map.md")
 
+    # Resolve by the registry's own `target` and REFUSE when there is none, as
+    # `select` does. The default used to be honeyslate's registry for every
+    # repo, so exporting any other project mapped it against the wrong journeys
+    # (audit H2).
+    registry_path = args.registry or reg.resolve_for_repo(args.repo)
+    if registry_path is None:
+        print(reg.not_found_message(args.repo), file=sys.stderr)
+        return 2
+
     db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
     conn = dbmod.connect(db_path)
-    registry = reg.load(args.registry)
+    registry = reg.load(registry_path)
 
     # An export off a corrupt index is exactly as dangerous as a selection off
     # one — more so, because the file outlives the run and carries no warning.
