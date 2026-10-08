@@ -2424,3 +2424,39 @@ class RevisionOptionInjectionTests(unittest.TestCase):
         self.assertIsNone(ledger.resolve_commit(self.repo, "-x"))
         self.assertIsNone(ledger.resolve_commit(self.repo, "--output=/tmp/x"))
         self.assertIsNotNone(ledger.resolve_commit(self.repo, "HEAD"))
+
+
+class ResolveSymbolSuffixTests(unittest.TestCase):
+    """Audit M1: a registry `file` is a path SUFFIX at a directory boundary,
+    case-sensitive, with no LIKE wildcards. A bare `%suffix` LIKE let
+    `app/config.py` resolve to `legacy/oldapp/config.py` and `APP/Config.py`."""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.execute(
+            "CREATE TABLE nodes(id TEXT, kind TEXT, name TEXT, "
+            "qualified_name TEXT, file_path TEXT, start_line INT, end_line INT)"
+        )
+        rows = [
+            ("a", "function", "f", "f", "app/config.py", 1, 2),
+            ("b", "function", "f", "f", "legacy/oldapp/config.py", 1, 2),
+            ("c", "function", "f", "f", "APP/Config.py", 1, 2),
+            ("d", "function", "f", "f", "backend/app/routers/tasks.py", 1, 2),
+            ("e", "function", "f", "f", "x/my_mod.py", 1, 2),
+            ("g", "function", "f", "f", "x/myXmod.py", 1, 2),
+        ]
+        self.conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?)", rows)
+
+    def test_directory_boundary_and_case(self):
+        self.assertEqual(dbmod.resolve_symbol(self.conn, "f", "app/config.py"), ["a"])
+
+    def test_suffix_still_matches_deeper_path(self):
+        self.assertEqual(
+            dbmod.resolve_symbol(self.conn, "f", "routers/tasks.py"), ["d"]
+        )
+
+    def test_underscore_is_literal(self):
+        self.assertEqual(dbmod.resolve_symbol(self.conn, "f", "my_mod.py"), ["e"])
+
+    def test_percent_is_literal(self):
+        self.assertEqual(dbmod.resolve_symbol(self.conn, "f", "%.py"), [])
