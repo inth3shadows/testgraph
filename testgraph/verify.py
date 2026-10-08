@@ -84,32 +84,48 @@ def validate(conn, registry, trace, verdicts):
     means one thing in both directions. Note what this deliberately does NOT
     check: how much of the journey ran after entry. That is
     `harness/unit_vs_journey.py`'s job, and conflating the two would let this
-    module claim a guarantee it cannot make."""
+    module claim a guarantee it cannot make.
+
+    Validation only ever GATES CREDIT FOR A PASS. A declared test whose JUnit
+    verdict is fail/error marks every journey it declares `fail`, whether or not
+    its trace reached an entry and whether or not it has a trace at all (audit
+    C2): a test that died in setup or before the first entry symbol is a red
+    journey test, not an "unvalidated claim" to be discarded. Discarding it let
+    a journey with one passing and one broken declared test exit 0."""
     entries = pa.journey_entries(conn, registry)
     credited, unvalidated, per_journey = {}, [], {}
+
+    def credit(jid, verdict):
+        prior = credited.get(jid)
+        if prior is None or pa._VERDICT_RANK[verdict] > pa._VERDICT_RANK[prior]:
+            credited[jid] = verdict
 
     for nodeid, declared in (trace.get("declared") or {}).items():
         if not declared:
             continue
+        result = verdicts.get(pa._join_key(nodeid))
+        verdict = res.TO_LEDGER_VERDICT[result["status"]] if result else None
         symbols = trace.get("tests", {}).get(nodeid)
+        if verdict == "fail":
+            for jid in declared:
+                if nodeid not in per_journey.setdefault(jid, []):
+                    per_journey[jid].append(nodeid)
+                credit(jid, "fail")
         if symbols is None:
             # Collected and declared, but never ran a body — deselected by a
             # `-k`, skipped, or errored in setup. Not a false claim; no evidence
-            # either way, so it credits nothing and accuses nothing.
+            # either way, so it credits nothing and accuses nothing (a FAILED
+            # one was handled above: red is red without a trace).
             continue
         node_ids, _amb = pa.resolve_traced(conn, [tuple(s) for s in symbols])
-        result = verdicts.get(pa._join_key(nodeid))
         for jid in declared:
             if not (node_ids & entries.get(jid, set())):
                 unvalidated.append((nodeid, jid))
                 continue
-            per_journey.setdefault(jid, []).append(nodeid)
-            if result is None:
-                continue
-            verdict = res.TO_LEDGER_VERDICT[result["status"]]
-            prior = credited.get(jid)
-            if prior is None or pa._VERDICT_RANK[verdict] > pa._VERDICT_RANK[prior]:
-                credited[jid] = verdict
+            if nodeid not in per_journey.setdefault(jid, []):
+                per_journey[jid].append(nodeid)
+            if verdict is not None and verdict != "fail":
+                credit(jid, verdict)
     return credited, unvalidated, per_journey
 
 
@@ -133,6 +149,7 @@ def _summary(repo, head, selection, **extra):
         "unvalidated": [],
         "per_journey": {},
         "uncovered": [],
+        "incomplete": [],
         "rows_written": 0,
         "pytest_exit": None,
     }
@@ -203,6 +220,13 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
 
     credited, unvalidated, per_journey = validate(conn, registry, trace, verdicts)
     uncovered = [j for j in journeys if j not in per_journey]
+    # Selected, has declared tests, but not a pass: the tests ran (or were
+    # collected) and no passing verdict came out. Distinct from `uncovered`
+    # (nothing declared) and from a credited fail (reported as a failure).
+    incomplete = []
+    for j in journeys:
+        if j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
+            incomplete.append((j, "skip" if credited.get(j) == "skip" else "no verdict"))
 
     written = []
     append = append or ledger.append
@@ -225,6 +249,7 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         unvalidated=unvalidated,
         per_journey={k: sorted(v) for k, v in per_journey.items()},
         uncovered=uncovered,
+        incomplete=incomplete,
         rows_written=len(written),
         pytest_exit=getattr(proc, "returncode", None),
         commit=sha,
@@ -232,24 +257,34 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
 
 
 def exit_code(summary):
-    """OK / tests-failed / nothing-to-run, as three distinct answers.
+    """OK / tests-failed / refused / incomplete, as distinct answers.
 
-    `EXIT_NOTHING_TO_RUN` exists because "every selected journey passed" and
-    "no selected journey had a test" are both quiet, and a shared code would
-    let a CI job read the second as the first — which is the whole failure this
-    module is built against, relocated into an integer."""
+    `EXIT_INCOMPLETE` exists because "every selected journey passed" and "some
+    selected journey had nothing that passed" are both quiet, and a shared code
+    would let a CI job read the second as the first — which is the whole failure
+    this module is built against, relocated into an integer.
+
+    A selected journey counts as verified ONLY if it was credited `pass`. A
+    journey that is uncovered, skip-only, or ran with no joinable verdict is
+    incomplete (audit C2: skip-only and verdict-less journeys used to exit 0).
+    If pytest itself exited abnormally (anything but 0 ok / 5 nothing
+    collected) a result that would be OK is downgraded to incomplete: a crashed
+    or interrupted run proves nothing."""
     if summary.get("refused"):
         return EXIT_REFUSED
-    if any(v == "fail" for v in summary.get("credited", {}).values()):
+    credited = summary.get("credited", {})
+    if any(v == "fail" for v in credited.values()):
         return EXIT_TESTS_FAILED
-    # ANY uncovered journey, not merely all of them. The first version of this
+    # ANY unverified journey, not merely all of them. The first version of this
     # returned OK whenever something was credited, and on its first real run it
     # printed "NO JOURNEY-LEVEL TEST: J1, J5, J6, J7" and exited 0 — four
     # journeys unverified behind a green from the other four. A partial answer
     # is not a pass, and the exit code is what a CI job actually reads.
-    if summary.get("uncovered"):
+    if summary.get("uncovered") or summary.get("incomplete"):
         return EXIT_INCOMPLETE
-    if summary.get("journeys") and not summary.get("credited"):
+    if any(credited.get(j) != "pass" for j in summary.get("journeys", [])):
+        return EXIT_INCOMPLETE
+    if summary.get("pytest_exit") not in (None, 0, 5):
         return EXIT_INCOMPLETE
     return EXIT_OK
 
@@ -286,12 +321,20 @@ def render(summary, registry=None):
     for jid in sorted(summary["credited"], key=reg.journey_sort_key):
         lines.append(f"    {jid}  {names.get(jid, ''):<38.38} "
                      f"{summary['credited'][jid]:<5} "
-                     f"{len(summary['per_journey'][jid])} declared test(s)")
+                     f"{len(summary['per_journey'].get(jid, ()))} declared test(s)")
     if summary["uncovered"]:
         lines.append(
             f"  ! NO JOURNEY-LEVEL TEST: {', '.join(summary['uncovered'])} — "
             f"selected, and nothing declared `covers(...)` for them. This run "
             f"says NOTHING about those journeys; it is not a pass."
+        )
+    if summary.get("incomplete"):
+        why = {"skip": "skipped", "no verdict": "no verdict"}
+        lines.append(
+            "  ! ran, but not a pass: "
+            + ", ".join(f"{j} ({why.get(r, r)})" for j, r in summary["incomplete"])
+            + " — declared tests exist but none passed. This run says "
+              "NOTHING about those journeys; it is not a pass."
         )
     if summary["unvalidated"]:
         lines.append(

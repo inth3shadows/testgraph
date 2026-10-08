@@ -196,6 +196,94 @@ class ExitCodeTests(unittest.TestCase):
         )
 
 
+def _summary_for(journeys, trace, verdicts, pytest_exit=0):
+    """What `run` would assemble from validate()'s output, for exit/render."""
+    conn = build_conn()
+    credited, unvalidated, per_journey = verify.validate(
+        conn, REGISTRY, trace, verdicts)
+    incomplete = []
+    for j in journeys:
+        if j in per_journey and credited.get(j) not in ("pass", "fail"):
+            incomplete.append(
+                (j, "skip" if credited.get(j) == "skip" else "no verdict"))
+    return {
+        "repo": "demo",
+        "selection": {"base": "a", "head": "b", "warnings": []},
+        "journeys": journeys, "marker_expression": " or ".join(
+            f"tg_{j}" for j in journeys),
+        "collected": len(verdicts), "credited": credited,
+        "unvalidated": unvalidated, "per_journey": per_journey,
+        "uncovered": [j for j in journeys if j not in per_journey],
+        "incomplete": incomplete, "rows_written": 0, "pytest_exit": pytest_exit,
+    }
+
+
+J2_TRACE = [["app/sel.py", "select_entry"]]
+
+
+class RedAndSkippedJourneyTests(unittest.TestCase):
+    """Audit C2: verify exited 0 over red, skipped, and verdict-less journeys."""
+
+    def test_a_journey_whose_only_test_skipped_in_its_body_is_not_ok(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::a": ["J2"]}, "tests": {"tests/t.py::a": J2_TRACE}},
+            junit(**{"tests.t.a": "skip"}))
+        self.assertEqual(s["credited"], {"J2": "skip"})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
+        self.assertIn("ran, but not a pass: J2 (skipped)", verify.render(s, REGISTRY))
+
+    def test_a_declared_test_that_failed_before_any_entry_makes_the_journey_red(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::ok": ["J2"], "tests/t.py::bad": ["J2"]},
+             "tests": {"tests/t.py::ok": J2_TRACE,
+                       "tests/t.py::bad": [["app/hook.py", "helper"]]}},
+            junit(**{"tests.t.ok": "pass", "tests.t.bad": "fail"}))
+        self.assertEqual(s["credited"], {"J2": "fail"})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_TESTS_FAILED)
+
+    def test_a_declared_test_that_errored_in_setup_makes_the_journey_red(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::ok": ["J2"], "tests/t.py::bad": ["J2"]},
+             "tests": {"tests/t.py::ok": J2_TRACE}},  # bad: no body trace
+            junit(**{"tests.t.ok": "pass", "tests.t.bad": "error"}))
+        self.assertEqual(s["credited"], {"J2": "fail"})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_TESTS_FAILED)
+
+    def test_an_unvalidated_passing_declaration_still_credits_nothing(self):
+        s = _summary_for(
+            ["J1"],
+            {"declared": {"tests/t.py::b": ["J1"]},
+             "tests": {"tests/t.py::b": [["app/hook.py", "helper"]]}},
+            junit(**{"tests.t.b": "pass"}))
+        self.assertEqual(s["credited"], {})
+        self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
+
+    def test_entered_the_journey_but_verdict_did_not_join_is_not_ok(self):
+        s = _summary_for(
+            ["J2"],
+            {"declared": {"tests/t.py::a": ["J2"]}, "tests": {"tests/t.py::a": J2_TRACE}},
+            {})  # JUnit has nothing under this key
+        self.assertEqual(s["credited"], {})
+        self.assertEqual(s["uncovered"], [])
+        self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
+        self.assertIn("ran, but not a pass: J2 (no verdict)", verify.render(s, REGISTRY))
+
+    def test_abnormal_pytest_exit_downgrades_an_otherwise_ok_result(self):
+        base = {"journeys": ["J2"], "credited": {"J2": "pass"}, "uncovered": []}
+        self.assertEqual(verify.exit_code({**base, "pytest_exit": 0}), verify.EXIT_OK)
+        self.assertEqual(verify.exit_code({**base, "pytest_exit": 2}),
+                         verify.EXIT_INCOMPLETE)
+
+    def test_a_selected_journey_credited_only_skip_is_incomplete(self):
+        self.assertEqual(
+            verify.exit_code({"journeys": ["J2"], "credited": {"J2": "skip"},
+                              "uncovered": []}),
+            verify.EXIT_INCOMPLETE)
+
+
 class SummaryShapeTests(unittest.TestCase):
     """Every exit from `run` carries the same keys.
 
