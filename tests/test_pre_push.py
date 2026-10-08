@@ -2,7 +2,7 @@
 
 The hook is shell, so these tests run the real text under `sh` (dash on Debian)
 in a throwaway git repo. PATH holds symlinks to only the tools the hook needs plus
-stub `python3` / `codegraph`, and deliberately `timeout` (until H3 removes the need for it): that is macOS, and the
+stub `python3` / `codegraph`, and deliberately NO `timeout`: that is macOS, and the
 old hook silently did nothing there.
 """
 import os
@@ -18,7 +18,7 @@ HOOK_SRC = os.path.join(os.path.dirname(HERE), "hooks", "pre-push")
 ZERO = "0" * 40
 MARK = "31337"      # sleep duration that identifies a stub's stray process
 
-_TOOLS = ("timeout", "sh", "git", "mktemp", "rm", "sleep", "cat", "env", "dirname", "basename")
+_TOOLS = ("sh", "git", "mktemp", "rm", "sleep", "cat", "env", "dirname", "basename")
 
 
 def _stray_processes():
@@ -48,6 +48,7 @@ class PrePushHookTest(unittest.TestCase):
             found = shutil.which(tool)
             if found:
                 os.symlink(found, os.path.join(self.bin, tool))
+        self.assertFalse(os.path.exists(os.path.join(self.bin, "timeout")))
         self.home = os.path.join(self.root, "tg-home")
         os.makedirs(self.home)
         self.repo = os.path.join(self.root, "repo")
@@ -102,6 +103,76 @@ class PrePushHookTest(unittest.TestCase):
         for n in ("a", "b", "c"):
             tip = self._commit(n)
         return base, tip
+
+    # --- H3 ---------------------------------------------------------------
+
+    def test_selector_output_is_printed_without_gnu_timeout(self):
+        _, tip = self._new_branch_repo()
+        self._stub("python3", 'echo "SELECTOR $*"')
+        r = self._run(tip)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("SELECTOR -m testgraph.hook", r.stdout)
+
+    def test_a_hung_selector_is_killed_with_heartbeat_and_exit_zero(self):
+        _, tip = self._new_branch_repo()
+        self._stub("python3", f"exec sleep {MARK}")
+        t0 = time.time()
+        r = self._run(tip, TESTGRAPH_HOOK_TIMEOUT="3", TESTGRAPH_HOOK_HEARTBEAT="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertLess(time.time() - t0, 15)
+        self.assertIn("testgraph: selector still running (1s) — Ctrl-C skips it", r.stderr)
+        self.assertIn("testgraph: selector skipped (timed out after 3s)", r.stderr)
+        if os.path.isdir("/proc"):
+            self.assertEqual(_stray_processes(), [])
+
+    def test_a_hung_codegraph_sync_is_bounded_and_the_selector_still_runs(self):
+        _, tip = self._new_branch_repo()
+        self._stub("codegraph", f"exec sleep {MARK}")
+        self._stub("python3", 'echo "SELECTOR"')
+        r = self._run(tip, TESTGRAPH_HOOK_SYNC_TIMEOUT="2", TESTGRAPH_HOOK_HEARTBEAT="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("testgraph: codegraph sync skipped (timed out after 2s)", r.stderr)
+        self.assertIn("SELECTOR", r.stdout)
+
+    def test_a_crashing_selector_shows_its_first_stderr_line(self):
+        _, tip = self._new_branch_repo()
+        self._stub("python3", 'echo "Traceback boom" >&2; echo second >&2; exit 1')
+        r = self._run(tip)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("testgraph: selector: Traceback boom", r.stderr)
+        self.assertNotIn("second", r.stderr)
+        self.assertEqual([f for f in os.listdir(self.root) if f.startswith("testgraph-hook.")], [])
+
+    def _interrupt(self, sig):
+        _, tip = self._new_branch_repo()
+        self._stub("python3", f"exec sleep {MARK}")
+        p = subprocess.Popen(["sh", self.hook], cwd=self.repo, stdin=subprocess.PIPE,
+                             stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                             env=self._env(TESTGRAPH_HOOK_HEARTBEAT="1"),
+                             start_new_session=True)
+        p.stdin.write(self._stdin(tip))
+        p.stdin.close()
+        time.sleep(1.5)
+        self.assertTrue(_stray_processes(), "the stub should be running by now")
+        os.kill(p.pid, sig)          # the shell only: its child ignores SIGINT
+        _, err = p.communicate(timeout=20)
+        self.assertEqual(p.returncode, 0, err)
+        self.assertEqual(_stray_processes(), [])
+        return err
+
+    @unittest.skipUnless(os.path.isdir("/proc"), "needs /proc")
+    def test_ctrl_c_kills_the_child_and_skips_the_step(self):
+        self.assertIn("skipped (interrupted)", self._interrupt(signal.SIGINT))
+
+    @unittest.skipUnless(os.path.isdir("/proc"), "needs /proc")
+    def test_sigterm_kills_the_child_and_exits_zero(self):
+        self._interrupt(signal.SIGTERM)
+
+    def test_the_hook_parses_under_dash_and_bash(self):
+        for shell in ("sh", "dash", "bash"):
+            if shutil.which(shell):
+                r = subprocess.run([shell, "-n", self.hook], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, f"{shell}: {r.stderr}")
 
     # --- M5 ---------------------------------------------------------------
 
