@@ -2312,3 +2312,59 @@ class DiffInputRobustnessTests(unittest.TestCase):
         diff = "diff --git a/app/__init__.py b/app/__init__.py\nnew file mode 100644\nindex 0..e69de29\n"
         self.assertEqual(sel._parse_unified_diff(diff), ({}, {}))
 
+
+
+class RevisionOptionInjectionTests(unittest.TestCase):
+    """Audit M2: `base`/`head` reach git as arguments, and through the MCP tool
+    they come from the model. `--output=<path>` made `git diff` write (truncate)
+    an arbitrary file and return an empty diff -- a clean NONE."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.conn = build_fixture()
+        self.registry = _registry_file(
+            self.tmp, {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                                          "file": "app/svc.py"}]}}
+        )
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+        self.db = _db_on_disk(self.tmp, self.conn)
+        self.victim = os.path.join(self.tmp, "victim.txt")
+
+    def test_select_rejects_a_dash_revision_and_writes_nothing(self):
+        with self.assertRaises(ValueError) as caught:
+            sel.select(self.repo, f"--output={self.victim}", "HEAD", self.db,
+                       self.registry)
+        self.assertIn("may not start with '-'", str(caught.exception))
+        self.assertFalse(os.path.exists(self.victim))
+        with self.assertRaises(ValueError):
+            sel.select(self.repo, "HEAD", "-x", self.db, self.registry)
+
+    def test_mcp_impact_is_an_error_and_writes_nothing(self):
+        from testgraph import mcp
+        dbdir = os.path.join(self.repo, ".codegraph")
+        os.makedirs(dbdir)
+        shutil.copy(self.db, os.path.join(dbdir, "codegraph.db"))
+        with unittest.mock.patch.object(
+            reg, "resolve_for_repo", return_value=self.registry
+        ):
+            text, is_error = mcp.call_tool(
+                "testgraph_impact",
+                {"repo": self.repo, "base": f"--output={self.victim}", "head": "HEAD"},
+            )
+        self.assertTrue(is_error, text)
+        self.assertFalse(os.path.exists(self.victim))
+
+    def test_changed_ranges_passes_end_of_options(self):
+        # defence in depth: even without the select() guard, git must not parse a
+        # dash-leading revision as an option
+        victim = self.victim
+        with self.assertRaises(subprocess.CalledProcessError):
+            sel.changed_ranges(self.repo, f"--output={victim}", "HEAD")
+        self.assertFalse(os.path.exists(victim))
+
+    def test_resolve_commit_refuses_a_dash_revision(self):
+        from testgraph import ledger
+        self.assertIsNone(ledger.resolve_commit(self.repo, "-x"))
+        self.assertIsNone(ledger.resolve_commit(self.repo, "--output=/tmp/x"))
+        self.assertIsNotNone(ledger.resolve_commit(self.repo, "HEAD"))

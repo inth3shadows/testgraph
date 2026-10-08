@@ -244,6 +244,14 @@ def changed_ranges(repo, base, head):
 
 
 def select(repo, base, head, db_path, registry_path, strict_registry=True):
+    # A revision starting with '-' is an option, not a revision (audit M2):
+    # `--output=<path>` made `git diff` truncate an arbitrary file and return an
+    # empty diff -- a clean NONE. Reachable from the MCP tool, where the model
+    # supplies base/head. `--end-of-options` in changed_ranges is the second
+    # layer; this refuses before ANY git call and says why.
+    for label, rev in (("base", base), ("head", head)):
+        if str(rev).startswith("-"):
+            raise ValueError(f"revision may not start with '-': {label}={rev!r}")
     conn = dbmod.connect(db_path)
     registry = reg.load(registry_path)
 
