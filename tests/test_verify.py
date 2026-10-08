@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import types
 import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -309,6 +310,47 @@ class StrictRegistryTests(unittest.TestCase):
         self.assertIsNone(err)
         self.assertTrue(summary.get("refused"), summary)
         self.assertEqual(verify.exit_code(summary), verify.EXIT_REFUSED)
+
+
+class ConnectionClosedTests(unittest.TestCase):
+    """Audit M6: `run` opens a db connection and must close it."""
+
+    def test_run_closes_its_connection(self):
+        import unittest.mock
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        db = _db_on_disk(tmp, build_fixture())
+        registry = _registry_file(tmp, {
+            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+        })
+        repo, run = _git_repo(tmp, {"app/svc.py": 22})
+        with open(os.path.join(repo, "app", "svc.py"), "a") as fh:
+            fh.write("# touched\n")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "touch")
+        closed, opened = [], []
+        real = verify.dbmod.connect
+
+        class Proxy:
+            def __init__(self, conn):
+                self._c = conn
+                opened.append(True)
+
+            def close(self):
+                closed.append(True)
+                self._c.close()
+
+            def __getattr__(self, n):
+                return getattr(self._c, n)
+
+        with unittest.mock.patch.object(
+                verify.dbmod, "connect", lambda p: Proxy(real(p))):
+            verify.run(repo, "HEAD~1", "HEAD", registry_path=registry, db_path=db,
+                       _runner=lambda: types.SimpleNamespace(returncode=0),
+                       append=lambda row: True)
+        # select opens one and verify opens one; both must be closed
+        self.assertEqual(len(opened), 2)
+        self.assertEqual(len(closed), len(opened))
 
 
 class SummaryShapeTests(unittest.TestCase):

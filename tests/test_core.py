@@ -2460,3 +2460,62 @@ class ResolveSymbolSuffixTests(unittest.TestCase):
 
     def test_percent_is_literal(self):
         self.assertEqual(dbmod.resolve_symbol(self.conn, "f", "%.py"), [])
+
+
+class ConnectionsAreClosedTests(unittest.TestCase):
+    """Audit M6: the MCP server is long-lived and the module docstring says
+    connections are closed; select/export opened one per call and never did."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.registry = _registry_file(
+            self.tmp, {"J1": {"name": "one", "entries": [{"name": "handler_a",
+                                                          "file": "app/svc.py"}]}}
+        )
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.opened = []
+        real = dbmod.connect
+
+        def tracking(path):
+            conn = real(path)
+            closed = []
+            self.opened.append(closed)
+            return _ClosingProxy(conn, closed)
+
+        patcher = unittest.mock.patch.object(dbmod, "connect", tracking)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_select_closes_its_connection(self):
+        sel.select(self.repo, "HEAD", "HEAD", self.db, self.registry)
+        self.assertEqual([c for c in self.opened], [[True]])
+
+    def test_select_closes_its_connection_when_it_raises(self):
+        with self.assertRaises(Exception):
+            sel.select(self.repo, "HEAD", "HEAD", self.db,
+                       os.path.join(self.tmp, "missing.json"))
+        self.assertTrue(self.opened and all(self.opened))
+
+    def test_export_closes_its_connection(self):
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            exp.main(["--repo", self.repo, "--registry", self.registry,
+                      "--db", self.db, "--out", os.path.join(self.tmp, "m.md")])
+        self.assertTrue(self.opened and all(self.opened))
+
+
+class _ClosingProxy:
+    """Delegates to a sqlite connection and records `close()`."""
+
+    def __init__(self, conn, closed):
+        self._conn = conn
+        self._closed = closed
+
+    def close(self):
+        self._closed.append(True)
+        self._conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)

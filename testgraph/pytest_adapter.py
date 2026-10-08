@@ -328,20 +328,25 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
         verdicts = parse_junit(junit_path)
 
     conn = dbmod.connect(db_path)
-    entries = journey_entries(conn, registry)
-    attribution = attribute(conn, trace.get("tests", {}), entries, verdicts)
-    written = write_outcomes(reg.repo_name(repo), sha, attribution, append=append)
+    try:
+        entries = journey_entries(conn, registry)
+        attribution = attribute(conn, trace.get("tests", {}), entries, verdicts)
+        written = write_outcomes(reg.repo_name(repo), sha, attribution, append=append)
 
-    summary = dict(attribution)
-    summary.update({
-        "repo": reg.repo_name(repo),
-        "commit": sha,
-        "rows_written": len(written),
-        "pytest_exit": getattr(proc, "returncode", None),
-        "backend": trace.get("backend"),
-        "journeys_registered": len(entries),
-    })
-    return summary, None
+        summary = dict(attribution)
+        summary.update({
+            "repo": reg.repo_name(repo),
+            "commit": sha,
+            "rows_written": len(written),
+            "pytest_exit": getattr(proc, "returncode", None),
+            "backend": trace.get("backend"),
+            "journeys_registered": len(entries),
+        })
+        return summary, None
+    finally:
+        # Close deterministically (audit M6): a long-lived MCP server calls this per
+        # request and would otherwise hold one sqlite handle per call until GC.
+        conn.close()
 
 
 def render(summary, registry=None):

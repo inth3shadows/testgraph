@@ -192,71 +192,76 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
                 for j in selection.get("journeys", [])]
     registry = reg.load(registry_path)
     conn = dbmod.connect(db_path)
+    try:
 
-    if not journeys:
-        return _summary(repo, head, selection), None
+        if not journeys:
+            return _summary(repo, head, selection), None
 
-    expr = marker_expression(journeys)
-    with tempfile.TemporaryDirectory() as tmp:
-        trace_path = os.path.join(tmp, "trace.json")
-        junit_path = os.path.join(tmp, "junit.xml")
-        env = dict(os.environ)
-        env["TGTRACE_OUT"] = trace_path
-        env["TGTRACE_ROOT"] = os.path.abspath(repo)
-        env["PYTHONPATH"] = os.pathsep.join(
-            p for p in (plugins, env.get("PYTHONPATH")) if p
-        )
-        cmd = [sys.executable, "-m", "pytest", "-p", "tgtrace",
-               "-m", expr, f"--junitxml={junit_path}", *pytest_args]
-        runner = _runner or (lambda: subprocess.run(
-            cmd, cwd=repo, env=env, capture_output=True, text=True))
-        proc = runner()
+        expr = marker_expression(journeys)
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = os.path.join(tmp, "trace.json")
+            junit_path = os.path.join(tmp, "junit.xml")
+            env = dict(os.environ)
+            env["TGTRACE_OUT"] = trace_path
+            env["TGTRACE_ROOT"] = os.path.abspath(repo)
+            env["PYTHONPATH"] = os.pathsep.join(
+                p for p in (plugins, env.get("PYTHONPATH")) if p
+            )
+            cmd = [sys.executable, "-m", "pytest", "-p", "tgtrace",
+                   "-m", expr, f"--junitxml={junit_path}", *pytest_args]
+            runner = _runner or (lambda: subprocess.run(
+                cmd, cwd=repo, env=env, capture_output=True, text=True))
+            proc = runner()
 
-        import json
-        trace = {}
-        if os.path.isfile(trace_path):
-            with open(trace_path) as fh:
-                trace = json.load(fh)
-        verdicts = {}
-        if os.path.isfile(junit_path):
-            verdicts = pa.parse_junit(junit_path)
+            import json
+            trace = {}
+            if os.path.isfile(trace_path):
+                with open(trace_path) as fh:
+                    trace = json.load(fh)
+            verdicts = {}
+            if os.path.isfile(junit_path):
+                verdicts = pa.parse_junit(junit_path)
 
-    credited, unvalidated, per_journey = validate(conn, registry, trace, verdicts)
-    uncovered = [j for j in journeys if j not in per_journey]
-    # Selected, has declared tests, but not a pass: the tests ran (or were
-    # collected) and no passing verdict came out. Distinct from `uncovered`
-    # (nothing declared) and from a credited fail (reported as a failure).
-    incomplete = []
-    for j in journeys:
-        if j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
-            incomplete.append((j, "skip" if credited.get(j) == "skip" else "no verdict"))
+        credited, unvalidated, per_journey = validate(conn, registry, trace, verdicts)
+        uncovered = [j for j in journeys if j not in per_journey]
+        # Selected, has declared tests, but not a pass: the tests ran (or were
+        # collected) and no passing verdict came out. Distinct from `uncovered`
+        # (nothing declared) and from a credited fail (reported as a failure).
+        incomplete = []
+        for j in journeys:
+            if j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
+                incomplete.append((j, "skip" if credited.get(j) == "skip" else "no verdict"))
 
-    written = []
-    append = append or ledger.append
-    sha = ledger.resolve_commit(repo, head)
-    for jid, verdict in sorted(credited.items(), key=lambda kv: reg.journey_sort_key(kv[0])):
-        row = ledger.outcome_row(
-            reg.repo_name(repo), sha, jid, verdict,
-            note=f"{len(per_journey[jid])} declared test(s), validated against entries",
-            edge_provenance=JOURNEY_PROVENANCE,
-        )
-        if append(row):
-            written.append(row)
+        written = []
+        append = append or ledger.append
+        sha = ledger.resolve_commit(repo, head)
+        for jid, verdict in sorted(credited.items(), key=lambda kv: reg.journey_sort_key(kv[0])):
+            row = ledger.outcome_row(
+                reg.repo_name(repo), sha, jid, verdict,
+                note=f"{len(per_journey[jid])} declared test(s), validated against entries",
+                edge_provenance=JOURNEY_PROVENANCE,
+            )
+            if append(row):
+                written.append(row)
 
-    return _summary(
-        repo, head, selection,
-        journeys=journeys,
-        marker_expression=expr,
-        collected=len(verdicts),
-        credited=credited,
-        unvalidated=unvalidated,
-        per_journey={k: sorted(v) for k, v in per_journey.items()},
-        uncovered=uncovered,
-        incomplete=incomplete,
-        rows_written=len(written),
-        pytest_exit=getattr(proc, "returncode", None),
-        commit=sha,
-    ), None
+        return _summary(
+            repo, head, selection,
+            journeys=journeys,
+            marker_expression=expr,
+            collected=len(verdicts),
+            credited=credited,
+            unvalidated=unvalidated,
+            per_journey={k: sorted(v) for k, v in per_journey.items()},
+            uncovered=uncovered,
+            incomplete=incomplete,
+            rows_written=len(written),
+            pytest_exit=getattr(proc, "returncode", None),
+            commit=sha,
+        ), None
+    finally:
+        # Close deterministically (audit M6): a long-lived MCP server calls this per
+        # request and would otherwise hold one sqlite handle per call until GC.
+        conn.close()
 
 
 def exit_code(summary):
