@@ -10,14 +10,17 @@ run printed `NO JOURNEY-LEVEL TEST: J1, J5, J6, J7` and exited 0 — four journe
 unverified behind a green from the other four.
 """
 import os
+import shutil
 import sqlite3
 import sys
+import tempfile
 import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 from testgraph import results as res  # noqa: E402
 from testgraph import verify  # noqa: E402
+from test_core import _db_on_disk, _git_repo, _registry_file, build_fixture  # noqa: E402
 
 
 def build_conn():
@@ -282,6 +285,30 @@ class RedAndSkippedJourneyTests(unittest.TestCase):
             verify.exit_code({"journeys": ["J2"], "credited": {"J2": "skip"},
                               "uncovered": []}),
             verify.EXIT_INCOMPLETE)
+
+
+class StrictRegistryTests(unittest.TestCase):
+    """Audit H1: live verify must not run off a registry some of whose journeys
+    can never be selected."""
+
+    def test_an_unresolvable_journey_refuses_the_run(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        db = _db_on_disk(tmp, build_fixture())
+        registry = _registry_file(tmp, {
+            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+            "J9": {"name": "gone", "entries": [{"name": "no_such_fn", "file": "app/svc.py"}]},
+        })
+        repo, run = _git_repo(tmp, {"app/svc.py": 22})
+        with open(os.path.join(repo, "app", "svc.py"), "a") as fh:
+            fh.write("# touched\n")
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "touch")
+        summary, err = verify.run(repo, "HEAD~1", "HEAD", registry_path=registry,
+                                  db_path=db)
+        self.assertIsNone(err)
+        self.assertTrue(summary.get("refused"), summary)
+        self.assertEqual(verify.exit_code(summary), verify.EXIT_REFUSED)
 
 
 class SummaryShapeTests(unittest.TestCase):

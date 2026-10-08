@@ -174,8 +174,11 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         return None, ("cannot find harness/plugin/tgtrace.py — it ships with "
                       "the source checkout, not the installed wheel")
 
-    selection = sel.select(repo, base, head, db_path, registry_path,
-                           strict_registry=False)
+    # Strict (the default): an unresolvable journey BLOCKs and the run is
+    # refused. `strict_registry=False` is reserved for history analysis
+    # (TECHNICAL.md) -- live verification must not pick tests from a registry
+    # that can never select some of its journeys (audit H1).
+    selection = sel.select(repo, base, head, db_path, registry_path)
     # `status` is the documented contract; `blocking` is only present when it
     # fires, so reading the list alone would depend on a key that may be absent.
     if selection.get("status") == "BLOCKED" or selection.get("blocking"):
