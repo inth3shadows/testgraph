@@ -89,6 +89,20 @@ class JoinKeyTests(unittest.TestCase):
             pa._junit_key("tests.test_x", "test_y[a-1]"), "tests.test_x.test_y[a-1]"
         )
 
+    def test_parametrized_id_containing_double_colon(self):
+        # Audit H4: pytest splits off `[...]` BEFORE `::`, so a param id may
+        # itself contain `::`. Splitting on `::` first shredded the key and the
+        # test silently lost its verdict.
+        self.assertEqual(
+            pa._join_key("tests/t.py::test_p[a::b]"), "tests.t.test_p[a::b]"
+        )
+        self.assertEqual(pa._junit_key("tests.t", "test_p[a::b]"), "tests.t.test_p[a::b]")
+
+    def test_class_parametrized_id_with_dot_is_unchanged(self):
+        self.assertEqual(
+            pa._join_key("tests/t.py::C::test_p[1.5]"), "tests.t.C.test_p[1.5]"
+        )
+
 
 class ParseJunitTests(unittest.TestCase):
     XML = """<?xml version="1.0"?>

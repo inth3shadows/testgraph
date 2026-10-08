@@ -59,12 +59,16 @@ def _join_key(nodeid):
     the XML is ambiguous — `tests.test_x.Cls` gives no way to tell where the
     module path ends and the class begins — so both sides are flattened to
     the one shape that is unambiguous from either direction instead."""
-    path, _, rest = nodeid.partition("::")
+    # Split off the `[params]` suffix FIRST, as pytest's own
+    # `mangle_test_address` does: a parametrized id may itself contain `::`
+    # (`test_p[a::b]`) and splitting on `::` first would shred it (audit H4).
+    path_part, bracket, params = nodeid.partition("[")
+    path, _, rest = path_part.partition("::")
     if path.endswith(".py"):
         path = path[:-3]
     parts = [path.replace(os.sep, ".").replace("/", ".")]
     parts.extend(p for p in rest.split("::") if p)
-    return ".".join(parts)
+    return ".".join(parts) + bracket + params
 
 
 def _junit_key(classname, name):
