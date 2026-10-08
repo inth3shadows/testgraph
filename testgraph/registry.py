@@ -93,7 +93,14 @@ def resolve_for_repo(repo, journeys_dir=None):
     The target check applies to every directory, including the repo's own
     `.testgraph/journeys`. A registry copied from another project and left
     unedited is precisely the case that used to blame the index for its own
-    mismatch, and being repo-local does not make it right."""
+    mismatch, and being repo-local does not make it right.
+
+    Within ONE directory an approved registry beats a `*.draft.json` match, and
+    a draft is returned only when nothing approved matches (audit H5). `sorted`
+    puts `proj.draft.json` before `proj.json`, so a first-match scan let a
+    leftover draft shadow the registry a reviewer had already approved. A lone
+    draft is still returned: unapproved registries run loudly by design, which
+    beats pretending there is none. Directory order is unchanged."""
     directories = [journeys_dir] if journeys_dir else search_dirs(repo)
     name = repo_name(repo)
     if not name:
@@ -101,6 +108,7 @@ def resolve_for_repo(repo, journeys_dir=None):
     for directory in directories:
         if not os.path.isdir(directory):
             continue
+        draft = None
         for fname in sorted(os.listdir(directory)):
             if not fname.endswith(".json"):
                 continue
@@ -111,7 +119,12 @@ def resolve_for_repo(repo, journeys_dir=None):
             except (OSError, ValueError):
                 continue
             if target == name:
-                return path
+                if not fname.endswith(".draft.json"):
+                    return path
+                if draft is None:
+                    draft = path
+        if draft is not None:
+            return draft
     return None
 
 
