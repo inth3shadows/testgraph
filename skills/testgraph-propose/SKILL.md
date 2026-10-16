@@ -1,6 +1,6 @@
 ---
 name: testgraph-propose
-description: Draft a journey registry for a repo that has none, so testgraph can answer "what could this change have broken?" there. Runs the deterministic proposer, then does the part it deliberately leaves to you — grouping handlers into user journeys, naming them, and closing the declared blind spots. Use when a repo has no journeys/<target>.json, or when an existing draft is still unapproved.
+description: Draft a journey registry for a repo that has none, so testgraph can answer "what could this change have broken?" there. Runs the deterministic proposer, then does the part it deliberately leaves to you — grouping handlers into user journeys, naming them, and closing the declared blind spots. Use when a repo has no .testgraph/journeys/<target>.json, or when an existing draft is still unapproved.
 ---
 
 # testgraph-propose
@@ -18,7 +18,8 @@ python3 -m testgraph.propose --repo <path-to-project>
 
 Needs a CodeGraph index (`<repo>/.codegraph/codegraph.db`). If it says there is
 none, run `codegraph index <repo>` first and re-run. It writes
-`journeys/<target>.draft.json` and prints the handlers it found, the ones it
+`<repo>/.testgraph/journeys/<target>.draft.json` (inside the target repo, so it
+versions with it) and prints the handlers it found, the ones it
 excluded, and its blind spots.
 
 It reads two languages: Python route decorators, and Next.js conventions in
@@ -84,7 +85,7 @@ Add anything you find as an ordinary entry: `{"name": "<symbol>", "file": "<repo
 Both of these must pass, against the draft, before you set the flag:
 
 ```
-python3 -m testgraph.select --repo <path> --registry journeys/<target>.draft.json
+python3 -m testgraph.select --repo <path> --registry <path>/.testgraph/journeys/<target>.draft.json
 ```
 
 - **No `journeys with no resolvable entry symbol` block.** An entry that does not
@@ -109,7 +110,9 @@ python3 -m testgraph.select --repo <path> --registry journeys/<target>.draft.jso
 
 Set `"approved": true`, drop the `blind_spots` you resolved (keep the ones you
 consciously accepted), rewrite `note` to say who reviewed it and what is knowingly
-uncovered, and rename the file to `journeys/<target>.json`.
+uncovered, and rename the file to `.testgraph/journeys/<target>.json` — in the same
+directory, inside the target repo. A registry moved anywhere else is not found by
+`select` or by `export`.
 
 Until that flag is set, every `select` run and every exported map carries an
 `UNAPPROVED REGISTRY` warning — which is correct, and is why shipping the draft

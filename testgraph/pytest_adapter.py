@@ -59,12 +59,16 @@ def _join_key(nodeid):
     the XML is ambiguous — `tests.test_x.Cls` gives no way to tell where the
     module path ends and the class begins — so both sides are flattened to
     the one shape that is unambiguous from either direction instead."""
-    path, _, rest = nodeid.partition("::")
+    # Split off the `[params]` suffix FIRST, as pytest's own
+    # `mangle_test_address` does: a parametrized id may itself contain `::`
+    # (`test_p[a::b]`) and splitting on `::` first would shred it (audit H4).
+    path_part, bracket, params = nodeid.partition("[")
+    path, _, rest = path_part.partition("::")
     if path.endswith(".py"):
         path = path[:-3]
     parts = [path.replace(os.sep, ".").replace("/", ".")]
     parts.extend(p for p in rest.split("::") if p)
-    return ".".join(parts)
+    return ".".join(parts) + bracket + params
 
 
 def _junit_key(classname, name):
@@ -324,20 +328,25 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
         verdicts = parse_junit(junit_path)
 
     conn = dbmod.connect(db_path)
-    entries = journey_entries(conn, registry)
-    attribution = attribute(conn, trace.get("tests", {}), entries, verdicts)
-    written = write_outcomes(reg.repo_name(repo), sha, attribution, append=append)
+    try:
+        entries = journey_entries(conn, registry)
+        attribution = attribute(conn, trace.get("tests", {}), entries, verdicts)
+        written = write_outcomes(reg.repo_name(repo), sha, attribution, append=append)
 
-    summary = dict(attribution)
-    summary.update({
-        "repo": reg.repo_name(repo),
-        "commit": sha,
-        "rows_written": len(written),
-        "pytest_exit": getattr(proc, "returncode", None),
-        "backend": trace.get("backend"),
-        "journeys_registered": len(entries),
-    })
-    return summary, None
+        summary = dict(attribution)
+        summary.update({
+            "repo": reg.repo_name(repo),
+            "commit": sha,
+            "rows_written": len(written),
+            "pytest_exit": getattr(proc, "returncode", None),
+            "backend": trace.get("backend"),
+            "journeys_registered": len(entries),
+        })
+        return summary, None
+    finally:
+        # Close deterministically (audit M6): a long-lived MCP server calls this per
+        # request and would otherwise hold one sqlite handle per call until GC.
+        conn.close()
 
 
 def render(summary, registry=None):

@@ -205,6 +205,15 @@ class SkillRulesAreSafe(unittest.TestCase):
                 f"unstaged work: {self.joined[max(0, m.start() - 60):m.end()]!r}",
             )
 
+    def test_changed_files_step_also_lists_untracked_files(self):
+        # Audit M11: `git diff --name-only HEAD` never lists a brand-new file that
+        # was not `git add`ed, so a change made only of new files read as empty.
+        self.assertIn("git ls-files --others --exclude-standard", self.joined)
+
+    def test_none_rule_requires_an_approved_registry(self):
+        rules = squeezed(self.text.split("## Rules")[1])
+        self.assertIn("UNAPPROVED REGISTRY", rules)
+
     def test_non_python_row_matches_what_select_actually_does(self):
         # This test previously asserted "Do NOT rely on `select`" — true before
         # #21, false after it, and asserting it *pinned* the stale instruction so
@@ -325,6 +334,23 @@ class SkillRulesAreSafe(unittest.TestCase):
                 len(cells) >= 2 and cells[1],
                 f"escalation row with no action: {row!r}",
             )
+
+
+class ProposeSkillPathsAreRight(unittest.TestCase):
+    """Audit M11: `propose` writes under `<repo>/.testgraph/journeys/`, and that
+    is the only place `select`/`export` look in the target repo. The skill said
+    `journeys/<target>...`, which is the package directory."""
+
+    def setUp(self):
+        path = os.path.join(os.path.dirname(SKILL), "..", "testgraph-propose", "SKILL.md")
+        with open(path, encoding="utf-8") as fh:
+            self.text = fh.read()
+
+    def test_every_registry_path_is_under_dot_testgraph(self):
+        import re
+        bad = re.findall(r"(?<![./\w])journeys/<target>", self.text)
+        self.assertEqual(bad, [], "registry path not under .testgraph/")
+        self.assertIn(".testgraph/journeys/<target>.draft.json", self.text)
 
 
 if __name__ == "__main__":

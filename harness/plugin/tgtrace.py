@@ -38,6 +38,7 @@ runnable under testgraph's own 3.11 CI, where the hermetic tests exercise it.
 import json
 import os
 import sys
+import threading
 
 try:
     import pytest
@@ -124,10 +125,16 @@ def _profile(frame, event, arg):
 
 def _start_profile():
     sys.setprofile(_profile)
+    # sys.setprofile only covers the CALLING thread; the 3.12+ monitoring
+    # backend is interpreter-wide, this one is not. Without this, on 3.11 a
+    # journey whose entry runs in a worker thread (a scheduler, an executor) is
+    # never recorded and its declared test is credited nothing (audit M10).
+    threading.setprofile(_profile)
 
 
 def _stop_profile():
     sys.setprofile(None)
+    threading.setprofile(None)
 
 
 _HAVE_MONITORING = hasattr(sys, "monitoring")

@@ -167,6 +167,24 @@ class ProposeScanTests(unittest.TestCase):
         self.assertNotIn("nested", names)  # function-local: not importable
         self.assertNotIn("fixture_route", names)  # test module
 
+    def test_duplicate_python_handler_names_yield_one_hit(self):
+        """audit H6: two decorated module-level `def handler()` in one file gave
+        two hits for the same (file, name); `assign_ids` keys on that pair, so
+        propose died with "journey ids are not unique". They merge, as TS hits do."""
+        with open(os.path.join(self.tmp, "app", "dup.py"), "w") as fh:
+            fh.write(
+                "from fastapi import APIRouter\nrouter = APIRouter()\n\n"
+                "@router.get('/a')\ndef handler():\n    pass\n\n"
+                "@router.post('/b')\ndef handler():\n    pass\n"
+            )
+        hits, _ = prop.scan(self.tmp)
+        dup = [h for h in hits if h[0] == os.path.join("app", "dup.py")]
+        self.assertEqual(len(dup), 1, "one (file, name) must yield one hit")
+        self.assertEqual(dup[0][1], "handler")
+        self.assertEqual(dup[0][2], [("GET", "/a"), ("POST", "/b")])
+        ids = prop.assign_ids(hits)
+        self.assertEqual(len(set(ids.values())), len(ids))
+
     def test_unparseable_file_is_skipped_not_raised(self):
         hits, unparsed = prop.scan(self.tmp)
         self.assertEqual(unparsed, ["app/broken.py"])

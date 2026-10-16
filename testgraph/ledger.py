@@ -156,7 +156,12 @@ def resolve_commit(repo, rev="HEAD"):
 
     `^{commit}` because a bare `rev-parse v1.0` on an ANNOTATED tag returns the
     tag OBJECT's oid, which no selection row can ever carry — the outcome would
-    sit in `unasked` forever with nothing to show why."""
+    sit in `unasked` forever with nothing to show why.
+
+    A rev starting with '-' is an option, not a revision (audit M2): refused
+    before git sees it."""
+    if str(rev).startswith("-"):
+        return None
     try:
         out = subprocess.run(
             ["git", "-C", repo, "rev-parse", "--verify", f"{rev}^{{commit}}"],

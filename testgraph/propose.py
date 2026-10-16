@@ -137,7 +137,14 @@ def scan(repo):
             continue
         for name, routes in _handlers(tree):
             hits.append((rel, name, routes))
-    return hits, unparsed
+    # Two decorated module-level `def handler()` in one file (a copy-pasted
+    # stub, a conditional redefinition) are two hits for one (file, symbol).
+    # `assign_ids` keys on that pair, so both took the same id and `propose`
+    # died on its uniqueness assertion (audit H6). Merge them, exactly as the
+    # TypeScript scan does: the registry entry is the symbol, which is what
+    # resolves in the index, so one journey per symbol carrying every route
+    # label keeps one journey per distinct route without a second id scheme.
+    return _merge_duplicate_hits(hits), unparsed
 
 
 # --- TypeScript / Next.js (issue #46) -------------------------------------
@@ -722,7 +729,7 @@ def main(argv=None):
     ap.add_argument("--target", default=None,
                     help="registry target name (defaults to the repo dir name)")
     ap.add_argument("--out", default=None,
-                    help="draft registry path (default journeys/<target>.draft.json)")
+                    help="draft registry path (default <repo>/.testgraph/journeys/<target>.draft.json)")
     ap.add_argument("--json", dest="json_out", action="store_true",
                     help="print the full candidate bundle instead of a summary")
     args = ap.parse_args(argv)

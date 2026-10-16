@@ -303,12 +303,12 @@ def render_markdown(rows_by_file, registry, meta):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="testgraph.export")
-    ap.add_argument("--repo", default="/home/ericm/personal_projects/honeyslate/main")
+    ap.add_argument("--repo", default=".")
     ap.add_argument("--db", default=None)
     ap.add_argument(
         "--registry",
-        default=os.path.join(os.path.dirname(__file__), "..", "journeys",
-                             "honeyslate.json"),
+        default=None,
+        help="defaults to the journeys/*.json whose `target` matches <repo>",
     )
     ap.add_argument("--out", default=None, help="markdown output path (default stdout)")
     ap.add_argument(
@@ -329,104 +329,117 @@ def main(argv=None):
         # that printed "map NOT written", and it is deliberately not gitignored.
         args.out = os.path.join(args.repo, ".testgraph", "journey-map.md")
 
-    db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
-    conn = dbmod.connect(db_path)
-    registry = reg.load(args.registry)
-
-    # An export off a corrupt index is exactly as dangerous as a selection off
-    # one — more so, because the file outlives the run and carries no warning.
-    blocking, warnings = integrity.check(
-        conn,
-        args.repo,
-        registry.get("spot_checks", {}),
-        schema_pin=registry.get("codegraph_schema_version"),
-        extraction_pin=registry.get("codegraph_extraction_version"),
-    )
-    # Live-drift BEFORE the print loop: appended after it, drift warnings reached
-    # neither the terminal nor — on a run that then blocked — the file, discarding
-    # the one signal that the registry is stale on exactly the runs most likely to
-    # carry it. Same live parse the selector runs (issue #7).
-    for jid, name, rel, why in reg.live_drift(args.repo, registry):
-        warnings.append(
-            f"journey {jid} entry `{name}` ({rel}): {why} — {reg.remedy_for(why)}"
-        )
-    for w in warnings:
-        print(f"WARN: {w}", file=sys.stderr)
-    # Registry provenance is NOT an integrity warning and must not ride that
-    # channel: `render_markdown` prints every `warnings` entry under "The index
-    # was not fully trustworthy", and the consumer skill reads that banner as
-    # "regenerate after `codegraph index`". An unapproved registry has no index
-    # component, so it would assert a permanent index problem with a remedy that
-    # can never clear it — the failure `unchecked_entries` was split out to
-    # avoid. Own field, own blockquote, own remedy.
-    approval = reg.approval_warning(registry)
-    if approval:
-        print(f"WARN: {approval}", file=sys.stderr)
-    # Provenance is checked alongside index integrity, and blocks for the same
-    # reason: a map whose stamp cannot be trusted disables the consumer's only
-    # staleness escalation, and the file outlives the run (issue #25).
-    stamp, provenance = None, []
-    try:
-        stamp = commit_stamp(args.repo)
-    except StampError as exc:
-        # Kept out of `blocking`: that list prints under "index not trustworthy",
-        # whose remedy is a multi-minute `codegraph index` rebuild. A --repo that
-        # simply is not a git repo has nothing to do with the index, and sending
-        # the reader to rebuild it wastes their time on the wrong fix.
-        provenance.append(str(exc))
-    # A journey whose entries no longer resolve vanishes from every row while the
-    # legend keeps advertising it. A persisted map that lies is worse than none.
-    for jid, names in reg.unresolved(conn, registry):
-        blocking.append(
-            f"journey {jid} ({reg.journey_name(registry, jid)}) has no resolvable "
-            f"entry symbol ({', '.join(names)}) — registry is stale against the "
-            f"index; it would silently vanish from every row"
-        )
-
-    if provenance:
-        print("BLOCKED — provenance unverifiable; map NOT written", file=sys.stderr)
-        for p in provenance:
-            print(f"  x {p}", file=sys.stderr)
-    if blocking:
-        print("BLOCKED — index not trustworthy; map NOT written", file=sys.stderr)
-        for b in blocking:
-            print(f"  x {b}", file=sys.stderr)
-    if provenance or blocking:
+    # Resolve by the registry's own `target` and REFUSE when there is none, as
+    # `select` does. The default used to be honeyslate's registry for every
+    # repo, so exporting any other project mapped it against the wrong journeys
+    # (audit H2).
+    registry_path = args.registry or reg.resolve_for_repo(args.repo)
+    if registry_path is None:
+        print(reg.not_found_message(args.repo), file=sys.stderr)
         return 2
 
-    rows_by_file = build_map(conn, registry)
-    meta = {
-        "repo": args.repo,
-        "schema": dbmod.schema_version(conn),
-        "commit": stamp,
-        "symbols": sum(len(v) for v in rows_by_file.values()),
-        # carried into the artifact AND the --json sidecar, so a consumer of
-        # either can tell the map was generated off a not-fully-trusted index
-        "warnings": warnings,
-        # a footnote in the map, never the "not fully trustworthy" banner: no
-        # amount of re-indexing clears an unverifiable entry
-        "unchecked_entries": reg.unchecked_entries(registry),
-        # same rule, different cause: whether a human ever reviewed the registry
-        # is a provenance fact about the map's INPUT, not about the index
-        "registry_approval": approval,
-    }
+    db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
+    conn = dbmod.connect(db_path)
+    try:
+        registry = reg.load(registry_path)
 
-    md = render_markdown(rows_by_file, registry, meta)
-    if args.out:
-        parent = os.path.dirname(args.out)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(args.out, "w", encoding="utf-8") as fh:
-            fh.write(md)
-        print(f"wrote {args.out} ({meta['symbols']} symbols, "
-              f"{len(rows_by_file)} files)")
-    else:
-        sys.stdout.write(md)
-    if args.json_out:
-        with open(args.json_out, "w", encoding="utf-8") as fh:
-            json.dump({"meta": meta, "files": rows_by_file}, fh, indent=2)
-        print(f"wrote {args.json_out}")
-    return 0
+        # An export off a corrupt index is exactly as dangerous as a selection off
+        # one — more so, because the file outlives the run and carries no warning.
+        blocking, warnings = integrity.check(
+            conn,
+            args.repo,
+            registry.get("spot_checks", {}),
+            schema_pin=registry.get("codegraph_schema_version"),
+            extraction_pin=registry.get("codegraph_extraction_version"),
+        )
+        # Live-drift BEFORE the print loop: appended after it, drift warnings reached
+        # neither the terminal nor — on a run that then blocked — the file, discarding
+        # the one signal that the registry is stale on exactly the runs most likely to
+        # carry it. Same live parse the selector runs (issue #7).
+        for jid, name, rel, why in reg.live_drift(args.repo, registry):
+            warnings.append(
+                f"journey {jid} entry `{name}` ({rel}): {why} — {reg.remedy_for(why)}"
+            )
+        for w in warnings:
+            print(f"WARN: {w}", file=sys.stderr)
+        # Registry provenance is NOT an integrity warning and must not ride that
+        # channel: `render_markdown` prints every `warnings` entry under "The index
+        # was not fully trustworthy", and the consumer skill reads that banner as
+        # "regenerate after `codegraph index`". An unapproved registry has no index
+        # component, so it would assert a permanent index problem with a remedy that
+        # can never clear it — the failure `unchecked_entries` was split out to
+        # avoid. Own field, own blockquote, own remedy.
+        approval = reg.approval_warning(registry)
+        if approval:
+            print(f"WARN: {approval}", file=sys.stderr)
+        # Provenance is checked alongside index integrity, and blocks for the same
+        # reason: a map whose stamp cannot be trusted disables the consumer's only
+        # staleness escalation, and the file outlives the run (issue #25).
+        stamp, provenance = None, []
+        try:
+            stamp = commit_stamp(args.repo)
+        except StampError as exc:
+            # Kept out of `blocking`: that list prints under "index not trustworthy",
+            # whose remedy is a multi-minute `codegraph index` rebuild. A --repo that
+            # simply is not a git repo has nothing to do with the index, and sending
+            # the reader to rebuild it wastes their time on the wrong fix.
+            provenance.append(str(exc))
+        # A journey whose entries no longer resolve vanishes from every row while the
+        # legend keeps advertising it. A persisted map that lies is worse than none.
+        for jid, names in reg.unresolved(conn, registry):
+            blocking.append(
+                f"journey {jid} ({reg.journey_name(registry, jid)}) has no resolvable "
+                f"entry symbol ({', '.join(names)}) — registry is stale against the "
+                f"index; it would silently vanish from every row"
+            )
+
+        if provenance:
+            print("BLOCKED — provenance unverifiable; map NOT written", file=sys.stderr)
+            for p in provenance:
+                print(f"  x {p}", file=sys.stderr)
+        if blocking:
+            print("BLOCKED — index not trustworthy; map NOT written", file=sys.stderr)
+            for b in blocking:
+                print(f"  x {b}", file=sys.stderr)
+        if provenance or blocking:
+            return 2
+
+        rows_by_file = build_map(conn, registry)
+        meta = {
+            "repo": args.repo,
+            "schema": dbmod.schema_version(conn),
+            "commit": stamp,
+            "symbols": sum(len(v) for v in rows_by_file.values()),
+            # carried into the artifact AND the --json sidecar, so a consumer of
+            # either can tell the map was generated off a not-fully-trusted index
+            "warnings": warnings,
+            # a footnote in the map, never the "not fully trustworthy" banner: no
+            # amount of re-indexing clears an unverifiable entry
+            "unchecked_entries": reg.unchecked_entries(registry),
+            # same rule, different cause: whether a human ever reviewed the registry
+            # is a provenance fact about the map's INPUT, not about the index
+            "registry_approval": approval,
+        }
+
+        md = render_markdown(rows_by_file, registry, meta)
+        if args.out:
+            parent = os.path.dirname(args.out)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(args.out, "w", encoding="utf-8") as fh:
+                fh.write(md)
+            print(f"wrote {args.out} ({meta['symbols']} symbols, "
+                  f"{len(rows_by_file)} files)")
+        else:
+            sys.stdout.write(md)
+        if args.json_out:
+            with open(args.json_out, "w", encoding="utf-8") as fh:
+                json.dump({"meta": meta, "files": rows_by_file}, fh, indent=2)
+            print(f"wrote {args.json_out}")
+        return 0
+    finally:
+        # Close deterministically (audit M6).
+        conn.close()
 
 
 if __name__ == "__main__":
