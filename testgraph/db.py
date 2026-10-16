@@ -6,6 +6,7 @@ not a transitive symbol closure (verified on honeyslate 2026-07-17).
 """
 import collections
 import os
+import pathlib
 import sqlite3
 
 # Edge kinds that carry a behavior-reachability signal, walked in REVERSE
@@ -90,15 +91,37 @@ class IndexMissing(FileNotFoundError):
 
 
 def connect(db_path):
-    # sqlite3.connect CREATES a missing file, so a mistyped --db used to leave
-    # an empty database behind and fail later with `no such table: files`
-    # (issue #111). testgraph reads an index and never builds one.
-    if db_path != ":memory:" and not os.path.exists(db_path):
+    """Open a CodeGraph index READ-ONLY, or raise IndexMissing.
+
+    sqlite3.connect creates a missing file, so a mistyped --db used to leave an
+    empty database behind and fail later with `no such table: files` (#111).
+    `mode=ro` means no path through here can create or write one; checking for
+    `files` also refuses the 0-byte file that bug left behind, and any sqlite
+    file that is not an index. Temp tables, which the closure walk uses, live
+    in the temp schema and still work."""
+    if db_path == ":memory:":
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+    if not os.path.isfile(db_path):
         raise IndexMissing(
-            f"no CodeGraph index at {db_path} — testgraph reads an existing "
-            f"index and does not build one. Run `codegraph init` in the repo."
+            f"no CodeGraph index at {db_path} — check the path, or build one "
+            f"with `codegraph init` in the repo"
         )
-    conn = sqlite3.connect(db_path)
+    uri = pathlib.Path(db_path).resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        has_files = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'"
+        ).fetchone()
+    except sqlite3.DatabaseError:
+        has_files = None
+    if not has_files:
+        conn.close()
+        raise IndexMissing(
+            f"{db_path} is not a CodeGraph index (no `files` table) — check the "
+            f"path, or build one with `codegraph init` in the repo"
+        )
     conn.row_factory = sqlite3.Row
     return conn
 
