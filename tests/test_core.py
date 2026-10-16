@@ -404,6 +404,36 @@ class WeakReasonReachesTheSelectorTests(unittest.TestCase):
         self.assertIsNone(dbmod.weak_edge_reason(caps["function:mid_b"]))
 
 
+class MissingIndexTests(unittest.TestCase):
+    """#111: sqlite3.connect creates a missing file, so a mistyped --db left an
+    empty database behind and failed later with `no such table: files`."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.db = os.path.join(self.tmp, "typo.db")
+
+    def test_connect_refuses_and_creates_nothing(self):
+        with self.assertRaises(dbmod.IndexMissing) as cm:
+            dbmod.connect(self.db)
+        self.assertIn("no CodeGraph index at", str(cm.exception))
+        self.assertFalse(os.path.exists(self.db))
+
+    def test_memory_database_still_opens(self):
+        dbmod.connect(":memory:").close()
+
+    def test_clis_exit_2_with_a_message(self):
+        registry = os.path.join(self.tmp, "r.json")
+        for main, extra in ((sel.main, []), (exp.main, [])):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = main(["--repo", self.tmp, "--db", self.db,
+                           "--registry", registry] + extra)
+            self.assertEqual(rc, 2, main.__module__)
+            self.assertIn("no CodeGraph index at", err.getvalue())
+            self.assertFalse(os.path.exists(self.db), main.__module__)
+
+
 class IntegrityTests(unittest.TestCase):
     def setUp(self):
         self.conn = build_fixture()
@@ -461,6 +491,60 @@ class IntegrityTests(unittest.TestCase):
         self.conn.execute("INSERT INTO unresolved_refs(status) VALUES ('pending')")
         blocking, _ = integrity.check(self.conn, "/nonexistent", {})
         self.assertTrue(any("pending" in b for b in blocking))
+
+    # --- pending-refs check that cannot run (#110) -------------------------
+    #
+    # It used to sit under `except Exception: pass`, so a missing table or a
+    # locked database disarmed the mid-resolution guard without a word. Each
+    # miss must now surface as a warning, which `select` turns into UNKNOWN.
+
+    def test_missing_unresolved_refs_table_warns(self):
+        self.conn.execute("DROP TABLE unresolved_refs")
+        blocking, warnings = integrity.check(self.conn, "/nonexistent", {})
+        self.assertTrue(any("pending-refs check skipped" in w for w in warnings),
+                        warnings)
+        self.assertFalse(any("pending" in b for b in blocking))
+
+    def test_missing_status_column_warns(self):
+        self.conn.execute("DROP TABLE unresolved_refs")
+        self.conn.execute("CREATE TABLE unresolved_refs(id INTEGER PRIMARY KEY)")
+        _, warnings = integrity.check(self.conn, "/nonexistent", {})
+        self.assertTrue(any("pending-refs check skipped" in w for w in warnings),
+                        warnings)
+
+    def test_locked_database_on_pending_check_warns(self):
+        real = self.conn
+
+        class LockedOnPending:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *args):
+                if "unresolved_refs" in sql:
+                    raise sqlite3.OperationalError("database is locked")
+                return real.execute(sql, *args)
+
+        _, warnings = integrity.check(LockedOnPending(), "/nonexistent", {})
+        self.assertTrue(any("pending-refs check failed" in w
+                            and "database is locked" in w for w in warnings),
+                        warnings)
+
+    def test_non_sqlite_error_on_pending_check_propagates(self):
+        """Only sqlite errors mean "the check could not run". A bug in testgraph
+        itself must crash, not be reworded as a warning."""
+        real = self.conn
+
+        class Broken:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *args):
+                if "unresolved_refs" in sql:
+                    raise TypeError("bug")
+                return real.execute(sql, *args)
+
+        with self.assertRaises(TypeError):
+            integrity.check(Broken(), "/nonexistent", {})
 
     # --- stale edges (#85) -------------------------------------------------
     #

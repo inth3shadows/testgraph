@@ -687,7 +687,11 @@ def main(argv=None):
     if registry_path is None:
         print(reg.not_found_message(args.repo), file=sys.stderr)
         return 2
-    result = select(args.repo, args.base, args.head, db_path, registry_path)
+    try:
+        result = select(args.repo, args.base, args.head, db_path, registry_path)
+    except dbmod.IndexMissing as e:
+        print(str(e), file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(result, indent=2))
     else:

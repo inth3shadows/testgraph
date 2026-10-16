@@ -12,6 +12,7 @@ answer — the remedy is a full `codegraph index` rebuild, never `sync`.
 """
 import hashlib
 import os
+import sqlite3
 
 from . import db as dbmod
 
@@ -172,8 +173,23 @@ def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None,
                 f"{pending} unresolved refs still pending (> {pending_max}) — "
                 f"index is mid-resolution"
             )
-    except Exception:
-        pass  # older schema without status column
+    except sqlite3.Error as e:
+        # This used to be `except Exception: pass`, justified as "older schema
+        # without status column" — but it also swallowed a missing table and a
+        # locked database, so the mid-resolution guard stopped running with no
+        # trace (issue #110). Every miss is now a warning, so `select` reads an
+        # empty answer as UNKNOWN rather than as a clean bill.
+        if "no such column" in str(e) or "no such table" in str(e):
+            warnings.append(
+                f"pending-refs check skipped: the index has no "
+                f"unresolved_refs.status ({e}) — cannot tell whether it is "
+                f"mid-resolution"
+            )
+        else:
+            warnings.append(
+                f"pending-refs check failed ({type(e).__name__}: {e}) — cannot "
+                f"tell whether the index is mid-resolution"
+            )
 
     # 2. freshness: any tracked source newer than its index row. WARN not BLOCK
     #    — repo-wide staleness costs precision, and blocking on it would refuse

@@ -5,6 +5,7 @@ that CLI returns only immediate dependents + a file-level cross-file bucket,
 not a transitive symbol closure (verified on honeyslate 2026-07-17).
 """
 import collections
+import os
 import sqlite3
 
 # Edge kinds that carry a behavior-reachability signal, walked in REVERSE
@@ -84,7 +85,19 @@ def weak_edge_reason(cap):
     return CAP_REASONS.get(cap)
 
 
+class IndexMissing(FileNotFoundError):
+    """No CodeGraph index at the given path."""
+
+
 def connect(db_path):
+    # sqlite3.connect CREATES a missing file, so a mistyped --db used to leave
+    # an empty database behind and fail later with `no such table: files`
+    # (issue #111). testgraph reads an index and never builds one.
+    if db_path != ":memory:" and not os.path.exists(db_path):
+        raise IndexMissing(
+            f"no CodeGraph index at {db_path} — testgraph reads an existing "
+            f"index and does not build one. Run `codegraph init` in the repo."
+        )
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
