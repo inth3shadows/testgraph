@@ -404,6 +404,86 @@ class WeakReasonReachesTheSelectorTests(unittest.TestCase):
         self.assertIsNone(dbmod.weak_edge_reason(caps["function:mid_b"]))
 
 
+class MissingIndexTests(unittest.TestCase):
+    """#111: sqlite3.connect creates a missing file, so a mistyped --db left an
+    empty database behind and failed later with `no such table: files`."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.db = os.path.join(self.tmp, "typo.db")
+
+    def test_connect_refuses_and_creates_nothing(self):
+        with self.assertRaises(dbmod.IndexMissing) as cm:
+            dbmod.connect(self.db)
+        self.assertIn("no CodeGraph index at", str(cm.exception))
+        self.assertFalse(os.path.exists(self.db))
+
+    def _sqlite_file(self, script):
+        path = os.path.join(self.tmp, "other.db")
+        c = sqlite3.connect(path)
+        c.executescript(script)
+        c.commit()
+        c.close()
+        return path
+
+    def test_empty_file_is_refused(self):
+        """The 0-byte file the old bug left behind passes an exists() check."""
+        open(self.db, "w").close()
+        with self.assertRaises(dbmod.IndexMissing) as cm:
+            dbmod.connect(self.db)
+        self.assertIn("not a CodeGraph index", str(cm.exception))
+
+    def test_non_codegraph_sqlite_file_is_refused(self):
+        path = self._sqlite_file("CREATE TABLE t(x);")
+        with self.assertRaises(dbmod.IndexMissing):
+            dbmod.connect(path)
+
+    def test_directory_is_refused(self):
+        with self.assertRaises(dbmod.IndexMissing):
+            dbmod.connect(self.tmp)
+
+    def test_connection_is_read_only(self):
+        """testgraph reads an index and never builds one. Temp tables, which
+        the closure walk uses, must still work."""
+        path = self._sqlite_file("CREATE TABLE files(path TEXT);")
+        conn = dbmod.connect(path)
+        self.addCleanup(conn.close)
+        conn.execute("CREATE TEMP TABLE _scratch(id TEXT)")
+        with self.assertRaises(sqlite3.OperationalError):
+            conn.execute("CREATE TABLE main.written(x)")
+
+    def test_message_points_at_the_path_before_a_rebuild(self):
+        """A mistyped --db must not read as "rebuild your index"."""
+        with self.assertRaises(dbmod.IndexMissing) as cm:
+            dbmod.connect(self.db)
+        self.assertIn("check the path", str(cm.exception))
+
+    def test_cli_refuses_an_empty_file_with_exit_2(self):
+        open(self.db, "w").close()
+        registry = os.path.join(self.tmp, "r.json")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = sel.main(["--repo", self.tmp, "--db", self.db,
+                           "--registry", registry])
+        self.assertEqual(rc, 2)
+        self.assertIn("not a CodeGraph index", err.getvalue())
+
+    def test_memory_database_still_opens(self):
+        dbmod.connect(":memory:").close()
+
+    def test_clis_exit_2_with_a_message(self):
+        registry = os.path.join(self.tmp, "r.json")
+        for main, extra in ((sel.main, []), (exp.main, [])):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = main(["--repo", self.tmp, "--db", self.db,
+                           "--registry", registry] + extra)
+            self.assertEqual(rc, 2, main.__module__)
+            self.assertIn("no CodeGraph index at", err.getvalue())
+            self.assertFalse(os.path.exists(self.db), main.__module__)
+
+
 class IntegrityTests(unittest.TestCase):
     def setUp(self):
         self.conn = build_fixture()
@@ -461,6 +541,85 @@ class IntegrityTests(unittest.TestCase):
         self.conn.execute("INSERT INTO unresolved_refs(status) VALUES ('pending')")
         blocking, _ = integrity.check(self.conn, "/nonexistent", {})
         self.assertTrue(any("pending" in b for b in blocking))
+
+    # --- pending-refs check that cannot run (#110) -------------------------
+    #
+    # It used to sit under `except Exception: pass`, so a missing table or a
+    # locked database disarmed the mid-resolution guard without a word. Each
+    # miss must now surface as a warning, which `select` turns into UNKNOWN.
+
+    def test_missing_unresolved_refs_table_warns(self):
+        self.conn.execute("DROP TABLE unresolved_refs")
+        blocking, warnings = integrity.check(self.conn, "/nonexistent", {})
+        self.assertTrue(any("pending-refs check skipped" in w for w in warnings),
+                        warnings)
+        self.assertFalse(any("pending" in b for b in blocking))
+
+    def test_missing_status_column_warns(self):
+        self.conn.execute("DROP TABLE unresolved_refs")
+        self.conn.execute("CREATE TABLE unresolved_refs(id INTEGER PRIMARY KEY)")
+        _, warnings = integrity.check(self.conn, "/nonexistent", {})
+        self.assertTrue(any("pending-refs check skipped" in w for w in warnings),
+                        warnings)
+
+    # A missing table or column only means "older schema" when the schema is
+    # unpinned or differs. When the pin MATCHES, the index claims a layout that
+    # has the table, so its absence is a broken index: block, because a warning
+    # only demotes an EMPTY answer and a non-empty one would stay confident.
+
+    def test_missing_unresolved_refs_table_blocks_when_schema_pin_matches(self):
+        self.conn.execute("DROP TABLE unresolved_refs")
+        blocking, _ = integrity.check(self.conn, "/nonexistent", {}, schema_pin=8)
+        self.assertTrue(any("no unresolved_refs table" in b for b in blocking),
+                        blocking)
+
+    def test_missing_status_column_blocks_when_schema_pin_matches(self):
+        self.conn.execute("DROP TABLE unresolved_refs")
+        self.conn.execute("CREATE TABLE unresolved_refs(id INTEGER PRIMARY KEY)")
+        blocking, _ = integrity.check(self.conn, "/nonexistent", {}, schema_pin=8)
+        self.assertTrue(any("no unresolved_refs.status column" in b
+                            for b in blocking), blocking)
+
+    def test_missing_table_and_missing_column_are_worded_apart(self):
+        self.conn.execute("DROP TABLE unresolved_refs")
+        _, warnings = integrity.check(self.conn, "/nonexistent", {})
+        self.assertTrue(any("no unresolved_refs table" in w for w in warnings),
+                        warnings)
+        self.assertFalse(any(".status" in w for w in warnings), warnings)
+
+    def test_locked_database_on_pending_check_warns(self):
+        real = self.conn
+
+        class LockedOnPending:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *args):
+                if "unresolved_refs" in sql:
+                    raise sqlite3.OperationalError("database is locked")
+                return real.execute(sql, *args)
+
+        _, warnings = integrity.check(LockedOnPending(), "/nonexistent", {})
+        self.assertTrue(any("pending-refs check failed" in w
+                            and "database is locked" in w for w in warnings),
+                        warnings)
+
+    def test_non_sqlite_error_on_pending_check_propagates(self):
+        """Only sqlite errors mean "the check could not run". A bug in testgraph
+        itself must crash, not be reworded as a warning."""
+        real = self.conn
+
+        class Broken:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *args):
+                if "unresolved_refs" in sql:
+                    raise TypeError("bug")
+                return real.execute(sql, *args)
+
+        with self.assertRaises(TypeError):
+            integrity.check(Broken(), "/nonexistent", {})
 
     # --- stale edges (#85) -------------------------------------------------
     #

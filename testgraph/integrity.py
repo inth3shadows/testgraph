@@ -12,6 +12,7 @@ answer — the remedy is a full `codegraph index` rebuild, never `sync`.
 """
 import hashlib
 import os
+import sqlite3
 
 from . import db as dbmod
 
@@ -172,8 +173,40 @@ def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None,
                 f"{pending} unresolved refs still pending (> {pending_max}) — "
                 f"index is mid-resolution"
             )
-    except Exception:
-        pass  # older schema without status column
+    except sqlite3.Error as e:
+        # This used to be `except Exception: pass`, justified as "older schema
+        # without status column" — but it also swallowed a missing table and a
+        # locked database, so the mid-resolution guard stopped running with no
+        # trace (issue #110).
+        #
+        # A missing table or column is an older schema only when the schema is
+        # unpinned or differs from the pin. When the pin MATCHES, the index
+        # claims a layout that has them, so it is broken: block. A warning would
+        # not do — it only demotes an EMPTY answer to UNKNOWN, and a non-empty
+        # one would still read as confident.
+        msg = str(e)
+        if "no such table" in msg:
+            missing = "no unresolved_refs table"
+        elif "no such column" in msg:
+            missing = "no unresolved_refs.status column"
+        else:
+            missing = None
+        if missing and schema_pin is not None and found == schema_pin:
+            blocking.append(
+                f"index has {missing} although its schema matches the pin "
+                f"({schema_pin}) — the index is incomplete; rebuild it with "
+                f"`codegraph init`"
+            )
+        elif missing:
+            warnings.append(
+                f"pending-refs check skipped: index has {missing} ({msg}) — "
+                f"cannot tell whether it is mid-resolution"
+            )
+        else:
+            warnings.append(
+                f"pending-refs check failed ({type(e).__name__}: {msg}) — "
+                f"cannot tell whether the index is mid-resolution"
+            )
 
     # 2. freshness: any tracked source newer than its index row. WARN not BLOCK
     #    — repo-wide staleness costs precision, and blocking on it would refuse
