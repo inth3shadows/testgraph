@@ -90,6 +90,17 @@ class IndexMissing(FileNotFoundError):
     """No CodeGraph index at the given path."""
 
 
+class IndexUnreadable(IndexMissing):
+    """An index file exists but cannot be read now (locked, permissions, a
+    hot journal a read-only open cannot roll back). A subclass so every caller
+    that exits 2 on IndexMissing covers it; the message must not say "not an
+    index", which would send the user to rebuild a healthy one."""
+
+
+# sqlite's busy wait on open, in seconds (sqlite3.connect's default).
+BUSY_TIMEOUT_S = 5.0
+
+
 def connect(db_path):
     """Open a CodeGraph index READ-ONLY, or raise IndexMissing.
 
@@ -109,12 +120,23 @@ def connect(db_path):
             f"with `codegraph init` in the repo"
         )
     uri = pathlib.Path(db_path).resolve().as_uri() + "?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = None
     try:
+        conn = sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT_S)
         has_files = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'"
         ).fetchone()
+    except sqlite3.OperationalError as e:
+        # Locked, unreadable, or deleted since the isfile check: a file that
+        # may well be an index, so do not call it "not an index".
+        if conn is not None:
+            conn.close()
+        raise IndexUnreadable(
+            f"cannot read the CodeGraph index at {db_path} ({e}) — retry once "
+            f"no other process holds it, or check its permissions"
+        ) from e
     except sqlite3.DatabaseError:
+        # "file is not a database": not sqlite at all.
         has_files = None
     if not has_files:
         conn.close()
