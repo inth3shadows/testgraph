@@ -145,8 +145,13 @@ def resolve_traced(conn, symbols, files, ambiguous=None):
     Several same-file nodes of that name (`A.run`, `B.run`, every `__init__`)
     are told apart by `qualified_name` (#96): resolving by bare name credited
     `B.run` as run when only `A.run` was, and reported it as a proof-grade
-    STATIC MISS. With no qualified match, one hit is accepted; several are
-    appended to `ambiguous` — not resolved, not unresolved, not a miss."""
+    STATIC MISS. An exact qualified match wins. Otherwise a single hit is
+    accepted only when its qualified_name cannot contradict the trace (empty,
+    or the bare name an older index wrote); a hit named `B::run` for a traced
+    `A.run` is not credited. Everything else goes to `ambiguous` as
+    `(rel, qualname, ids)`: not resolved and not unresolved. `trace_nodes`
+    still counts the candidates as PRESENT for the runtime witness, which must
+    over-state presence, and leaves them out of the miss count only."""
     resolved, unresolved = set(), []
     for rel, qualname in symbols:
         if "<" in qualname.split(".")[-1]:
@@ -154,17 +159,17 @@ def resolve_traced(conn, symbols, files, ambiguous=None):
         name = qualname.split(".")[-1]
         ids = dbmod.resolve_symbol(conn, name, os.path.basename(rel))
         hits = [i for i in ids if path_matches(files.get(i, ""), rel)]
-        if len(hits) > 1:
+        if hits:
             want = _qualified(qualname)
             marks = ",".join("?" * len(hits))
-            exact = [r[0] for r in conn.execute(
-                f"SELECT id FROM nodes WHERE id IN ({marks}) AND qualified_name = ?",
-                (*hits, want))]
+            qn = dict(conn.execute(
+                f"SELECT id, qualified_name FROM nodes WHERE id IN ({marks})", hits))
+            exact = [i for i in hits if qn.get(i) == want]
             if exact:
                 hits = exact
-            else:
+            elif len(hits) > 1 or qn.get(hits[0]) not in (None, "", name):
                 if ambiguous is not None:
-                    ambiguous.append((rel, qualname))
+                    ambiguous.append((rel, qualname, frozenset(hits)))
                 continue
         if hits:
             resolved.update(hits)
@@ -173,16 +178,29 @@ def resolve_traced(conn, symbols, files, ambiguous=None):
     return resolved, unresolved
 
 
-def trace_nodes(conn, trace_tests, files=None, ambiguous=None):
+def trace_nodes(conn, trace_tests, files=None, ambiguous=None, strict=None):
     """tgtrace's `{nodeid: [[rel, qualname], ...]}` -> ({test: {node_id}},
     [unresolved]). One resolution pass, reused by both halves of the report.
-    Symbols `resolve_traced` cannot tell apart go to `ambiguous`."""
+
+    The returned sets are PRESENCE: they include every candidate of a symbol
+    `resolve_traced` could not tell apart, because the runtime witness must
+    over-state what ran (dropping them turned oracle gaps into confirmed
+    phantoms). `strict`, when given, gets the same map without those
+    candidates, for the STATIC MISS count, where crediting a node that did not
+    run is a false proof. Ambiguous symbols are added to `ambiguous` once each."""
     files = files if files is not None else file_map(conn)
-    per_test, unresolved = {}, []
+    per_test, unresolved, seen = {}, [], set()
     for test, symbols in trace_tests.items():
-        ids, missing = resolve_traced(conn, [tuple(s) for s in symbols], files,
-                                      ambiguous)
-        per_test[test] = ids
+        amb = []
+        ids, missing = resolve_traced(conn, [tuple(s) for s in symbols], files, amb)
+        if strict is not None:
+            strict[test] = set(ids)
+        per_test[test] = set(ids).union(*(a[2] for a in amb))
+        if ambiguous is not None:
+            for a in amb:
+                if a[:2] not in seen:
+                    seen.add(a[:2])
+                    ambiguous.append(a)
         unresolved.extend(missing)
     return per_test, unresolved
 
@@ -249,7 +267,6 @@ class _Module:
         self.bindings = collections.defaultdict(set)
         self.star = False
         self.functions = collections.defaultdict(list)
-        self.by_line = {}
         self.module_level = set()
         self._index(tree)
 
@@ -278,9 +295,6 @@ class _Module:
                     self.bindings[local].add(("symbol", (mod, a.name)))
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self.functions[node.name].append(node)
-                self.by_line[node.lineno] = node
-                for dec in node.decorator_list:
-                    self.by_line.setdefault(dec.lineno, node)
         for top in tree.body:
             if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 self.module_level.add(top.name)
@@ -290,18 +304,15 @@ class _Module:
                         self.module_level.add(t.id)
 
     def find(self, name, start_line=None):
-        """The def(s) an index node names. `start_line` first — CodeGraph may
-        record either the `def` line or the first decorator, so both are
-        indexed — then every same-named def as a fallback. Several defs share
-        a name legitimately (a method on two classes); support is the UNION
-        over them, which again over-supports rather than over-accuses."""
-        # The line is trusted only when the def there has the node's name. The
-        # index can be stale against the working tree this reads, and the def
-        # now on that line is then a different function, whose body would turn
-        # a real edge into a phantom (#100).
-        hit = self.by_line.get(start_line) if start_line is not None else None
-        if hit is not None and hit.name == name:
-            return [hit]
+        """Every def of that name in the file, judged as a UNION: several defs
+        share a name legitimately (a method on two classes), and the union
+        over-supports rather than over-accuses.
+
+        `start_line` is accepted and deliberately ignored. It used to pick one
+        def, but the index can be stale against the working tree this reads:
+        the def now on that line can be a different function (#100), or a
+        same-named one in another class (`A.run` where `B.run` was indexed),
+        and judging that one body turned a real edge into a phantom."""
         return list(self.functions.get(name, ()))
 
 
@@ -436,7 +447,10 @@ def _supports(func, module, caller_file, callee_name, callee_file,
             for kind, value in module.bindings.get(node.id, ()):
                 if kind == "symbol":
                     mod, orig = value
-                    if orig == callee_name and mod and _module_matches(mod, callee_file):
+                    # An empty `mod` is `from . import x as y`: the package
+                    # itself, accepted exactly as the unaliased branch below
+                    # accepts `from . import x`.
+                    if orig == callee_name and (not mod or _module_matches(mod, callee_file)):
                         return True
         elif isinstance(node, ast.Name) and node.id == callee_name:
             if callee_name in locals_:
@@ -616,12 +630,13 @@ def reconcile(db_path, repo_root, registry, trace):
     """The whole report, as data. `trace` is a parsed tgtrace payload."""
     conn = dbmod.connect(db_path)
     files = file_map(conn)
-    ambiguous = []
-    per_test, unresolved = trace_nodes(conn, trace.get("tests", {}), files, ambiguous)
+    ambiguous, strict = [], {}
+    per_test, unresolved = trace_nodes(conn, trace.get("tests", {}), files,
+                                       ambiguous, strict)
     node_tests = invert(per_test)
     reach, contained_by = dbmod.dependency_graph(conn)
 
-    misses = static_misses(conn, registry, per_test, reach, contained_by, files)
+    misses = static_misses(conn, registry, strict, reach, contained_by, files)
     findings, counts, footprints = phantom_edges(
         conn, repo_root, registry, node_tests, reach, contained_by
     )
@@ -636,7 +651,7 @@ def reconcile(db_path, repo_root, registry, trace):
     return {
         "tests_traced": len(per_test),
         "unresolved_symbols": sorted(set(unresolved)),
-        "ambiguous_symbols": sorted(set(ambiguous)),
+        "ambiguous_symbols": sorted(a[:2] for a in ambiguous),
         "static_misses": misses,
         "edges": findings,
         "edge_counts": dict(counts),

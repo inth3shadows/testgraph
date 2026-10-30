@@ -1902,13 +1902,22 @@ and each refusal was a confident false accusation waiting for an untested branch
 - **Traced `co_qualname`** (`A.run`, `outer.<locals>.git`) is matched against
   CodeGraph's `qualified_name` (`A::run`, `outer::git`). Before, it was matched
   by bare name, so `B.run` counted as run and became a proof-grade STATIC MISS.
-  Several same-named nodes with no qualified match are reported as
-  `ambiguous_symbols`, not as misses.
-- **`find()`** trusts the indexed `start_line` only when the def on that line has
-  the node's name, so a stale index can't hand it another function's body.
+  A symbol goes to `ambiguous_symbols` when there are several same-named nodes
+  with no qualified match, or when one node's qualified name contradicts the
+  trace (`B::run` for a traced `A.run`). Its candidates still count as present for
+  the runtime witness, which must over-state presence: dropping them would turn
+  oracle gaps into confirmed phantoms. They are left out of the static-miss count,
+  where crediting a node that didn't run is a false proof.
+- **`find()`** judges the union of every same-named def and ignores the indexed
+  `start_line`. On a stale index the def on that line can be a different
+  function, or a same-named method of another class.
+- **`from . import x as y`** resolves too. The empty module means the package
+  itself, as it already did without the alias.
 
 On testgraph's own suite (535 tests traced): 55 static misses before and after.
-Findings went from 1 oracle gap to 0.
+Findings went from 2 (an oracle gap on `close_block → note` and a source-only
+phantom on `harness/ast_oracle.py:_is_test`, a real
+`from testgraph.select import _is_test as _sel_is_test` alias) to 0.
 
 ### Phase 6 — `verify`, and the gate that redesigned it (PRs #88, #89)
 

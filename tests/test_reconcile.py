@@ -513,6 +513,13 @@ class CommonCallShapeTests(unittest.TestCase):
         self.assertEqual(self._support(src, "f", "append", "function", "svc.py"),
                          rec.SUPPORTED)
 
+    def test_a_relative_package_alias_is_supported(self):
+        """Review F1: `from . import helper as h` has no module name, and the
+        alias branch required one; the unaliased spelling was supported."""
+        src = "from . import helper as h\n\ndef f(x):\n    return h(x)\n"
+        self.assertEqual(self._support(src, "f", "helper", "function", "__init__.py"),
+                         rec.SUPPORTED)
+
     def test_an_alias_from_another_module_does_not(self):
         src = "from .other import append as ap\n\ndef f(row):\n    ap(row)\n"
         self.assertEqual(self._support(src, "f", "append", "function", "svc.py"),
@@ -533,6 +540,23 @@ class StaleStartLineTests(unittest.TestCase):
             d, {"name": "caller", "file_path": "mod.py", "start_line": 1,
                 "kind": "function"},
             {"name": "helper", "file_path": "mod.py", "kind": "function"}, {})[0]
+        self.assertEqual(support, rec.SUPPORTED)
+
+
+class StaleSameNameLineTests(unittest.TestCase):
+    """Review F4: a stale start_line that lands on a SAME-named def in another
+    class judged only that body."""
+
+    def test_same_named_defs_are_judged_as_a_union(self):
+        d = tempfile.mkdtemp(prefix="tg-oracle-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with open(os.path.join(d, "mod.py"), "w") as fh:
+            fh.write("class A:\n    def run(self):\n        pass\n\n\n"
+                     "class B:\n    def run(self, x):\n        x.go()\n")
+        support = rec.source_support(
+            d, {"name": "run", "file_path": "mod.py", "start_line": 2,
+                "kind": "method"},
+            {"name": "go", "file_path": "other.py", "kind": "method"}, {})[0]
         self.assertEqual(support, rec.SUPPORTED)
 
 
@@ -565,6 +589,33 @@ class QualifiedTraceTests(unittest.TestCase):
             conn, [("app/svc.py", "outer.<locals>.git")], rec.file_map(conn))
         self.assertEqual(resolved, {"f:outer.git"})
 
+    def test_a_single_hit_that_contradicts_the_trace_is_not_credited(self):
+        """Review F3: only `B::run` indexed, trace says `A.run` ran."""
+        conn = self._conn([
+            ("m:B.run", "method", "run", "B::run", "app/svc.py", 20, 22),
+        ])
+        ambiguous = []
+        resolved, _ = rec.resolve_traced(
+            conn, [("app/svc.py", "A.run")], rec.file_map(conn), ambiguous)
+        self.assertEqual(resolved, set())
+        self.assertEqual([a[:2] for a in ambiguous], [("app/svc.py", "A.run")])
+
+    def test_ambiguous_symbols_still_count_as_present_at_runtime(self):
+        """Review F2: dropping them from the runtime witness turned an oracle
+        gap into a confirmed phantom. Presence over-states; only the miss
+        count leaves them out."""
+        conn = self._conn([
+            ("m:A.run", "method", "run", "X::run", "app/svc.py", 10, 12),
+            ("m:B.run", "method", "run", "Y::run", "app/svc.py", 20, 22),
+        ])
+        strict, ambiguous = {}, []
+        per_test, _ = rec.trace_nodes(
+            conn, {"t1": [["app/svc.py", "A.run"]]}, rec.file_map(conn),
+            ambiguous=ambiguous, strict=strict)
+        self.assertEqual(per_test["t1"], {"m:A.run", "m:B.run"})
+        self.assertEqual(strict["t1"], set())
+        self.assertEqual(len(ambiguous), 1)
+
     def test_several_hits_with_no_qualified_match_are_ambiguous(self):
         conn = self._conn([
             ("m:A.run", "method", "run", "X::run", "app/svc.py", 10, 12),
@@ -575,7 +626,7 @@ class QualifiedTraceTests(unittest.TestCase):
             conn, [("app/svc.py", "A.run")], rec.file_map(conn), ambiguous)
         self.assertEqual(resolved, set())
         self.assertEqual(unresolved, [])
-        self.assertEqual(ambiguous, [("app/svc.py", "A.run")])
+        self.assertEqual([a[:2] for a in ambiguous], [("app/svc.py", "A.run")])
 
 
 class AmbiguousReportTests(unittest.TestCase):
@@ -590,6 +641,33 @@ class AmbiguousReportTests(unittest.TestCase):
         })
         self.assertIn("1 traced symbol(s) match several", out)
         self.assertNotIn("have no node in the index", out)
+
+
+class AmbiguousIsNotAMissTests(unittest.TestCase):
+    """Review F2, end to end through `reconcile()`: an ambiguous symbol is
+    present for the runtime witness but must not be credited as RUN in the
+    static-miss count, where that would be a false proof."""
+
+    def test_an_ambiguous_symbol_outside_the_footprint_is_not_a_miss(self):
+        d = tempfile.mkdtemp(prefix="tg-reconcile-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        conn = build_conn()
+        conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?)", [
+            ("m:X.run", "method", "run", "X::run", "app/store.py", 20, 22),
+            ("m:Y.run", "method", "run", "Y::run", "app/store.py", 30, 32),
+        ])
+        conn.execute("CREATE TABLE files(path TEXT)")
+        conn.commit()
+        db = os.path.join(d, "cg.db")
+        dst = sqlite3.connect(db)
+        conn.backup(dst)
+        dst.close()
+        trace = {"tests": {"t::a": [["app/handler.py", "handle"],
+                                    ["app/store.py", "A.run"]]}}
+        report = rec.reconcile(db, d, REGISTRY, trace)
+        missed = {m for row in report["static_misses"] for m in row["misses"]}
+        self.assertFalse(missed & {"m:X.run", "m:Y.run"}, missed)
+        self.assertEqual(report["ambiguous_symbols"], [("app/store.py", "A.run")])
 
 
 class HelperTests(unittest.TestCase):
