@@ -16,7 +16,7 @@ file-level cross-file bucket, not the transitive symbol closure this needs.
 Data flow for `testgraph.select`:
 
 ```
-git diff --unified=0 base..head
+git diff --unified=0 merge-base(base, head)..head      [select.diff_base, #112]
   -> changed (file, line-range) pairs        [select.changed_ranges]
   -> seed nodes: nodes whose [start,end] overlaps a changed range   [db.nodes_for_lines]
   -> impacted set: reverse-transitive closure over the graph        [db.impacted_closure]

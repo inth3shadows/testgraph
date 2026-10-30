@@ -310,6 +310,30 @@ def changed_ranges(repo, base, head, paths=None):
     return _parse_unified_diff(diff, paths)
 
 
+def diff_base(repo, base, head):
+    """The revision to diff `head` against: `merge-base(base, head)`, or `None`
+    when the two share no history.
+
+    `base..head` compared two trees, so on a branch behind `base` the changes
+    that landed on `base` since the fork were read, reversed, as this branch's
+    own (issue #112): a docs-only branch listed every journey because main had
+    added a migration. The merge-base is what `git diff base...head` means.
+    When `base` is an ancestor of `head` (HEAD~1, every push) it IS `base`, so
+    nothing changes there."""
+    proc = subprocess.run(
+        ["git", "-C", repo, "merge-base", "--end-of-options", base, head],
+        capture_output=True, text=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else None
+
+
+def _same_rev(repo, sha, rev):
+    proc = subprocess.run(
+        ["git", "-C", repo, "rev-parse", "--verify", "-q", "--end-of-options",
+         f"{rev}^{{commit}}"], capture_output=True, text=True)
+    return proc.stdout.strip() == sha
+
+
 def select(repo, base, head, db_path, registry_path, strict_registry=True):
     # A revision starting with '-' is an option, not a revision (audit M2):
     # `--output=<path>` made `git diff` truncate an arbitrary file and return an
@@ -397,7 +421,17 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             return result
 
         diff_paths = set()
-        ranges, whole_files = changed_ranges(repo, base, head, diff_paths)
+        merge_base = diff_base(repo, base, head)
+        if merge_base is None:
+            # Unrelated histories or a shallow clone: no fork point to diff from.
+            # The tree diff over-selects, which is the safe direction. An
+            # unknown revision still fails loudly in `changed_ranges` below.
+            warnings.append(
+                f"{base} and {head} have no common ancestor (unrelated histories "
+                f"or a shallow clone) — compared the two trees directly, which "
+                f"may include changes that are not {head}'s"
+            )
+        ranges, whole_files = changed_ranges(repo, merge_base or base, head, diff_paths)
 
         # A changed file whose hunks resolve to NO node is the same failure as an
         # unmappable whole-file change, and it used to pass silently: seeds stayed
@@ -674,6 +708,8 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         # the data both read from) — riding `warnings` would let it silently drop
         # off a push whose other warnings already filled hook.py's MAX_WARNINGS.
 
+        if merge_base is not None and not _same_rev(repo, merge_base, base):
+            result["diff_base"] = merge_base
         result.update(
             status="OK",
             changed_files=sorted(ranges),
@@ -770,6 +806,9 @@ def _render(result):
             f"({len(result.get('exempt_files', {}))} exempt, "
             f"{len(result.get('unmodeled_files', []))} unmodeled)"
         )
+    if result.get("diff_base"):
+        lines.append(f"  diffed from merge-base {result['diff_base'][:12]} "
+                     f"({result['base']} has moved on since {result['head']} forked)")
     lines.append(
         f"{changed} | "
         f"seeds: {result['seed_symbols']} | impacted symbols: {result['impacted_symbols']}"

@@ -74,9 +74,12 @@ commit or stash first, then:
 On a feature branch:
 
 ```bash
-python3 -m testgraph.select --repo <repo> \
-  --base "$(git -C <repo> merge-base main HEAD)" --head HEAD
+python3 -m testgraph.select --repo <repo> --base main --head HEAD
 ```
+
+`select` diffs from the merge-base itself (issue #112), so `--base main` means
+"what this branch changed" even when main has moved on. The output names the
+merge-base when it differs from `--base`.
 
 Working directly on the default branch, `merge-base main HEAD` **is** `HEAD` and
 the diff is empty — use the commit count instead:
@@ -88,7 +91,7 @@ python3 -m testgraph.select --repo <repo> --base HEAD~<N> --head HEAD
 **Always confirm the range is non-empty before trusting the answer:**
 
 ```bash
-git -C <repo> diff --name-only <base>..HEAD    # must list your files
+git -C <repo> diff --name-only <base>...HEAD   # must list your files (three dots: from the merge-base)
 ```
 
 Do **not** pass `--base HEAD --head <your-branch>` while checked out on that

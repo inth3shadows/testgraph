@@ -2553,6 +2553,60 @@ class ExportFileTriggerTests(unittest.TestCase):
         self.assertEqual(text, "")
 
 
+class MergeBaseDiffTests(unittest.TestCase):
+    """Issue #112: `base..head` compared the two trees, so on a branch behind
+    main, main's own changes were seeded as the branch's — a docs-only branch
+    listed every journey because main had added a migration."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, ZeroSeedDegradesTests.REG)
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+        self.run("git", "branch", "-M", "main")
+
+    def _write(self, rel, text="x\n"):
+        full = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(full) or self.repo, exist_ok=True)
+        with open(full, "w") as fh:
+            fh.write(text)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", rel)
+
+    def test_a_branch_behind_main_sees_only_its_own_changes(self):
+        self.run("git", "switch", "-qc", "feature")
+        self._write("README.md")
+        self.run("git", "switch", "-q", "main")
+        self._write("db/001.sql")
+        res = sel.select(self.repo, "main", "feature", self.db, self.registry)
+        self.assertEqual(res["diff_files"], ["README.md"])
+        self.assertFalse(res["recall_degraded"], res["warnings"])
+        self.assertEqual(res["journeys"], [])
+        base = subprocess.run(["git", "-C", self.repo, "merge-base", "main", "feature"],
+                              capture_output=True, text=True).stdout.strip()
+        self.assertEqual(res["diff_base"], base)
+        self.assertIn(f"diffed from merge-base {base[:12]}", sel._render(res))
+
+    def test_an_ancestor_base_is_unchanged(self):
+        self._write("db/001.sql")
+        res = sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+        self.assertEqual(res["diff_files"], ["db/001.sql"])
+        self.assertNotIn("diff_base", res)
+
+    def test_unrelated_histories_fall_back_to_the_tree_diff_and_say_so(self):
+        self.run("git", "switch", "-q", "--orphan", "other")
+        self._write("db/002.sql")
+        res = sel.select(self.repo, "main", "other", self.db, self.registry)
+        self.assertIn("db/002.sql", res["diff_files"])
+        self.assertTrue(any("no common ancestor" in w for w in res["warnings"]),
+                        res["warnings"])
+
+    def test_an_unknown_revision_still_fails_loudly(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            sel.select(self.repo, "no-such-rev", "HEAD", self.db, self.registry)
+
+
 class ClosureConfinedTests(unittest.TestCase):
     """Issue #63: seeds that resolve fine but whose closure never leaves the
     file they started in used to be indistinguishable from a confident,

@@ -75,7 +75,9 @@ TOOLS = [
             "and degrades toward listing everything when the index cannot be "
             "trusted. Use before committing or reporting work complete. "
             "`base` defaults to HEAD~1 (the last commit); pass the base branch "
-            "(e.g. origin/main) to scope it to a whole branch instead."
+            "(e.g. origin/main) to scope it to a whole branch instead; the diff "
+            "is taken from the merge-base, so changes that landed on the base "
+            "since the branch forked are not counted."
         ),
         "inputSchema": {
             "type": "object",
