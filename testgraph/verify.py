@@ -295,8 +295,12 @@ def exit_code(summary):
     if summary.get("uncovered") or summary.get("incomplete"):
         return EXIT_INCOMPLETE
     # An empty selection the selector itself cannot vouch for verified nothing
-    # (#117): exit 0 would turn UNKNOWN into a pass.
-    if not summary.get("journeys") and _unknown_because(summary.get("selection") or {}):
+    # (#117): exit 0 would turn UNKNOWN into a pass. Entries no parser covers
+    # are left out of this decision: they never clear (registry.unchecked_entries),
+    # so counting them would hold every NONE in such a repo at exit 3 for good.
+    # The headline still shows them.
+    if not summary.get("journeys") and sel.none_is_unknown(
+            dict(summary.get("selection") or {}, entries_unchecked=[])):
         return EXIT_INCOMPLETE
     if any(credited.get(j) != "pass" for j in summary.get("journeys", [])):
         return EXIT_INCOMPLETE
@@ -380,7 +384,8 @@ def main(argv=None):
         description="run the declared tests for the journeys a diff endangers",
         epilog="Exit: 0 every selected journey ran and passed, 1 a journey "
                "failed, 2 refused (untrustworthy index), 3 incomplete — at "
-               "least one selected journey had no declared test.\n"
+               "least one selected journey had no passing declared test, or "
+               "the selection was NONE but UNKNOWN.\n"
                "Put pytest's own flags after `--`.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

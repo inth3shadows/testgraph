@@ -400,6 +400,22 @@ class RenderTests(unittest.TestCase):
         self.assertIn("UNKNOWN, not verified-safe", headline)
         self.assertNotIn("nothing to verify", headline)
 
+    def test_a_permanent_unchecked_entry_does_not_hold_ci_red(self):
+        """Review round 1 (H4): an entry no parser covers never clears, so a
+        NONE whose only UNKNOWN reason is that would exit 3 on every run. The
+        headline still says UNKNOWN; the exit code does not decide on it."""
+        sel_ = {"base": "a", "head": "b", "warnings": [], "journeys": [],
+                "closure_confined": [],
+                "entries_unchecked": [{"journey": "J1", "entry": "x", "file": "a.ts"}]}
+        sel_["unknown_because"] = verify.sel.none_is_unknown(sel_)
+        summary = verify._summary("/x", "HEAD", sel_)
+        self.assertIn("UNKNOWN", verify.render(summary, REGISTRY))
+        self.assertEqual(verify.exit_code(summary), verify.EXIT_OK)
+        stale = dict(sel_, warnings=["stale"])
+        stale["unknown_because"] = verify.sel.none_is_unknown(stale)
+        self.assertEqual(verify.exit_code(verify._summary("/x", "HEAD", stale)),
+                         verify.EXIT_INCOMPLETE)
+
     def test_a_clean_none_keeps_its_wording(self):
         sel_ = {"base": "a", "head": "b", "warnings": [], "journeys": [],
                 "unknown_because": []}

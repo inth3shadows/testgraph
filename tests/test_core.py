@@ -2256,6 +2256,47 @@ class UnmodeledDiffPathTests(unittest.TestCase):
         sel._parse_unified_diff(diff, paths)
         self.assertEqual(paths, {"db/old.sql", "db/new.sql"})
 
+    def test_the_exemption_names_only_what_cannot_run(self):
+        """Review round 1 (H2, H3, H5): a prefix match on doc basenames and the
+        code-file test-name rules exempted migrations, CI and runtime config,
+        which answered a clean NONE — the #117 failure again."""
+        exempt = {
+            "README.md": "docs", "LICENSE": "docs", "LICENSE.txt": "docs",
+            "COPYING": "docs", "NOTICE": "docs", "AUTHORS.rst": "docs",
+            "docs/x.sql": "docs", "doc/guide.txt": "docs",
+            "tests/fixtures/seed.sql": "test", "e2e/data.json": "test",
+            "app/__tests__/snap.json": "test", "app/types.d.ts": "type declaration",
+        }
+        for path, why in exempt.items():
+            self.assertEqual(sel._exemption(path), why, path)
+        for path in ("db/authors.sql", "db/changelog_entries.sql",
+                     "db/notice_board.sql", "config/licenses.json",
+                     "config/copying.yaml", "COPYING.sql",
+                     ".github/workflows/license-check.yml",
+                     ".github/workflows/test_and_deploy.yml",
+                     "scripts/test_release.sh", "docker-compose.test.yml",
+                     "db/test_users.sql", "api/openapi.spec.yaml",
+                     "src/app.spec.json", "app/docs/schema.json"):
+            self.assertIsNone(sel._exemption(path), path)
+
+    def test_a_submodule_bump_is_seen_whatever_the_git_config(self):
+        """Review round 1 (H1): diff.ignoreSubmodules / diff.submodule=log made
+        a submodule bump vanish from the diff, so it answered a clean NONE."""
+        def bump(sha):
+            self.run("git", "update-index", "--add", "--cacheinfo",
+                     f"160000,{sha},vendor/sub")
+            self.run("git", "commit", "-qm", "bump")
+        bump("1" * 40)
+        bump("2" * 40)
+        for key, value in (("diff.ignoreSubmodules", "all"),
+                           ("diff.submodule", "log")):
+            with self.subTest(config=key):
+                self.run("git", "config", key, value)
+                res = self._select()
+                self.assertIn("vendor/sub", res["diff_files"])
+                self.assertTrue(res["recall_degraded"])
+                self.run("git", "config", "--unset", key)
+
     def test_a_deleted_or_renamed_unmodeled_path_counts(self):
         self._commit({"db/schema.sql": "x\n"})
         self.run("git", "mv", "db/schema.sql", "db/schema2.sql")

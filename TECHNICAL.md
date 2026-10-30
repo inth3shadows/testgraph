@@ -665,7 +665,7 @@ result:
 | bucket | field | effect |
 |---|---|---|
 | product (`_is_product`) | `changed_files` | seeded as before |
-| exempt | `exempt_files` `{path: reason}` | none; reason is `test` (`_is_test`), `type declaration` (`.d.ts` family) or `docs` (`.md`/`.rst`/`.adoc`, a `docs/` or `doc/` segment, `LICENSE*`/`COPYING*`/`CHANGELOG*`/`NOTICE*`/`AUTHORS*`) |
+| exempt | `exempt_files` `{path: reason}` | none; reason is `test` (under a `tests/`, `e2e/` or `__tests__/` directory — not `_is_test`'s name rules, which exempted `test_and_deploy.yml`), `type declaration` (`.d.ts` family) or `docs` (`.md`/`.rst`/`.adoc`, a top-level `docs/` or `doc/`, or exactly `LICENSE`/`COPYING`/`CHANGELOG`/`NOTICE`/`AUTHORS` with no extension or a prose one — a prefix match exempted `db/authors.sql`) |
 | unmodeled (anything else) | `unmodeled_files` | joins `unmapped`: warns, `recall_degraded: true`, every journey listed `verify_manually` |
 
 `diff_files` lists every raw path, and the text renderer prints
@@ -689,6 +689,13 @@ bites; it is not built.
 verify follows the same rule from the other side: an empty selection whose
 `unknown_because` is non-empty prints `journeys selected: NONE — but UNKNOWN, not
 verified-safe:` as its headline (#113) and exits 3, not 0. UNKNOWN is not a pass.
+One reason is left out of the exit decision: an entry no parser covers
+(`entries_unchecked`) never clears, so counting it would hold every NONE in such a
+repo at exit 3 for good. The headline still lists it.
+
+`git diff` also runs with `--submodule=short --ignore-submodules=none`: with
+`diff.ignoreSubmodules`, a `.gitmodules` `ignore`, or `diff.submodule=log`, a
+submodule bump produced no `diff --git` block and answered a clean NONE.
 
 ## Re-verification After the Extractor Fix (2026-09-09)
 

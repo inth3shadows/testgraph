@@ -48,13 +48,16 @@ DECLARATION_EXT = (".d.ts", ".d.mts", ".d.cts")
 TEST_DIRS = frozenset({"tests", "e2e", "__tests__"})
 
 # Paths exempt from the unmodeled-path fallback (issue #117) because they cannot
-# change runtime behavior: prose, by extension, by directory segment, or by the
-# conventional top-level file names. Deliberately short. Everything else outside
+# change runtime behavior: prose, by extension, by a top-level docs directory,
+# or by the conventional file names — matched EXACTLY (optionally with a prose
+# extension), because a prefix match exempted `db/authors.sql` and
+# `config/licenses.json`. Deliberately short. Everything else outside
 # PRODUCT_EXT -- SQL, Dockerfile, CI YAML, CSS, JSON, toml, requirements.txt,
 # anything unrecognized -- is UNKNOWN impact, not "safe".
 DOC_EXT = (".md", ".rst", ".adoc")
 DOC_DIRS = frozenset({"docs", "doc"})
-DOC_BASENAMES = ("LICENSE", "COPYING", "CHANGELOG", "NOTICE", "AUTHORS")
+DOC_BASENAMES = frozenset({"LICENSE", "COPYING", "CHANGELOG", "NOTICE", "AUTHORS"})
+DOC_BASENAME_EXT = ("", ".txt", ".md", ".rst", ".adoc")
 
 
 def _is_product(path):
@@ -66,14 +69,19 @@ def _is_product(path):
 
 
 def _exemption(path):
-    """Why a non-product path cannot change behavior, or None when it might."""
-    if _is_test(path):
+    """Why a non-product path cannot change behavior, or None when it might.
+
+    Only a test DIRECTORY exempts a non-code file. `_is_test`'s name rules
+    (`test_*`, `*.test.*`, `*.spec.*`) are conventions for code; on other files
+    they exempted `test_and_deploy.yml` and `openapi.spec.yaml`."""
+    parts = path.split("/")
+    if TEST_DIRS.intersection(parts[:-1]):
         return "test"
     if path.endswith(DECLARATION_EXT):
         return "type declaration"
-    parts = path.split("/")
-    if (path.endswith(DOC_EXT) or DOC_DIRS.intersection(parts[:-1])
-            or parts[-1].upper().startswith(DOC_BASENAMES)):
+    stem, ext = os.path.splitext(parts[-1])
+    if (path.endswith(DOC_EXT) or (len(parts) > 1 and parts[0] in DOC_DIRS)
+            or (stem.upper() in DOC_BASENAMES and ext.lower() in DOC_BASENAME_EXT)):
         return "docs"
     return None
 
@@ -284,7 +292,12 @@ def changed_ranges(repo, base, head, paths=None):
         # --end-of-options: `base`/`head` are never parsed as git options (M2).
         ["git", "-C", repo, "-c", "core.quotePath=false", "diff", "--no-color",
          "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
-         "--unified=0", "-M", "--end-of-options", f"{base}..{head}"],
+         "--unified=0", "-M",
+         # diff.ignoreSubmodules, a .gitmodules `ignore`, or diff.submodule=log
+         # drop or reshape a submodule bump so no `diff --git` block names it
+         # (#117 review): pin both so the path is always accounted for.
+         "--submodule=short", "--ignore-submodules=none",
+         "--end-of-options", f"{base}..{head}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -435,22 +448,6 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             else:
                 _mark_unmapped(path, reason)
 
-        # A changed file that is NEWER than its index row is a third way to be
-        # unmappable, and the quietest. The other two resolve to no node and are
-        # obvious; this one resolves to the WRONG node. Seeds come from line ranges
-        # (`nodes_for_lines`), so a file that gained twenty lines above a function
-        # since it was indexed hands the diff's line numbers to whatever symbol used
-        # to live there — a neighbouring function, or nothing. The answer stays
-        # confident and can be narrower than the truth, which is the one failure
-        # this selector is built to refuse.
-        #
-        # The seeds computed above are KEPT, not discarded: whatever they resolved to
-        # is still evidence, and recall-first means adding doubt, not removing rows.
-        # Joining `unmapped` degrades the answer to "every journey, verify manually"
-        # — the same treatment issue #29 established for a file with no symbols.
-        #
-        # The `pre-push` hook runs `codegraph sync` first precisely so this stays the
-        # exceptional path rather than every push.
         # A changed path the index does not model at all — SQL, a Dockerfile, CI
         # YAML, CSS — never becomes a seed, and used to vanish in the parser: a
         # migration-only diff answered "0 changed files, NONE" with no warning
@@ -468,6 +465,22 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                 unmodeled_files.append(path)
                 _mark_unmapped(path, f"not modeled by the index: {_unmodeled_kind(path)}")
 
+        # A changed file that is NEWER than its index row is a third way to be
+        # unmappable, and the quietest. The other two resolve to no node and are
+        # obvious; this one resolves to the WRONG node. Seeds come from line ranges
+        # (`nodes_for_lines`), so a file that gained twenty lines above a function
+        # since it was indexed hands the diff's line numbers to whatever symbol used
+        # to live there — a neighbouring function, or nothing. The answer stays
+        # confident and can be narrower than the truth, which is the one failure
+        # this selector is built to refuse.
+        #
+        # The seeds computed above are KEPT, not discarded: whatever they resolved to
+        # is still evidence, and recall-first means adding doubt, not removing rows.
+        # Joining `unmapped` degrades the answer to "every journey, verify manually"
+        # — the same treatment issue #29 established for a file with no symbols.
+        #
+        # The `pre-push` hook runs `codegraph sync` first precisely so this stays the
+        # exceptional path rather than every push.
         drifted = integrity.content_drift(conn, repo, set(ranges) | set(whole_files))
         for path in sorted(drifted):
             _mark_unmapped(path, "bytes differ from the indexed copy — line spans are stale")
