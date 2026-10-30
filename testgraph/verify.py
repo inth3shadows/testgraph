@@ -214,10 +214,33 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
             proc = runner()
 
             import json
-            trace = {}
-            if os.path.isfile(trace_path):
+            # A missing or unreadable trace is a broken run, not a verdict
+            # (#108). Read as `{}` it reported every selected journey as having
+            # no journey-level test (exit 3); a truncated one raised out of here
+            # and exited 1, the code for "tests failed".
+            if not os.path.isfile(trace_path):
+                # pytest's own stderr usually names the cause (a bad flag, the
+                # plugin's xdist refusal); the guess below is only a fallback.
+                tail = (getattr(proc, "stderr", "") or "").strip()[-400:]
+                return None, (
+                    f"pytest exited {getattr(proc, 'returncode', '?')} and tgtrace "
+                    f"wrote no trace — the run was killed, or the plugin did not "
+                    f"load; no verdict was recorded"
+                    + (f"\n  pytest stderr (tail): {tail}" if tail else "")
+                )
+            try:
                 with open(trace_path) as fh:
                     trace = json.load(fh)
+            except (OSError, ValueError) as exc:
+                return None, (
+                    f"the tgtrace trace is truncated or not JSON ({exc}) — the run "
+                    f"was cut short; no verdict was recorded"
+                )
+            if not isinstance(trace, dict):
+                return None, (
+                    f"the trace file is not a tgtrace payload (a JSON "
+                    f"{type(trace).__name__}, not an object); no verdict was recorded"
+                )
             verdicts = {}
             if os.path.isfile(junit_path):
                 verdicts = pa.parse_junit(junit_path)
@@ -383,7 +406,8 @@ def main(argv=None):
         prog="testgraph.verify",
         description="run the declared tests for the journeys a diff endangers",
         epilog="Exit: 0 every selected journey ran and passed, 1 a journey "
-               "failed, 2 refused (untrustworthy index), 3 incomplete — at "
+               "failed, 2 refused (untrustworthy index, or no readable trace), "
+               "3 incomplete — at "
                "least one selected journey had no passing declared test, or "
                "the selection was NONE but UNKNOWN.\n"
                "Put pytest's own flags after `--`.",

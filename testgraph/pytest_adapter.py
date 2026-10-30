@@ -320,8 +320,15 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
             )
 
         import json
-        with open(trace_path) as f:
-            trace = json.load(f)
+        try:
+            with open(trace_path) as f:
+                trace = json.load(f)
+        except (OSError, ValueError) as exc:
+            # Same refusal as verify (#108): a cut-short run is not a verdict.
+            return None, f"the tgtrace trace is truncated or not JSON ({exc})"
+        if not isinstance(trace, dict):
+            return None, (f"the trace file is not a tgtrace payload (a JSON "
+                          f"{type(trace).__name__}, not an object)")
         if trace_out:
             with open(trace_out, "w") as f:
                 json.dump(trace, f, indent=1, sort_keys=True)

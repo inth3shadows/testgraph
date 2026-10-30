@@ -12,7 +12,7 @@ instead of being folded into PASS.
 python3 -m testgraph.verify --repo . --base origin/main -- tests/ -q
 # exit 0  every selected journey ran and passed
 # exit 1  a journey's tests failed
-# exit 2  refused: the index can't be trusted
+# exit 2  refused: the index can't be trusted, or the run left no readable trace
 # exit 3  a selected journey has no journey-level test, or the selection is UNKNOWN — named, not hidden
 ```
 
