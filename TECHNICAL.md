@@ -118,6 +118,8 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
 - `TESTGRAPH_STATE_DIR` relocates the invocation log (default
   `${XDG_DATA_HOME:-~/.local/share}/testgraph`).
 - Registry `spot_checks`: `{symbol: {min_caller_edges, file}}` — the guard floors.
+- Registry `file_triggers`: `{glob: [journey ids]}` — paths mapped straight to
+  journeys (issue #118; "File Triggers").
 
 ## Deployment
 
@@ -648,6 +650,40 @@ Measured effect on the labeled set: none. Recall 1.00 and mean precision 0.68 ar
 byte-identical with the degrade reverted, because no labeled commit exercises the
 zero-seed path (`0b4135f` already degraded via a whole-file change). The guard is
 justified by the reproduced failure in #29, not by a metric move.
+
+## File Triggers (issue #118)
+
+Some dependencies the graph cannot model are still known: a SQL migration under
+`packages/db/migrations/` can change RLS for every journey. A registry declares them:
+
+```json
+"file_triggers": {
+  "packages/db/migrations/**": ["J1", "J2", "J3"],
+  "apps/web/src/**/*.css": ["J8"]
+}
+```
+
+- **Globs** are repo-relative and match the whole path, case-sensitively: `**` is
+  zero or more whole segments, `*` any run inside one segment, `?` one character
+  inside a segment. No `[...]`, `{...}`, `!`, `\`, leading `/` or `..`.
+- **Matched against every raw diff path** (`diff_files`: added, deleted, both
+  sides of a rename, binary, submodule), before the product filter.
+- **Additive.** A journey the graph also selected keeps its graph row and gains
+  `triggered_by: [{pattern, path}]`, with no `reason`. A trigger-only journey gets
+  a row with `reason: "file-trigger"`, `confidence: 1.0`, `verify_manually: false`:
+  a human declared that dependency, which is stronger than any edge. The result
+  carries `file_triggers: [{path, pattern, journeys}]`; select prints
+  ``trigger: <path> matches `<glob>` → J…``, and both select and the hook label the row.
+- **A trigger is a complete claim** for the paths it matches. A matched
+  unmodeled path does not force the #117 all-journeys fallback, and is not
+  reported as unmodeled in the text or the hook. There is no partial coverage: to
+  be conservative, list more journeys. A matched product path still goes
+  through the graph (and #29) as before.
+- **An unmatched unmodeled path still degrades.** A typo'd glob cannot be
+  detected, but it fails safe, into the #117 fallback.
+- **Invalid triggers BLOCK**: a malformed glob, a value that isn't a non-empty
+  list, or an unknown journey id. A typo'd id would otherwise drop a journey
+  the registry declares affected.
 
 ## Unmodeled Paths Degrade Too (issue #117)
 

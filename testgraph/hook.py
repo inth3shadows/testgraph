@@ -83,6 +83,8 @@ def render(result, repo, more_cmd=None):
         ]
         for j in journeys[:MAX_JOURNEYS]:
             flag = "  ! VERIFY MANUALLY" if j.get("verify_manually") else ""
+            if j.get("reason") == "file-trigger":
+                flag = "  (file-trigger)"
             lines.append(
                 f"  [{j['rank']:>3}] {j['id']}  {j['name']}  "
                 f"(conf {j['confidence']}){flag}"
@@ -112,7 +114,8 @@ def render(result, repo, more_cmd=None):
     # Same reasoning as the confined line: a path the index does not model
     # forced the all-journeys fallback (issue #117), and the reader should see
     # which one without depending on the capped warnings below.
-    unmodeled = result.get("unmodeled_files", [])
+    covered = {t["path"] for t in result.get("file_triggers", [])}
+    unmodeled = [p for p in result.get("unmodeled_files", []) if p not in covered]
     if unmodeled:
         shown = ", ".join(unmodeled[:MAX_CONFINED])
         if len(unmodeled) > MAX_CONFINED:
