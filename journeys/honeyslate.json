@@ -129,7 +129,7 @@
       ]
     }
   },
-  "codegraph_schema_version": 15,
+  "codegraph_schema_version": 16,
   "codegraph_extraction_version": 28,
   "spot_checks": {
     "get_settings": {
