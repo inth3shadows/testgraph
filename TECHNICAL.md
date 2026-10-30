@@ -16,7 +16,8 @@ file-level cross-file bucket, not the transitive symbol closure this needs.
 Data flow for `testgraph.select`:
 
 ```
-git diff --unified=0 base..head
+git diff --unified=0 merge-base(base, head)..head      [select.diff_base, #112;
+                     the pre-push hook passes exact_range: base..head as trees]
   -> changed (file, line-range) pairs        [select.changed_ranges]
   -> seed nodes: nodes whose [start,end] overlaps a changed range   [db.nodes_for_lines]
   -> impacted set: reverse-transitive closure over the graph        [db.impacted_closure]
@@ -650,6 +651,26 @@ Measured effect on the labeled set: none. Recall 1.00 and mean precision 0.68 ar
 byte-identical with the degrade reverted, because no labeled commit exercises the
 zero-seed path (`0b4135f` already degraded via a whole-file change). The guard is
 justified by the reproduced failure in #29, not by a metric move.
+
+## Which range a diff means (issue #112)
+
+`select --base main --head HEAD` used to compare the two trees, so on a branch
+behind main the changes that landed on main since the fork were seeded as the
+branch's own: a docs-only branch listed every journey because main had added a
+migration. It now diffs from `merge-base(base, head)`, which is what "what did this
+branch change" means. The result carries `diff_base` when that differs from `base`.
+
+A push means something else. It moves the remote from its old tip to the new one,
+and after a rebase or a rewind the fork point hides what the push removes: a
+dropped migration read as a confident NONE. So the pre-push hook calls
+`select(..., exact_range=True)` and its `full:` command carries `--exact-range`.
+Two degenerate cases fall back to the tree diff with a warning:
+- **head behind base:** the merge-base is head itself, so the diff would be
+  empty by construction.
+- **no common ancestor:** `git merge-base` exits 1, for unrelated histories or
+  a shallow clone.
+
+Any other `merge-base` failure raises.
 
 ## File Triggers (issue #118)
 

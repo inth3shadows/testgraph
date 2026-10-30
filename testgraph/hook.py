@@ -180,7 +180,11 @@ def run(repo, base, head, registry_path=None, caller="pre-push"):
             record,
         )
 
-    result = sel.select(repo, base, head, db_path, registry_path)
+    # The exact range, not the merge-base: a push moves the remote from `base`
+    # (its old tip, or the merge-base pre-push already computed for a new
+    # branch) to `head`, and after a rebase or a rewind the fork point would
+    # hide what the push removes (#112 review).
+    result = sel.select(repo, base, head, db_path, registry_path, exact_range=True)
     record["status"] = result.get("status")
     record["n_journeys"] = len(result.get("journeys", []))
     record["journey_ids"] = [j["id"] for j in result.get("journeys", [])]
@@ -188,7 +192,8 @@ def run(repo, base, head, registry_path=None, caller="pre-push"):
     record["closure_confined"] = result.get("closure_confined", [])
     record["duration_ms"] = int((time.time() - started) * 1000)
     more = (
-        f"python3 -m testgraph.select --repo {repo} --base {base} --head {head}"
+        f"python3 -m testgraph.select --repo {repo} --base {base} --head {head} "
+        f"--exact-range"
     )
     return render(result, repo, more_cmd=more), record
 
