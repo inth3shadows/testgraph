@@ -346,11 +346,33 @@ class ConnectionClosedTests(unittest.TestCase):
             def __getattr__(self, n):
                 return getattr(self._c, n)
 
+        # A whole (empty) trace, so the run goes through validate and the
+        # ledger section — the part a leak would hide in. With no trace it now
+        # stops at the #108 refusal and would test nothing past it.
+        work = os.path.join(tmp, "work")
+        os.makedirs(work)
+
+        class FixedDir:
+            def __enter__(self):
+                return work
+
+            def __exit__(self, *exc):
+                return False
+
+        def runner():
+            with open(os.path.join(work, "trace.json"), "w") as fh:
+                fh.write('{"tests": {}, "declared": {}}')
+            return types.SimpleNamespace(returncode=0)
+
         with unittest.mock.patch.object(
-                verify.dbmod, "connect", lambda p: Proxy(real(p))):
-            verify.run(repo, "HEAD~1", "HEAD", registry_path=registry, db_path=db,
-                       _runner=lambda: types.SimpleNamespace(returncode=0),
-                       append=lambda row: True)
+                verify.dbmod, "connect", lambda p: Proxy(real(p))), \
+                unittest.mock.patch.object(verify.tempfile, "TemporaryDirectory",
+                                           lambda: FixedDir()):
+            summary, err = verify.run(repo, "HEAD~1", "HEAD", registry_path=registry,
+                                      db_path=db, _runner=runner,
+                                      append=lambda row: True)
+        self.assertIsNone(err)
+        self.assertIsNotNone(summary["marker_expression"])
         # select opens one and verify opens one; both must be closed
         self.assertEqual(len(opened), 2)
         self.assertEqual(len(closed), len(opened))
@@ -407,6 +429,36 @@ class UnreadableTraceTests(unittest.TestCase):
         self.assertIsNone(summary)
         self.assertIn("trace", err)
         self.assertIn("truncated or not JSON", err)
+
+    def test_a_trace_that_is_not_an_object_is_refused(self):
+        """Review H1: `null` or `[]` parse, then crashed validate() with an
+        AttributeError — exit 1 again."""
+        for text in ("null", "[]", '"x"'):
+            with self.subTest(text):
+                summary, err = self._run(text)
+                self.assertIsNone(summary)
+                self.assertIn("not a tgtrace payload", err)
+
+    def test_the_refusal_carries_pytest_stderr(self):
+        """Review H3: the real cause (an xdist refusal, a bad flag) was in
+        pytest's stderr, which was dropped."""
+        work = self.work
+
+        class FixedDir:
+            def __enter__(self):
+                return work
+
+            def __exit__(self, *exc):
+                return False
+
+        runner = lambda: types.SimpleNamespace(
+            returncode=4, stderr="ERROR: usage: unrecognized arguments: --bogus")
+        with unittest.mock.patch.object(verify.tempfile, "TemporaryDirectory",
+                                        lambda: FixedDir()):
+            summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
+                                      registry_path=self.registry, db_path=self.db,
+                                      _runner=runner, append=lambda r: True)
+        self.assertIn("unrecognized arguments: --bogus", err)
 
     def test_a_missing_trace_is_refused_not_uncovered(self):
         summary, err = self._run(None)
@@ -484,7 +536,7 @@ class AdapterTruncatedTraceTests(unittest.TestCase):
             with open(os.path.join(work, "junit.xml"), "w") as fh:
                 fh.write("<testsuite/>")
             with open(os.path.join(work, "trace.json"), "w") as fh:
-                fh.write('{"tests": {')
+                fh.write(self.trace_text)
             return types.SimpleNamespace(returncode=0, stderr="")
 
         with unittest.mock.patch.object(pa.tempfile, "TemporaryDirectory",
@@ -492,7 +544,14 @@ class AdapterTruncatedTraceTests(unittest.TestCase):
             summary, err = pa.run(repo, registry_path=registry, db_path=db,
                                   _runner=runner, append=lambda r: True)
         self.assertIsNone(summary)
-        self.assertIn("truncated or not JSON", err)
+        self.assertIn(self.expect, err)
+
+    trace_text, expect = '{"tests": {', "truncated or not JSON"
+
+
+class AdapterNonObjectTraceTests(AdapterTruncatedTraceTests):
+    """Review H1, adapter side: `[]` crashed at `trace.get("tests")`."""
+    trace_text, expect = "[]", "not a tgtrace payload"
 
 
 class SummaryShapeTests(unittest.TestCase):
