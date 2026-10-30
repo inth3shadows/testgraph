@@ -179,7 +179,8 @@ indexed copy afterwards, the answer degrades to `RECALL DEGRADED` and names the 
 instead of quietly trusting the wrong line numbers. So does a change to a file the
 index does not model at all — SQL, a `Dockerfile`, CI YAML, CSS, config — unless it is
 a test, docs or a type declaration: not indexed is not "no impact" (TECHNICAL.md
-"Unmodeled Paths Degrade Too").
+"Unmodeled Paths Degrade Too"). A registry's `file_triggers` maps such paths to the
+journeys they affect instead (TECHNICAL.md "File Triggers").
 
 Each run appends one `selection` row to `~/.local/share/testgraph/ledger.jsonl`
 (`{kind, ts, repo, base, head, commit, status, n_journeys, journey_ids, duration_ms,

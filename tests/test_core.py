@@ -2256,6 +2256,18 @@ class UnmodeledDiffPathTests(unittest.TestCase):
         sel._parse_unified_diff(diff, paths)
         self.assertEqual(paths, {"db/old.sql", "db/new.sql"})
 
+    def test_the_unmodeled_warning_is_capped_and_worded_for_its_cause(self):
+        """#136: the warning listed every path uncapped. #138: the fallback rows
+        reused #29's "no resolvable symbols", which points at re-indexing."""
+        self._commit({f"data/f{i}.json": "x\n" for i in range(7)})
+        res = self._select()
+        w = next(w for w in res["warnings"] if "not modeled" in w)
+        self.assertIn("… 2 more", w)
+        self.assertNotIn("data/f6.json", w)
+        self.assertEqual(len(res["unmodeled_files"]), 7)
+        self.assertTrue(all(j["reason"] == "path the index does not model"
+                            for j in res["journeys"]), res["journeys"])
+
     def test_the_exemption_names_only_what_cannot_run(self):
         """Review round 1 (H2, H3, H5): a prefix match on doc basenames and the
         code-file test-name rules exempted migrations, CI and runtime config,
@@ -2310,6 +2322,235 @@ class UnmodeledDiffPathTests(unittest.TestCase):
         res = self._select()
         self.assertIn("db/schema2.sql", res["unmodeled_files"])
         self.assertTrue(res["recall_degraded"])
+
+
+class FileTriggerTests(unittest.TestCase):
+    """Issue #118: a registry can map repo-relative globs straight to journeys,
+    for dependencies the graph cannot model (SQL migrations → RLS). Additive to
+    the graph; a matched unmodeled path is declared covered and does not force
+    the #117 all-journeys fallback."""
+
+    REG = {
+        "J1": {"name": "one", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+        "J2": {"name": "two", "entries": [{"name": "leaf", "file": "app/leaf.py"}]},
+        "J3": {"name": "three", "entries": [{"name": "leaf", "file": "app/leaf.py"}]},
+    }
+    TRIGGERS = {"packages/db/migrations/**": ["J2", "J3"],
+                "packages/db/migrations/*.sql": ["J3"],
+                "styles/*.css": ["J1"]}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+        self.registry = self._registry(self.TRIGGERS)
+
+    def _registry(self, triggers):
+        path = os.path.join(self.tmp, "reg.json")
+        with open(path, "w") as fh:
+            json.dump({"codegraph_schema_version": 8, "journeys": self.REG,
+                       "spot_checks": {}, "file_triggers": triggers}, fh)
+        return path
+
+    def _commit(self, files):
+        for rel, text in files.items():
+            full = os.path.join(self.repo, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w") as fh:
+                fh.write(text)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "change")
+
+    def _select(self):
+        return sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+
+    def test_a_migration_only_diff_selects_exactly_the_declared_journeys(self):
+        self._commit({"packages/db/migrations/001_add_rls.sql": "x\n"})
+        res = self._select()
+        self.assertEqual(res["status"], "OK")
+        self.assertFalse(res["recall_degraded"], res["warnings"])
+        self.assertEqual(["J2", "J3"], sorted(j["id"] for j in res["journeys"]))
+        for j in res["journeys"]:
+            self.assertEqual(j["reason"], "file-trigger")
+            self.assertFalse(j["verify_manually"])
+        j3 = next(j for j in res["journeys"] if j["id"] == "J3")
+        self.assertEqual(
+            sorted(t["pattern"] for t in j3["triggered_by"]),
+            ["packages/db/migrations/**", "packages/db/migrations/*.sql"])
+        text = sel._render(res)
+        self.assertIn("trigger: packages/db/migrations/001_add_rls.sql matches "
+                      "`packages/db/migrations/**`", text)
+        self.assertIn("file-trigger", text)
+        pushed = hook.render(res, self.repo)
+        self.assertIn("file-trigger", pushed)
+        # declared covered: not also reported as an unmodeled blind spot
+        self.assertNotIn("not modeled by the index", pushed)
+        self.assertNotIn("unmodeled:", text)
+        self.assertEqual(
+            {(t["path"], t["pattern"]) for t in res["file_triggers"]},
+            {("packages/db/migrations/001_add_rls.sql", "packages/db/migrations/**"),
+             ("packages/db/migrations/001_add_rls.sql", "packages/db/migrations/*.sql")})
+
+    def test_a_trigger_on_a_graph_selected_journey_adds_no_duplicate(self):
+        full = os.path.join(self.repo, "app", "svc.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[11] = "changed = 1\n"  # inside handler_a -> J1 via the graph
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self._commit({"styles/site.css": "x\n"})
+        res = self._select()
+        self.assertFalse(res["recall_degraded"], res["warnings"])
+        ids = [j["id"] for j in res["journeys"]]
+        self.assertEqual(ids.count("J1"), 1, ids)
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertNotIn("reason", j1)  # still a graph selection
+        self.assertEqual(j1["triggered_by"],
+                         [{"pattern": "styles/*.css", "path": "styles/site.css"}])
+
+    def test_an_unmatched_unmodeled_path_still_degrades(self):
+        self._commit({"packages/db/migrations/002.sql": "x\n", "Dockerfile": "x\n"})
+        res = self._select()
+        self.assertTrue(res["recall_degraded"])
+        self.assertEqual({"J1", "J2", "J3"}, {j["id"] for j in res["journeys"]})
+        self.assertIn("Dockerfile", res["unmodeled_files"])
+        self.assertTrue(any("Dockerfile" in w for w in res["warnings"]))
+        self.assertFalse(any("002.sql" in w for w in res["warnings"]), res["warnings"])
+
+    def test_no_match_is_the_117_fallback(self):
+        self._commit({"packages/web/migrations/001.sql": "x\n"})
+        res = self._select()
+        self.assertTrue(res["recall_degraded"])
+        self.assertEqual(res["file_triggers"], [])
+
+    def test_star_does_not_cross_a_directory(self):
+        self._commit({"styles/nested/site.css": "x\n"})
+        res = self._select()
+        self.assertEqual(res["file_triggers"], [])
+        self.assertTrue(res["recall_degraded"])
+
+    def test_renames_match_on_either_side_and_deletions_match(self):
+        self._commit({"packages/db/migrations/003.sql": "x\n"})
+        os.makedirs(os.path.join(self.repo, "archive"))
+        self.run("git", "mv", "packages/db/migrations/003.sql", "archive/003.sql")
+        self.run("git", "commit", "-qm", "move out")
+        res = self._select()
+        self.assertIn("packages/db/migrations/003.sql",
+                      {t["path"] for t in res["file_triggers"]})
+        # the new side, archive/003.sql, matches nothing -> #117 still applies
+        self.assertTrue(res["recall_degraded"])
+        os.remove(os.path.join(self.repo, "archive", "003.sql"))
+        self._commit({"packages/db/migrations/004.sql": "x\n"})
+        self.run("git", "rm", "-q", "packages/db/migrations/004.sql")
+        self.run("git", "commit", "-qm", "delete")
+        res = self._select()
+        self.assertFalse(res["recall_degraded"], res["warnings"])
+        self.assertEqual(["J2", "J3"], sorted(j["id"] for j in res["journeys"]))
+
+    def test_glob_semantics(self):
+        cases = [
+            ("db/**", "db/a.sql", True), ("db/**", "db/x/y/a.sql", True),
+            ("db/**", "db", False), ("**/schema.sql", "schema.sql", True),
+            ("**/schema.sql", "a/b/schema.sql", True),
+            ("a/**/b.sql", "a/b.sql", True), ("a/**/b.sql", "a/x/y/b.sql", True),
+            ("a/**/b.sql", "a/xb.sql", False), ("**/b.sql", "xb.sql", False),
+            ("a/*.sql", "a/b.sql", True), ("a/*.sql", "a/x/b.sql", False),
+            ("a/?.sql", "a/b.sql", True), ("a/?.sql", "a/bc.sql", False),
+            ("a/b.sql", "a/b.sql", True), ("a/b.sql", "x/a/b.sql", False),
+            ("a.b/*", "aXb/c", False),
+        ]
+        for pattern, path, want in cases:
+            self.assertEqual(reg.trigger_matches(pattern, path), want, (pattern, path))
+
+    def test_a_glob_that_can_never_match_blocks(self):
+        """Review round 1 (H2): these validated but matched nothing, so on an
+        exempt or graph-mapped path the declared journey vanished behind a
+        clean NONE."""
+        for pattern in ("tests/**.json", "a**b/c", "docs/", "docs/**/", "db//x.sql",
+                        "./db/**", "db/./x.sql"):
+            with self.subTest(pattern):
+                self.assertTrue(
+                    reg.trigger_problems({"journeys": self.REG,
+                                          "file_triggers": {pattern: ["J1"]}}),
+                    pattern)
+
+    def test_a_trailing_double_star_matches_any_name(self):
+        """H3: `.*` without DOTALL missed a path containing a newline."""
+        self.assertTrue(reg.trigger_matches("docs/**", "docs/gui\nde.md"))
+        self.assertTrue(reg.trigger_matches("**", "a\nb"))
+
+    def test_pathological_globs_are_refused_or_fast(self):
+        """H4: chained stars backtracked for seconds, enough to hang the hook."""
+        many = "/".join(["**", "a"] * 4) + "/x"
+        self.assertTrue(reg.trigger_problems(
+            {"journeys": self.REG, "file_triggers": {many: ["J1"]}}))
+        start = time.monotonic()
+        reg.trigger_matches("**/**/a/x", "/".join(["a"] * 60) + "/y")
+        reg.trigger_matches("a*a*a*a*b", "a" * 200)
+        self.assertLess(time.monotonic() - start, 0.5)
+
+    def test_an_invalid_trigger_blocks(self):
+        bad = {
+            "unknown journey": {"db/**": ["J1", "J9"]},
+            "empty list": {"db/**": []},
+            "not a list": {"db/**": "J1"},
+            "absolute": {"/db/**": ["J1"]},
+            "dotdot": {"../db/**": ["J1"]},
+            "brackets": {"db/[ab].sql": ["J1"]},
+            "empty glob": {"": ["J1"]},
+        }
+        self._commit({"README.md": "x\n"})
+        for label, triggers in bad.items():
+            with self.subTest(label):
+                self.registry = self._registry(triggers)
+                res = self._select()
+                self.assertEqual(res["status"], "BLOCKED", res.get("warnings"))
+                self.assertTrue(any("file_triggers" in b for b in res["blocking"]),
+                                res["blocking"])
+        self.registry = self._registry(["db/**"])
+        self.assertEqual(self._select()["status"], "BLOCKED")
+
+
+class ExportFileTriggerTests(unittest.TestCase):
+    """Review round 1 (H1): the static map must carry the triggers the selector
+    applies, or an agent reading it skips a declared journey; and an invalid
+    trigger must stop the map as it stops `select`."""
+
+    def _registry(self, tmp, triggers):
+        path = os.path.join(tmp, "reg.json")
+        with open(path, "w") as fh:
+            json.dump({"codegraph_schema_version": 8, "approved": True,
+                       "journeys": FileTriggerTests.REG, "spot_checks": {},
+                       "file_triggers": triggers}, fh)
+        return path
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.repo, _ = _git_repo(self.tmp, {"app/svc.py": 22})
+
+    def _export(self, triggers):
+        out = os.path.join(self.tmp, "map.md")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = exp.main(["--repo", self.repo, "--db", self.db, "--registry",
+                           self._registry(self.tmp, triggers), "--out", out])
+        text = open(out).read() if os.path.exists(out) else ""
+        return rc, text, err.getvalue()
+
+    def test_the_map_lists_the_triggers(self):
+        rc, text, err = self._export({"packages/db/migrations/**": ["J2", "J3"]})
+        self.assertEqual(rc, 0, err)
+        self.assertIn("## File triggers", text)
+        self.assertIn("`packages/db/migrations/**` → J2, J3", text)
+
+    def test_an_invalid_trigger_blocks_the_map(self):
+        rc, text, err = self._export({"db/**": ["J9"]})
+        self.assertEqual(rc, 2)
+        self.assertIn("file_triggers", err)
+        self.assertEqual(text, "")
 
 
 class ClosureConfinedTests(unittest.TestCase):

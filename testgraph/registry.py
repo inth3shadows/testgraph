@@ -3,8 +3,10 @@ symbols. Names drift, node ids don't — so we store names + file and resolve to
 node ids at run time.
 """
 import ast
+import functools
 import json
 import os
+import re
 
 from . import db as dbmod
 
@@ -459,6 +461,85 @@ def _scan(node, name, in_function):
 def _binds(node, name):
     targets = getattr(node, "targets", None) or [getattr(node, "target", None)]
     return any(isinstance(t, ast.Name) and t.id == name for t in targets if t)
+
+
+# `file_triggers` (issue #118): {"<glob>": ["J1", ...]} maps changed paths straight
+# to journeys, for dependencies the graph cannot model (a SQL migration that
+# changes RLS for every journey). Globs are repo-relative and match the whole
+# path: `**` is zero or more whole segments, `*` any run inside one segment, `?`
+# one character inside a segment. fnmatch's `*` crosses `/`, and
+# PurePath.full_match / glob.translate are 3.13+, so the translation is ours.
+_GLOB_UNSUPPORTED = re.compile(r"[\[\]!{}\\]")
+# More `**` segments than this backtrack badly on deep paths (8 chained took
+# >20s, enough to hang the pre-push hook), and no real trigger needs them.
+MAX_DOUBLE_STAR = 2
+
+
+@functools.lru_cache(maxsize=None)
+def _trigger_regex(pattern):
+    out = []
+    parts = pattern.split("/")
+    for i, part in enumerate(parts):
+        last = i == len(parts) - 1
+        if part == "**":
+            # [\s\S], not `.`: a path may contain a newline (git quotes it, the
+            # diff parser unquotes it), and `.` would silently miss it.
+            out.append(r"[\s\S]*" if last else "(?:[^/]+/)*")
+            continue
+        seg = "".join("[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c)
+                      for c in part)
+        out.append(seg if last else seg + "/")
+    return re.compile("".join(out) + r"\Z")
+
+
+def trigger_matches(pattern, path):
+    """Whether a repo-relative `path` matches a `file_triggers` glob."""
+    return _trigger_regex(pattern).match(path) is not None
+
+
+def trigger_problems(registry):
+    """Why `file_triggers` is unusable, as blocking messages; [] when fine.
+
+    Blocking, not a warning: an unknown journey id would silently drop a journey
+    a human declared affected. A typo'd GLOB cannot be caught here (it matches
+    nothing), but it fails safe: the path falls through to the #117 fallback."""
+    triggers = registry.get("file_triggers")
+    if triggers is None:
+        return []
+    if not isinstance(triggers, dict):
+        return ["file_triggers must be an object of {glob: [journey ids]}"]
+    known = registry.get("journeys", {})
+    problems = []
+    for pattern, jids in triggers.items():
+        segs = pattern.split("/") if isinstance(pattern, str) else []
+        # Every one of these can never match a file path, so it would drop the
+        # declared journeys behind a clean NONE on an exempt or graph-mapped
+        # path: an empty segment (`docs/`, `a//b`, a leading `/`), `.` or `..`,
+        # `**` inside a segment (`tests/**.json` is a one-segment `*`).
+        if (not segs or _GLOB_UNSUPPORTED.search(pattern)
+                or any(s in ("", ".", "..") or ("**" in s and s != "**")
+                       for s in segs)
+                or segs.count("**") > MAX_DOUBLE_STAR):
+            problems.append(
+                f"file_triggers glob {pattern!r} can never match as written — "
+                f"repo-relative, no empty, `.` or `..` segments, `**` only as a "
+                f"whole segment (at most {MAX_DOUBLE_STAR}), only * ** ?"
+            )
+            continue
+        if (not isinstance(jids, list) or not jids
+                or not all(isinstance(j, str) for j in jids)):
+            problems.append(
+                f"file_triggers[{pattern!r}] must be a non-empty list of journey ids"
+            )
+            continue
+        unknown = [j for j in jids if j not in known]
+        if unknown:
+            problems.append(
+                f"file_triggers[{pattern!r}] names unknown journey(s) "
+                f"{', '.join(unknown)} — a typo here would silently drop a "
+                f"journey the registry declares affected"
+            )
+    return problems
 
 
 def journey_name(registry, jid):

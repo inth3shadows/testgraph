@@ -108,6 +108,11 @@ python3 -m testgraph.select --repo <path> --registry <path>/.testgraph/journeys/
 
 ## 6. Approve
 
+If the app has behaviour the graph cannot see — SQL migrations, RLS policies,
+stylesheets a journey depends on — declare it before approving, so those diffs
+select the right journeys instead of every one (TECHNICAL.md "File Triggers"):
+`"file_triggers": {"packages/db/migrations/**": ["J1", "J2"]}`.
+
 Set `"approved": true`, drop the `blind_spots` you resolved (keep the ones you
 consciously accepted), rewrite `note` to say who reviewed it and what is knowingly
 uncovered, and rename the file to `.testgraph/journeys/<target>.json` — in the same

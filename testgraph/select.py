@@ -42,6 +42,9 @@ PRODUCT_EXT = (".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts",
 # whole answer to "test everything", so admitting them would be actively worse.
 DECLARATION_EXT = (".d.ts", ".d.mts", ".d.cts")
 
+# How many paths one warning names before "… N more" (#136).
+MAX_LISTED = 5
+
 # Directory names that mean "this is test code", matched as whole path segments.
 # Substring matching on "/tests/" missed a repo-root `tests/` or `__tests__/`
 # directory entirely, so root-level test files were seeded as product code.
@@ -357,6 +360,8 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                     f"journeys absent from this index (not scored): {detail}"
                 )
 
+        blocking.extend(reg.trigger_problems(registry))
+
         # Drift the index cannot see: the registry and the index can agree while both
         # are stale against the source. A live parse is the only check in this pipeline
         # that reads the working tree, so it is the only one that catches a handler
@@ -454,7 +459,26 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         # (issue #117). Not indexed is not "no impact". Unless the path is
         # exempt (tests, docs, type declarations), it degrades the answer to
         # every journey, exactly like a code file with no symbols (#29).
-        exempt_files, unmodeled_files = {}, []
+        #
+        # A registry `file_triggers` glob (issue #118) is the exception: it maps
+        # matched paths straight to journeys, additively, and is the registry's
+        # claim of complete coverage for them, so a matched unmodeled path does
+        # not force the fallback. Every raw path is matched, product and exempt
+        # included, so a trigger is never hidden by the filter.
+        triggers = registry.get("file_triggers") or {}
+        trigger_hits = []
+        triggered = {}  # jid -> [{"pattern", "path"}]
+        for path in sorted(diff_paths):
+            for pattern, jids in triggers.items():
+                if reg.trigger_matches(pattern, path):
+                    trigger_hits.append(
+                        {"path": path, "pattern": pattern, "journeys": list(jids)})
+                    for jid in jids:
+                        triggered.setdefault(jid, []).append(
+                            {"pattern": pattern, "path": path})
+        trigger_covered = {t["path"] for t in trigger_hits}
+
+        exempt_files, unmodeled_files, untriggered = {}, [], []
         for path in sorted(diff_paths):
             if _is_product(path):
                 continue
@@ -463,7 +487,8 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                 exempt_files[path] = why
             else:
                 unmodeled_files.append(path)
-                _mark_unmapped(path, f"not modeled by the index: {_unmodeled_kind(path)}")
+                if path not in trigger_covered:
+                    untriggered.append(path)
 
         # A changed file that is NEWER than its index row is a third way to be
         # unmappable, and the quietest. The other two resolve to no node and are
@@ -581,6 +606,27 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             weak_reason = dbmod.weak_edge_reason(impacted_caps.get(best, ""))
             if weak_reason and journeys[-1]["verify_manually"]:
                 journeys[-1]["weak_reason"] = weak_reason
+        # Declared by a file trigger: a graph row keeps its graph meaning (no
+        # `reason`) and gains `triggered_by`; a trigger-only journey gets its own
+        # confident row — a human declared the dependency — labelled
+        # `file-trigger` so it never reads as a graph edge.
+        by_id = {j["id"]: j for j in journeys}
+        for jid in sorted(triggered, key=reg.journey_sort_key):
+            if jid in by_id:
+                by_id[jid]["triggered_by"] = triggered[jid]
+            else:
+                journeys.append(
+                    {
+                        "id": jid,
+                        "name": reg.journey_name(registry, jid),
+                        "entries_hit": 0,
+                        "rank": 0,
+                        "confidence": 1.0,
+                        "verify_manually": False,
+                        "reason": "file-trigger",
+                        "triggered_by": triggered[jid],
+                    }
+                )
         # Unmappable whole-file change -> unbounded impact. Add every journey the
         # closure did not already select, flagged for manual verification, so the
         # answer degrades toward "test everything" instead of toward silence.
@@ -589,6 +635,22 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                 f"{len(unmapped)} changed file(s) the index cannot be trusted for "
                 f"({', '.join(unmapped)}) — impact is unbounded; all journeys listed"
             )
+        # Its own warning and its own row reason (#138): re-indexing can never
+        # change the answer for a file the index does not model, so the #29
+        # wording would send the reader the wrong way. The path list is capped
+        # (#136); `unmodeled_files` carries all of them.
+        if untriggered:
+            shown = ", ".join(untriggered[:MAX_LISTED])
+            if len(untriggered) > MAX_LISTED:
+                shown += f", … {len(untriggered) - MAX_LISTED} more"
+            warnings.append(
+                f"{len(untriggered)} changed path(s) not modeled by the index and "
+                f"matched by no file trigger ({shown}) — impact unknown; all "
+                f"journeys listed"
+            )
+        if unmapped or untriggered:
+            fallback_reason = ("change with no resolvable symbols" if unmapped
+                               else "path the index does not model")
             selected = {j["id"] for j in journeys}
             for jid in sorted(registry.get("journeys", {}), key=reg.journey_sort_key):
                 if jid not in selected:
@@ -600,7 +662,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                             "rank": 0,
                             "confidence": 0.0,
                             "verify_manually": True,
-                            "reason": "change with no resolvable symbols",
+                            "reason": fallback_reason,
                         }
                     )
 
@@ -618,8 +680,9 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             diff_files=sorted(diff_paths),
             exempt_files=exempt_files,
             unmodeled_files=unmodeled_files,
+            file_triggers=trigger_hits,
             whole_file_changes=whole_files,
-            recall_degraded=bool(unmapped),
+            recall_degraded=bool(unmapped or untriggered),
             closure_confined=confined_files,
             seed_symbols=len(seeds),
             impacted_symbols=len(impacted),
@@ -713,8 +776,13 @@ def _render(result):
     )
     for path, reason in sorted(result.get("whole_file_changes", {}).items()):
         lines.append(f"  whole-file: {path} ({reason})")
+    for t in result.get("file_triggers", []):
+        lines.append(f"  trigger: {t['path']} matches `{t['pattern']}` → "
+                     f"{', '.join(t['journeys'])}")
+    covered = {t["path"] for t in result.get("file_triggers", [])}
     for path in result.get("unmodeled_files", []):
-        lines.append(f"  unmodeled: {path} — not in the index, impact UNKNOWN")
+        if path not in covered:
+            lines.append(f"  unmodeled: {path} — not in the index, impact UNKNOWN")
     if result.get("recall_degraded"):
         lines.append("  RECALL DEGRADED — unbounded impact, all journeys listed")
     for f in result.get("closure_confined", []):
@@ -743,6 +811,8 @@ def _render(result):
         for j in result["journeys"]:
             why = j.get("weak_reason") or j.get("reason") or "weak edge path"
             flag = "  ! VERIFY MANUALLY — %s" % why if j["verify_manually"] else ""
+            if j.get("reason") == "file-trigger":
+                flag = "  — file-trigger"
             lines.append(
                 f"  [{j['rank']:>3}] {j['id']}  {j['name']}  "
                 f"({j['entries_hit']} entry, conf {j['confidence']}){flag}"
