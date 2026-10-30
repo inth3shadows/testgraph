@@ -25,6 +25,9 @@ from testgraph import verify  # noqa: E402
 from test_core import _db_on_disk, _registry_file, build_fixture  # noqa: E402
 
 HAVE_PYTEST = importlib.util.find_spec("pytest") is not None
+# Set by the `unittest-with-pytest` CI job, which exists to run this file: there
+# a missing pytest must fail, not skip into a green job that ran nothing.
+REQUIRE_PYTEST = os.environ.get("TG_REQUIRE_PYTEST") == "1"
 
 # handler_a must sit on lines 10-20: that is where build_fixture's node says it is.
 SVC = "".join(f"# line {i}\n" for i in range(1, 10)) + (
@@ -61,6 +64,24 @@ CASES = {
     "declared but never enters the journey": (
         "@covers('J1')\ndef test_j1():\n    assert True\n",
         verify.EXIT_INCOMPLETE),
+}
+
+
+class PytestPresenceTests(unittest.TestCase):
+    def test_the_pytest_job_really_has_pytest(self):
+        if REQUIRE_PYTEST:
+            self.assertTrue(HAVE_PYTEST, "TG_REQUIRE_PYTEST=1 but pytest is not importable")
+
+
+WHY = {
+    "skip in the body": {"incomplete": [("J1", "skip")], "uncovered": []},
+    "xfail": {"incomplete": [("J1", "skip")], "uncovered": []},
+    "declared but never enters the journey": {
+        "uncovered": ["J1"], "credited": {}, "unvalidated_journeys": ["J1"]},
+    "setup error": {"credited": {"J1": "fail"}},
+    "fail": {"credited": {"J1": "fail"}},
+    "pass": {"credited": {"J1": "pass"}},
+    "parametrized id containing ::": {"credited": {"J1": "pass"}},
 }
 
 
@@ -117,9 +138,14 @@ class RealPytestVerifyTests(unittest.TestCase):
         with open(os.path.join(tests_dir, f"test_case_{self._n}.py"), "w") as fh:
             fh.write(HEADER + body)
         # The pytest subprocess imports `testgraph.results` from this checkout.
+        # No auto-loaded plugins and no PYTEST_ADDOPTS from the developer's
+        # shell: `-n auto` would trip tgtrace's xdist refusal, and pytest-cov or
+        # pytest-randomly change the run. tgtrace itself loads with `-p`.
         env = {"PYTHONPATH": os.pathsep.join(
             p for p in (ROOT_DIR, os.environ.get("PYTHONPATH")) if p),
-            "PYTHONDONTWRITEBYTECODE": "1"}
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "PYTEST_ADDOPTS": ""}
         with unittest.mock.patch.dict(os.environ, env):
             return verify.run(self.repo, "HEAD~1", "HEAD",
                               registry_path=self.registry, db_path=self.db,
@@ -132,10 +158,26 @@ class RealPytestVerifyTests(unittest.TestCase):
                 summary, err = self._verify(body)
                 self.assertIsNone(err, err)
                 self.assertEqual(summary["journeys"], ["J1"])
+                # Three different paths end in exit 3; pin which one each took.
+                got = dict(summary, unvalidated_journeys=[
+                    jid for _test, jid in summary["unvalidated"]])
+                for key, value in WHY.get(label, {}).items():
+                    self.assertEqual(got[key], value, (label, key))
                 self.assertEqual(verify.exit_code(summary), want,
                                  (label, summary["credited"], summary["incomplete"],
                                   summary["uncovered"], summary["unvalidated"],
                                   summary["pytest_exit"]))
+
+    def test_only_the_selected_journeys_tests_run(self):
+        """Review: dropping `-m <journeys>` from the pytest command survived,
+        because every test covered the one journey. An unmarked red test must
+        not run, and must not turn J1's pass into anything else."""
+        summary, err = self._verify(
+            CASES["pass"][0] + "\n\ndef test_unrelated_and_red():\n    assert False\n")
+        self.assertIsNone(err, err)
+        self.assertEqual(summary["collected"], 1)
+        self.assertEqual(summary["pytest_exit"], 0)
+        self.assertEqual(verify.exit_code(summary), verify.EXIT_OK)
 
     def test_a_pass_is_validated_against_the_trace(self):
         summary, err = self._verify(CASES["pass"][0])
