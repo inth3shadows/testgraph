@@ -118,7 +118,13 @@ def file_map(conn):
     }
 
 
-def resolve_traced(conn, symbols, files):
+def _qualified(qualname):
+    """The tracer's `co_qualname` (`A.run`, `outer.<locals>.git`) in CodeGraph's
+    `qualified_name` form (`A::run`, `outer::git`)."""
+    return "::".join(p for p in qualname.split(".") if p != "<locals>")
+
+
+def resolve_traced(conn, symbols, files, ambiguous=None):
     """[(relpath, qualname)] -> ({node_id}, [unresolved]).
 
     Only ANONYMOUS frames are dropped — `<lambda>`, `<listcomp>`, `<genexpr>`
@@ -134,7 +140,13 @@ def resolve_traced(conn, symbols, files):
     A name that resolves only in a DIFFERENT file is reported unresolved, not
     accepted — "the graph has no node for this" (an indexing gap) and "the
     graph has a node and no path to it" (a traversal gap) are different
-    defects with different fixes, and merging them reports one as the other."""
+    defects with different fixes, and merging them reports one as the other.
+
+    Several same-file nodes of that name (`A.run`, `B.run`, every `__init__`)
+    are told apart by `qualified_name` (#96): resolving by bare name credited
+    `B.run` as run when only `A.run` was, and reported it as a proof-grade
+    STATIC MISS. With no qualified match, one hit is accepted; several are
+    appended to `ambiguous` — not resolved, not unresolved, not a miss."""
     resolved, unresolved = set(), []
     for rel, qualname in symbols:
         if "<" in qualname.split(".")[-1]:
@@ -142,6 +154,18 @@ def resolve_traced(conn, symbols, files):
         name = qualname.split(".")[-1]
         ids = dbmod.resolve_symbol(conn, name, os.path.basename(rel))
         hits = [i for i in ids if path_matches(files.get(i, ""), rel)]
+        if len(hits) > 1:
+            want = _qualified(qualname)
+            marks = ",".join("?" * len(hits))
+            exact = [r[0] for r in conn.execute(
+                f"SELECT id FROM nodes WHERE id IN ({marks}) AND qualified_name = ?",
+                (*hits, want))]
+            if exact:
+                hits = exact
+            else:
+                if ambiguous is not None:
+                    ambiguous.append((rel, qualname))
+                continue
         if hits:
             resolved.update(hits)
         else:
@@ -149,13 +173,15 @@ def resolve_traced(conn, symbols, files):
     return resolved, unresolved
 
 
-def trace_nodes(conn, trace_tests, files=None):
+def trace_nodes(conn, trace_tests, files=None, ambiguous=None):
     """tgtrace's `{nodeid: [[rel, qualname], ...]}` -> ({test: {node_id}},
-    [unresolved]). One resolution pass, reused by both halves of the report."""
+    [unresolved]). One resolution pass, reused by both halves of the report.
+    Symbols `resolve_traced` cannot tell apart go to `ambiguous`."""
     files = files if files is not None else file_map(conn)
     per_test, unresolved = {}, []
     for test, symbols in trace_tests.items():
-        ids, missing = resolve_traced(conn, [tuple(s) for s in symbols], files)
+        ids, missing = resolve_traced(conn, [tuple(s) for s in symbols], files,
+                                      ambiguous)
         per_test[test] = ids
         unresolved.extend(missing)
     return per_test, unresolved
@@ -269,8 +295,13 @@ class _Module:
         indexed — then every same-named def as a fallback. Several defs share
         a name legitimately (a method on two classes); support is the UNION
         over them, which again over-supports rather than over-accuses."""
-        if start_line is not None and start_line in self.by_line:
-            return [self.by_line[start_line]]
+        # The line is trusted only when the def there has the node's name. The
+        # index can be stale against the working tree this reads, and the def
+        # now on that line is then a different function, whose body would turn
+        # a real edge into a phantom (#100).
+        hit = self.by_line.get(start_line) if start_line is not None else None
+        if hit is not None and hit.name == name:
+            return [hit]
         return list(self.functions.get(name, ()))
 
 
@@ -347,7 +378,8 @@ def _local_names(func):
     return names
 
 
-def _supports(func, module, caller_file, callee_name, callee_file):
+def _supports(func, module, caller_file, callee_name, callee_file,
+              callee_kind=None):
     """Does anything in `func` denote `callee_name` defined in `callee_file`?
 
     Every reference is weighed, not only call positions: passing a function as
@@ -369,6 +401,17 @@ def _supports(func, module, caller_file, callee_name, callee_file):
                     and node.name == callee_name and node is not func):
                 return True
     for node in ast.walk(func):
+        if (isinstance(node, ast.Attribute) and node.attr == callee_name
+                and callee_kind == "method"):
+            # A METHOD is reached through an instance or its class, and which
+            # one cannot be resolved without types: `svc.create()` on a
+            # parameter, `s.create()` on a local, `Svc.build()`, `A().run()`.
+            # Refusing these called the commonest real edges phantoms (#95).
+            # Same coarse rule `self.`/`cls.` already get. A module-level
+            # FUNCTION callee does not take this branch, so the #66 shape —
+            # `rows.setdefault(k, []).append(v)` against `ledger.append` —
+            # still refuses below.
+            return True
         if isinstance(node, ast.Attribute) and node.attr == callee_name:
             receiver = _dotted(node.value)
             if receiver is None:
@@ -386,6 +429,15 @@ def _supports(func, module, caller_file, callee_name, callee_file):
                     )
             if any(_module_matches(c, callee_file) for c in candidates):
                 return True
+        elif (isinstance(node, ast.Name) and node.id != callee_name
+              and node.id not in locals_):
+            # `from .svc import append as ap; ap()` — the alias denotes the
+            # original name (#95).
+            for kind, value in module.bindings.get(node.id, ()):
+                if kind == "symbol":
+                    mod, orig = value
+                    if orig == callee_name and mod and _module_matches(mod, callee_file):
+                        return True
         elif isinstance(node, ast.Name) and node.id == callee_name:
             if callee_name in locals_:
                 continue                    # shadowed by a parameter or a local
@@ -400,6 +452,13 @@ def _supports(func, module, caller_file, callee_name, callee_file):
                 # the callee's NAME against a module path — `append` is not a
                 # module, so the name-based check silently rejected every
                 # same-file call.
+                return True
+            if callee_name in module.functions and caller_file == callee_file:
+                # A def nested in an ENCLOSING function, reached as a closure:
+                # `close_block` calling its sibling `note` inside
+                # `_parse_unified_diff` (found by running this on testgraph).
+                # Any same-named def in the file counts — over-support, the
+                # safe direction.
                 return True
     return False
 
@@ -423,7 +482,7 @@ def source_support(repo_root, caller, callee, cache):
     if not defs:
         return UNKNOWN, UNREADABLE
     for func in defs:
-        if _supports(func, module, ca, callee["name"], cb):
+        if _supports(func, module, ca, callee["name"], cb, callee.get("kind")):
             return SUPPORTED, None
     # A caller in the callee's OWN file, referencing it by a bare name, is
     # handled above via `module_level`. Reaching here means no reference of
@@ -557,7 +616,8 @@ def reconcile(db_path, repo_root, registry, trace):
     """The whole report, as data. `trace` is a parsed tgtrace payload."""
     conn = dbmod.connect(db_path)
     files = file_map(conn)
-    per_test, unresolved = trace_nodes(conn, trace.get("tests", {}), files)
+    ambiguous = []
+    per_test, unresolved = trace_nodes(conn, trace.get("tests", {}), files, ambiguous)
     node_tests = invert(per_test)
     reach, contained_by = dbmod.dependency_graph(conn)
 
@@ -576,6 +636,7 @@ def reconcile(db_path, repo_root, registry, trace):
     return {
         "tests_traced": len(per_test),
         "unresolved_symbols": sorted(set(unresolved)),
+        "ambiguous_symbols": sorted(set(ambiguous)),
         "static_misses": misses,
         "edges": findings,
         "edge_counts": dict(counts),
@@ -675,6 +736,13 @@ def render(report, max_examples=8):
             f"  {len(report['unresolved_symbols'])} traced symbol(s) have no "
             f"node in the index — an indexing gap, kept out of the miss count "
             f"because it needs a different fix than a missing edge"
+        )
+    if report.get("ambiguous_symbols"):
+        lines.append("")
+        lines.append(
+            f"  {len(report['ambiguous_symbols'])} traced symbol(s) match several "
+            f"same-named nodes and no qualified name — not counted as run, so "
+            f"they cannot make a miss (#96)"
         )
     return "\n".join(lines)
 

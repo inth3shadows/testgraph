@@ -449,6 +449,149 @@ def write(row):
         )
 
 
+class CommonCallShapeTests(unittest.TestCase):
+    """#95: the strict oracle refused the commonest Python call shapes and
+    reported real edges as phantoms. A METHOD callee is supported by any
+    attribute reference of its name, like `self.`/`cls.`; a module-level
+    FUNCTION callee stays strict, so the #66 shape still refuses."""
+
+    def _support(self, source, caller, callee_name, callee_kind, callee_file="mod.py",
+                 files=None):
+        d = tempfile.mkdtemp(prefix="tg-oracle-")
+        try:
+            for rel, text in (files or {}).items():
+                with open(os.path.join(d, rel), "w") as fh:
+                    fh.write(text)
+            with open(os.path.join(d, "mod.py"), "w") as fh:
+                fh.write(source.lstrip("\n"))
+            return rec.source_support(
+                d,
+                {"name": caller, "file_path": "mod.py", "start_line": None,
+                 "kind": "function"},
+                {"name": callee_name, "file_path": callee_file, "kind": callee_kind},
+                {},
+            )[0]
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_a_method_on_a_parameter_or_local_is_supported(self):
+        for src in ("def f(svc):\n    svc.create()\n",
+                    "def f():\n    s = Svc()\n    s.create()\n"):
+            with self.subTest(src):
+                self.assertEqual(self._support(src, "f", "create", "method",
+                                               "svc.py"), rec.SUPPORTED)
+
+    def test_a_method_on_a_class_name_or_call_result_is_supported(self):
+        for src, name in (("from .svc import Svc\n\ndef f():\n    Svc.build()\n", "build"),
+                          ("def f():\n    A().run()\n", "run")):
+            with self.subTest(src):
+                self.assertEqual(self._support(src, "f", name, "method", "svc.py"),
+                                 rec.SUPPORTED)
+
+    def test_a_sibling_closure_is_supported(self):
+        """Found by running reconcile on testgraph itself: `close_block` calls
+        `note`, both nested inside `_parse_unified_diff`. The bare name is a
+        closure binding, neither module-level nor nested in the caller."""
+        src = ("def outer():\n    def note(p):\n        pass\n\n"
+               "    def close_block():\n        note(1)\n")
+        self.assertEqual(self._support(src, "close_block", "note", "function"),
+                         rec.SUPPORTED)
+
+    def test_a_same_named_def_in_another_file_is_not_a_closure(self):
+        src = ("def outer():\n    def note(p):\n        pass\n\n"
+               "    def close_block():\n        note(1)\n")
+        self.assertEqual(self._support(src, "close_block", "note", "function",
+                                       "other.py"), rec.UNSUPPORTED)
+
+    def test_the_66_shape_still_refuses_a_function_callee(self):
+        src = "def f(rows, k, v):\n    rows.setdefault(k, []).append(v)\n"
+        self.assertEqual(self._support(src, "f", "append", "function", "ledger.py"),
+                         rec.UNSUPPORTED)
+
+    def test_an_aliased_import_supports_the_original_name(self):
+        src = "from .svc import append as ap\n\ndef f(row):\n    ap(row)\n"
+        self.assertEqual(self._support(src, "f", "append", "function", "svc.py"),
+                         rec.SUPPORTED)
+
+    def test_an_alias_from_another_module_does_not(self):
+        src = "from .other import append as ap\n\ndef f(row):\n    ap(row)\n"
+        self.assertEqual(self._support(src, "f", "append", "function", "svc.py"),
+                         rec.UNSUPPORTED)
+
+
+class StaleStartLineTests(unittest.TestCase):
+    """#100: on a stale index the def at the indexed start_line is a different
+    function; judging its body turned a real edge into a phantom."""
+
+    def test_a_def_with_another_name_on_that_line_is_not_used(self):
+        d = tempfile.mkdtemp(prefix="tg-oracle-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with open(os.path.join(d, "mod.py"), "w") as fh:
+            fh.write("def other():\n    pass\n\n\ndef caller():\n    helper()\n\n\n"
+                     "def helper():\n    pass\n")
+        support = rec.source_support(
+            d, {"name": "caller", "file_path": "mod.py", "start_line": 1,
+                "kind": "function"},
+            {"name": "helper", "file_path": "mod.py", "kind": "function"}, {})[0]
+        self.assertEqual(support, rec.SUPPORTED)
+
+
+class QualifiedTraceTests(unittest.TestCase):
+    """#96: a traced `A.run` resolved by bare name to every `run` in the file,
+    so `B.run`, which never ran, became a proof-grade STATIC MISS."""
+
+    def _conn(self, rows):
+        conn = build_conn()
+        conn.executemany("INSERT INTO nodes VALUES (?,?,?,?,?,?,?)", rows)
+        conn.commit()
+        return conn
+
+    def test_a_qualified_name_picks_the_method_that_ran(self):
+        conn = self._conn([
+            ("m:A.run", "method", "run", "A::run", "app/svc.py", 10, 12),
+            ("m:B.run", "method", "run", "B::run", "app/svc.py", 20, 22),
+        ])
+        resolved, unresolved = rec.resolve_traced(
+            conn, [("app/svc.py", "A.run")], rec.file_map(conn))
+        self.assertEqual(resolved, {"m:A.run"})
+        self.assertEqual(unresolved, [])
+
+    def test_a_nested_def_matches_through_locals(self):
+        conn = self._conn([
+            ("f:outer.git", "function", "git", "outer::git", "app/svc.py", 10, 12),
+            ("f:other.git", "function", "git", "other::git", "app/svc.py", 20, 22),
+        ])
+        resolved, _ = rec.resolve_traced(
+            conn, [("app/svc.py", "outer.<locals>.git")], rec.file_map(conn))
+        self.assertEqual(resolved, {"f:outer.git"})
+
+    def test_several_hits_with_no_qualified_match_are_ambiguous(self):
+        conn = self._conn([
+            ("m:A.run", "method", "run", "X::run", "app/svc.py", 10, 12),
+            ("m:B.run", "method", "run", "Y::run", "app/svc.py", 20, 22),
+        ])
+        ambiguous = []
+        resolved, unresolved = rec.resolve_traced(
+            conn, [("app/svc.py", "A.run")], rec.file_map(conn), ambiguous)
+        self.assertEqual(resolved, set())
+        self.assertEqual(unresolved, [])
+        self.assertEqual(ambiguous, [("app/svc.py", "A.run")])
+
+
+class AmbiguousReportTests(unittest.TestCase):
+    def test_the_report_counts_ambiguous_symbols_on_their_own_line(self):
+        out = rec.render({
+            "tests_traced": 1, "unresolved_symbols": [],
+            "ambiguous_symbols": [("app/svc.py", "A.run")],
+            "static_misses": [{"journey": "J1", "name": "one", "entries_resolved": 1,
+                               "covering_tests": 1, "traced_nodes": 2,
+                               "footprint": 2, "misses": []}],
+            "edges": [], "edge_counts": {}, "labels": {},
+        })
+        self.assertIn("1 traced symbol(s) match several", out)
+        self.assertNotIn("have no node in the index", out)
+
+
 class HelperTests(unittest.TestCase):
     def test_dotted_refuses_a_call_receiver(self):
         """The one rule the phantom half rests on."""
