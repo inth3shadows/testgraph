@@ -665,7 +665,9 @@ Some dependencies the graph cannot model are still known: a SQL migration under
 
 - **Globs** are repo-relative and match the whole path, case-sensitively: `**` is
   zero or more whole segments, `*` any run inside one segment, `?` one character
-  inside a segment. No `[...]`, `{...}`, `!`, `\`, leading `/` or `..`.
+  inside a segment. No `[...]`, `{...}`, `!` or `\`; no empty, `.` or `..`
+  segment (so no leading `./` or `/`, trailing `/`, or `//`); `**` only as a whole
+  segment, at most two per glob (more backtrack for seconds on deep paths).
 - **Matched against every raw diff path** (`diff_files`: added, deleted, both
   sides of a rename, binary, submodule), before the product filter.
 - **Additive.** A journey the graph also selected keeps its graph row and gains
@@ -679,8 +681,14 @@ Some dependencies the graph cannot model are still known: a SQL migration under
   reported as unmodeled in the text or the hook. There is no partial coverage: to
   be conservative, list more journeys. A matched product path still goes
   through the graph (and #29) as before.
-- **An unmatched unmodeled path still degrades.** A typo'd glob cannot be
-  detected, but it fails safe, into the #117 fallback.
+- **An unmatched unmodeled path still degrades.** The globs that can never
+  match a file (the shapes above) are refused. A plausible but wrong glob can't
+  be detected. It fails safe for an unmodeled path, which falls back to every
+  journey, but NOT for an exempt or product path, which just loses the declared
+  journeys, so check new triggers against a real diff.
+- **The export map lists the triggers** under `## File triggers` (and in the
+  `--json` sidecar's `meta.file_triggers`), and refuses an invalid trigger as
+  `select` does. Otherwise the map would disagree with the selector.
 - **Invalid triggers BLOCK**: a malformed glob, a value that isn't a non-empty
   list, or an unknown journey id. A typo'd id would otherwise drop a journey
   the registry declares affected.

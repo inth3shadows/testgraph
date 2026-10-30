@@ -263,6 +263,22 @@ def render_markdown(rows_by_file, registry, meta):
         entries = ", ".join(f"`{e['name']}`" for e in spec["entries"])
         out.append(f"- **{jid}** {spec['name']} — entry: {entries}")
     out.append("")
+    # The selector adds these journeys for any changed path matching the glob,
+    # whatever the graph says (#118). Without them here the map disagrees with
+    # `select`, and an agent reading it would skip a declared journey.
+    triggers = registry.get("file_triggers") or {}
+    if triggers:
+        out += [
+            "## File triggers",
+            "",
+            "Declared, not graph-derived: if a path you changed matches one of "
+            "these globs (`**` = any number of directories, `*` = within one), "
+            "add its journeys to your set, whatever the rows below say.",
+            "",
+        ]
+        for pattern, jids in triggers.items():
+            out.append(f"- `{pattern}` → {', '.join(jids)}")
+        out.append("")
     out.append("## Symbols by file")
     for path in sorted(rows_by_file):
         out.append("")
@@ -397,6 +413,14 @@ def main(argv=None):
                 f"index; it would silently vanish from every row"
             )
 
+        # Same refusal as `select`: an unknown journey id in a trigger would drop a
+        # declared journey from the map's trigger list too (#118).
+        trigger_problems = reg.trigger_problems(registry)
+        if trigger_problems:
+            print("BLOCKED — registry file_triggers invalid; map NOT written",
+                  file=sys.stderr)
+            for t in trigger_problems:
+                print(f"  x {t}", file=sys.stderr)
         if provenance:
             print("BLOCKED — provenance unverifiable; map NOT written", file=sys.stderr)
             for p in provenance:
@@ -405,7 +429,7 @@ def main(argv=None):
             print("BLOCKED — index not trustworthy; map NOT written", file=sys.stderr)
             for b in blocking:
                 print(f"  x {b}", file=sys.stderr)
-        if provenance or blocking:
+        if provenance or blocking or trigger_problems:
             return 2
 
         rows_by_file = build_map(conn, registry)
@@ -423,6 +447,8 @@ def main(argv=None):
             # same rule, different cause: whether a human ever reviewed the registry
             # is a provenance fact about the map's INPUT, not about the index
             "registry_approval": approval,
+            # the --json consumer needs the declared triggers too (#118)
+            "file_triggers": registry.get("file_triggers") or {},
         }
 
         md = render_markdown(rows_by_file, registry, meta)

@@ -2463,6 +2463,33 @@ class FileTriggerTests(unittest.TestCase):
         for pattern, path, want in cases:
             self.assertEqual(reg.trigger_matches(pattern, path), want, (pattern, path))
 
+    def test_a_glob_that_can_never_match_blocks(self):
+        """Review round 1 (H2): these validated but matched nothing, so on an
+        exempt or graph-mapped path the declared journey vanished behind a
+        clean NONE."""
+        for pattern in ("tests/**.json", "a**b/c", "docs/", "docs/**/", "db//x.sql",
+                        "./db/**", "db/./x.sql"):
+            with self.subTest(pattern):
+                self.assertTrue(
+                    reg.trigger_problems({"journeys": self.REG,
+                                          "file_triggers": {pattern: ["J1"]}}),
+                    pattern)
+
+    def test_a_trailing_double_star_matches_any_name(self):
+        """H3: `.*` without DOTALL missed a path containing a newline."""
+        self.assertTrue(reg.trigger_matches("docs/**", "docs/gui\nde.md"))
+        self.assertTrue(reg.trigger_matches("**", "a\nb"))
+
+    def test_pathological_globs_are_refused_or_fast(self):
+        """H4: chained stars backtracked for seconds, enough to hang the hook."""
+        many = "/".join(["**", "a"] * 4) + "/x"
+        self.assertTrue(reg.trigger_problems(
+            {"journeys": self.REG, "file_triggers": {many: ["J1"]}}))
+        start = time.monotonic()
+        reg.trigger_matches("**/**/a/x", "/".join(["a"] * 60) + "/y")
+        reg.trigger_matches("a*a*a*a*b", "a" * 200)
+        self.assertLess(time.monotonic() - start, 0.5)
+
     def test_an_invalid_trigger_blocks(self):
         bad = {
             "unknown journey": {"db/**": ["J1", "J9"]},
@@ -2483,6 +2510,47 @@ class FileTriggerTests(unittest.TestCase):
                                 res["blocking"])
         self.registry = self._registry(["db/**"])
         self.assertEqual(self._select()["status"], "BLOCKED")
+
+
+class ExportFileTriggerTests(unittest.TestCase):
+    """Review round 1 (H1): the static map must carry the triggers the selector
+    applies, or an agent reading it skips a declared journey; and an invalid
+    trigger must stop the map as it stops `select`."""
+
+    def _registry(self, tmp, triggers):
+        path = os.path.join(tmp, "reg.json")
+        with open(path, "w") as fh:
+            json.dump({"codegraph_schema_version": 8, "approved": True,
+                       "journeys": FileTriggerTests.REG, "spot_checks": {},
+                       "file_triggers": triggers}, fh)
+        return path
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.repo, _ = _git_repo(self.tmp, {"app/svc.py": 22})
+
+    def _export(self, triggers):
+        out = os.path.join(self.tmp, "map.md")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = exp.main(["--repo", self.repo, "--db", self.db, "--registry",
+                           self._registry(self.tmp, triggers), "--out", out])
+        text = open(out).read() if os.path.exists(out) else ""
+        return rc, text, err.getvalue()
+
+    def test_the_map_lists_the_triggers(self):
+        rc, text, err = self._export({"packages/db/migrations/**": ["J2", "J3"]})
+        self.assertEqual(rc, 0, err)
+        self.assertIn("## File triggers", text)
+        self.assertIn("`packages/db/migrations/**` → J2, J3", text)
+
+    def test_an_invalid_trigger_blocks_the_map(self):
+        rc, text, err = self._export({"db/**": ["J9"]})
+        self.assertEqual(rc, 2)
+        self.assertIn("file_triggers", err)
+        self.assertEqual(text, "")
 
 
 class ClosureConfinedTests(unittest.TestCase):

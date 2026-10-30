@@ -470,6 +470,9 @@ def _binds(node, name):
 # one character inside a segment. fnmatch's `*` crosses `/`, and
 # PurePath.full_match / glob.translate are 3.13+, so the translation is ours.
 _GLOB_UNSUPPORTED = re.compile(r"[\[\]!{}\\]")
+# More `**` segments than this backtrack badly on deep paths (8 chained took
+# >20s, enough to hang the pre-push hook), and no real trigger needs them.
+MAX_DOUBLE_STAR = 2
 
 
 @functools.lru_cache(maxsize=None)
@@ -479,7 +482,9 @@ def _trigger_regex(pattern):
     for i, part in enumerate(parts):
         last = i == len(parts) - 1
         if part == "**":
-            out.append(".*" if last else "(?:[^/]+/)*")
+            # [\s\S], not `.`: a path may contain a newline (git quotes it, the
+            # diff parser unquotes it), and `.` would silently miss it.
+            out.append(r"[\s\S]*" if last else "(?:[^/]+/)*")
             continue
         seg = "".join("[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c)
                       for c in part)
@@ -506,11 +511,19 @@ def trigger_problems(registry):
     known = registry.get("journeys", {})
     problems = []
     for pattern, jids in triggers.items():
-        if (not isinstance(pattern, str) or not pattern or pattern.startswith("/")
-                or ".." in pattern.split("/") or _GLOB_UNSUPPORTED.search(pattern)):
+        segs = pattern.split("/") if isinstance(pattern, str) else []
+        # Every one of these can never match a file path, so it would drop the
+        # declared journeys behind a clean NONE on an exempt or graph-mapped
+        # path: an empty segment (`docs/`, `a//b`, a leading `/`), `.` or `..`,
+        # `**` inside a segment (`tests/**.json` is a one-segment `*`).
+        if (not segs or _GLOB_UNSUPPORTED.search(pattern)
+                or any(s in ("", ".", "..") or ("**" in s and s != "**")
+                       for s in segs)
+                or segs.count("**") > MAX_DOUBLE_STAR):
             problems.append(
-                f"file_triggers glob {pattern!r} is not a repo-relative glob "
-                f"(no leading /, no .., only * ** ?)"
+                f"file_triggers glob {pattern!r} can never match as written — "
+                f"repo-relative, no empty, `.` or `..` segments, `**` only as a "
+                f"whole segment (at most {MAX_DOUBLE_STAR}), only * ** ?"
             )
             continue
         if (not isinstance(jids, list) or not jids
