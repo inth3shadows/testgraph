@@ -2602,6 +2602,61 @@ class MergeBaseDiffTests(unittest.TestCase):
         self.assertTrue(any("no common ancestor" in w for w in res["warnings"]),
                         res["warnings"])
 
+    def _sha(self, rev):
+        return subprocess.run(["git", "-C", self.repo, "rev-parse", rev],
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    def test_a_head_behind_base_is_not_an_empty_diff(self):
+        """Review round 1: head an ancestor of base makes the merge-base head
+        itself, so the diff was empty by construction — a confident NONE."""
+        self._write("db/001.sql")
+        res = sel.select(self.repo, "HEAD", "HEAD~1", self.db, self.registry)
+        self.assertIn("db/001.sql", res["diff_files"])
+        self.assertTrue(res["recall_degraded"])
+        self.assertTrue(any("is behind" in w for w in res["warnings"]), res["warnings"])
+        self.assertNotIn("diff_base", res)
+
+    def test_the_push_hook_diffs_the_exact_range(self):
+        """A push moves the remote from its old tip to the new one. After a
+        rebase that dropped a change, the fork point no longer shows it; the
+        exact tree diff does. The hook (and its `full:` command) keep that."""
+        self.run("git", "switch", "-qc", "feature")
+        self._write("db/dropped.sql")
+        old_tip = self._sha("HEAD")
+        self.run("git", "reset", "-q", "--hard", "main")
+        self._write("README.md")
+        new_tip = self._sha("HEAD")
+        res = sel.select(self.repo, old_tip, new_tip, self.db, self.registry,
+                         exact_range=True)
+        self.assertIn("db/dropped.sql", res["diff_files"])
+        self.assertNotIn("diff_base", res)
+        calls = []
+        real = sel.select
+
+        def spy(*a, **kw):
+            calls.append(kw)
+            return real(a[0], a[1], a[2], self.db, self.registry, **kw)
+
+        os.makedirs(os.path.join(self.repo, ".codegraph"))
+        shutil.copy(self.db, os.path.join(self.repo, ".codegraph", "codegraph.db"))
+        with unittest.mock.patch.object(sel, "select", spy):
+            text, record = hook.run(self.repo, old_tip, new_tip,
+                                    registry_path=self.registry)
+        self.assertEqual(calls, [{"exact_range": True}])
+        self.assertIn("db/dropped.sql", text + str(record))
+        self.assertIn("--exact-range", text)
+
+    def test_only_exit_1_means_no_common_ancestor(self):
+        """git merge-base exits 1 for unrelated histories; 128 is a bad rev or
+        a missing object, which must not read as "unrelated" (#112 review)."""
+        fake = subprocess.CompletedProcess(["git"], 128, "", "fatal: bad object")
+        with unittest.mock.patch.object(sel.subprocess, "run", return_value=fake):
+            with self.assertRaises(subprocess.CalledProcessError):
+                sel.diff_base(self.repo, "main", "HEAD")
+        none = subprocess.CompletedProcess(["git"], 1, "", "")
+        with unittest.mock.patch.object(sel.subprocess, "run", return_value=none):
+            self.assertIsNone(sel.diff_base(self.repo, "main", "HEAD"))
+
     def test_an_unknown_revision_still_fails_loudly(self):
         with self.assertRaises(subprocess.CalledProcessError):
             sel.select(self.repo, "no-such-rev", "HEAD", self.db, self.registry)

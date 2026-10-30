@@ -18,6 +18,7 @@ import sys
 
 from . import db as dbmod
 from . import integrity
+from . import ledger
 from . import registry as reg
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
@@ -312,29 +313,33 @@ def changed_ranges(repo, base, head, paths=None):
 
 def diff_base(repo, base, head):
     """The revision to diff `head` against: `merge-base(base, head)`, or `None`
-    when the two share no history.
+    when the two share no history (git exits 1). Any other git failure (a bad
+    revision, a missing object) raises, rather than reading as "unrelated".
 
     `base..head` compared two trees, so on a branch behind `base` the changes
     that landed on `base` since the fork were read, reversed, as this branch's
     own (issue #112): a docs-only branch listed every journey because main had
     added a migration. The merge-base is what `git diff base...head` means.
-    When `base` is an ancestor of `head` (HEAD~1, every push) it IS `base`, so
-    nothing changes there."""
+    When `base` is an ancestor of `head` (HEAD~1) it IS `base`, so nothing
+    changes there.
+
+    Not for a push: a push moves the remote from its old tip to the new one,
+    and after a rebase or a rewind the fork point hides what the push removed.
+    The hook asks for the exact range (`select(..., exact_range=True)`)."""
     proc = subprocess.run(
         ["git", "-C", repo, "merge-base", "--end-of-options", base, head],
         capture_output=True, text=True,
     )
-    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else None
+    if proc.returncode == 1:
+        return None
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, proc.args,
+                                            proc.stdout, proc.stderr)
+    return proc.stdout.strip() or None
 
 
-def _same_rev(repo, sha, rev):
-    proc = subprocess.run(
-        ["git", "-C", repo, "rev-parse", "--verify", "-q", "--end-of-options",
-         f"{rev}^{{commit}}"], capture_output=True, text=True)
-    return proc.stdout.strip() == sha
-
-
-def select(repo, base, head, db_path, registry_path, strict_registry=True):
+def select(repo, base, head, db_path, registry_path, strict_registry=True,
+           exact_range=False):
     # A revision starting with '-' is an option, not a revision (audit M2):
     # `--output=<path>` made `git diff` truncate an arbitrary file and return an
     # empty diff -- a clean NONE. Reachable from the MCP tool, where the model
@@ -421,8 +426,19 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             return result
 
         diff_paths = set()
-        merge_base = diff_base(repo, base, head)
-        if merge_base is None:
+        merge_base = None if exact_range else diff_base(repo, base, head)
+        head_sha = ledger.resolve_commit(repo, head)
+        if merge_base is not None and merge_base == head_sha != ledger.resolve_commit(repo, base):
+            # head is BEHIND base: the fork point is head itself and the diff
+            # would be empty by construction — a confident NONE for whatever
+            # base has that head does not (review of #112). The tree diff
+            # shows it, reversed: over-selection, the safe direction.
+            warnings.append(
+                f"{head} is behind {base} (an ancestor of it) — compared the two "
+                f"trees directly, so this lists {base}'s changes in reverse"
+            )
+            merge_base = None
+        elif merge_base is None and not exact_range:
             # Unrelated histories or a shallow clone: no fork point to diff from.
             # The tree diff over-selects, which is the safe direction. An
             # unknown revision still fails loudly in `changed_ranges` below.
@@ -708,7 +724,7 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         # the data both read from) — riding `warnings` would let it silently drop
         # off a push whose other warnings already filled hook.py's MAX_WARNINGS.
 
-        if merge_base is not None and not _same_rev(repo, merge_base, base):
+        if merge_base is not None and merge_base != ledger.resolve_commit(repo, base):
             result["diff_base"] = merge_base
         result.update(
             status="OK",
@@ -871,6 +887,9 @@ def main(argv=None):
         help="defaults to the journeys/*.json whose `target` matches <repo>",
     )
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--exact-range", action="store_true",
+                    help="diff base..head as two trees, not from their merge-base "
+                         "(what a push changes; the pre-push hook uses this)")
     args = ap.parse_args(argv)
 
     db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
@@ -883,7 +902,8 @@ def main(argv=None):
         print(reg.not_found_message(args.repo), file=sys.stderr)
         return 2
     try:
-        result = select(args.repo, args.base, args.head, db_path, registry_path)
+        result = select(args.repo, args.base, args.head, db_path, registry_path,
+                        exact_range=args.exact_range)
     except dbmod.IndexMissing as e:
         print(str(e), file=sys.stderr)
         return 2
