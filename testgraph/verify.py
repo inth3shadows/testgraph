@@ -264,6 +264,10 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         conn.close()
 
 
+def _unknown_because(selection):
+    return selection.get("unknown_because") or sel.none_is_unknown(selection)
+
+
 def exit_code(summary):
     """OK / tests-failed / refused / incomplete, as distinct answers.
 
@@ -289,6 +293,14 @@ def exit_code(summary):
     # journeys unverified behind a green from the other four. A partial answer
     # is not a pass, and the exit code is what a CI job actually reads.
     if summary.get("uncovered") or summary.get("incomplete"):
+        return EXIT_INCOMPLETE
+    # An empty selection the selector itself cannot vouch for verified nothing
+    # (#117): exit 0 would turn UNKNOWN into a pass. Entries no parser covers
+    # are left out of this decision: they never clear (registry.unchecked_entries),
+    # so counting them would hold every NONE in such a repo at exit 3 for good.
+    # The headline still shows them.
+    if not summary.get("journeys") and sel.none_is_unknown(
+            dict(summary.get("selection") or {}, entries_unchecked=[])):
         return EXIT_INCOMPLETE
     if any(credited.get(j) != "pass" for j in summary.get("journeys", [])):
         return EXIT_INCOMPLETE
@@ -318,9 +330,15 @@ def render(summary, registry=None):
         lines.append(f"  WARN: {w}")
 
     if not summary["journeys"]:
-        lines.append("  journeys selected: NONE — nothing to verify")
-        for r in sel.none_is_unknown(sel_):
-            lines.append(f"    UNKNOWN, not verified-safe: {r}")
+        # Two sentences for two claims, as in select._render and hook.render
+        # (#75): the UNKNOWN belongs in the headline, not indented below a
+        # line that reads as a clean bill (#113).
+        unknown = _unknown_because(sel_)
+        if unknown:
+            lines.append("  journeys selected: NONE — but UNKNOWN, not verified-safe:")
+            lines.extend(f"    {r}" for r in unknown)
+        else:
+            lines.append("  journeys selected: NONE — nothing to verify")
         return "\n".join(lines)
 
     lines.append(f"  journeys selected: {', '.join(summary['journeys'])}")
@@ -366,7 +384,8 @@ def main(argv=None):
         description="run the declared tests for the journeys a diff endangers",
         epilog="Exit: 0 every selected journey ran and passed, 1 a journey "
                "failed, 2 refused (untrustworthy index), 3 incomplete — at "
-               "least one selected journey had no declared test.\n"
+               "least one selected journey had no passing declared test, or "
+               "the selection was NONE but UNKNOWN.\n"
                "Put pytest's own flags after `--`.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

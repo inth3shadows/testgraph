@@ -69,7 +69,7 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
 - `testgraph/registry.py` — loads the journey JSON, resolves entry `name`+`file`
   to node ids at run time (ids are stable, names drift), maps every matching
   node to its journey.
-- `testgraph/select.py` — diff parsing (test/e2e files excluded as seeds),
+- `testgraph/select.py` — diff parsing (test/e2e/docs files exempt, unmodeled paths degrade — #117),
   orchestration, ranking, human + `--json` output, the CLI.
 - `testgraph/propose.py` — drafts a registry for a repo that has none: ast scan
   for route-decorated handlers, index resolution, spot-check derivation, declared
@@ -648,6 +648,54 @@ Measured effect on the labeled set: none. Recall 1.00 and mean precision 0.68 ar
 byte-identical with the degrade reverted, because no labeled commit exercises the
 zero-seed path (`0b4135f` already degraded via a whole-file change). The guard is
 justified by the reproduced failure in #29, not by a metric move.
+
+## Unmodeled Paths Degrade Too (issue #117)
+
+The parser used to drop every path outside `PRODUCT_EXT` before anything looked
+at it, so an external trial's migration-only diff reported **0 changed files, 0
+journeys and no warning**. A SQL migration, a `Dockerfile`, CI YAML or a
+stylesheet can change runtime behaviour without ever becoming a CodeGraph node;
+"not indexed" is not "no impact".
+
+Every path in the diff is now accounted for before filtering
+(`_parse_unified_diff(diff, paths)`: both sides of a rename, the `---` side of a
+deletion, binary and mode-only blocks) and lands in one of three buckets on the
+result:
+
+| bucket | field | effect |
+|---|---|---|
+| product (`_is_product`) | `changed_files` | seeded as before |
+| exempt | `exempt_files` `{path: reason}` | none; reason is `test` (under a `tests/`, `e2e/` or `__tests__/` directory — not `_is_test`'s name rules, which exempted `test_and_deploy.yml`), `type declaration` (`.d.ts` family) or `docs` (`.md`/`.rst`/`.adoc`, a top-level `docs/` or `doc/`, or exactly `LICENSE`/`COPYING`/`CHANGELOG`/`NOTICE`/`AUTHORS` with no extension or a prose one — a prefix match exempted `db/authors.sql`) |
+| unmodeled (anything else) | `unmodeled_files` | joins `unmapped`: warns, `recall_degraded: true`, every journey listed `verify_manually` |
+
+`diff_files` lists every raw path, and the text renderer prints
+`changed files: N product of M in diff (E exempt, U unmodeled)` plus one
+`unmodeled:` line per path. The hook gives unmodeled paths their own capped NOTE
+line, like `closure_confined`, so the capped warnings cannot hide them.
+
+All-journeys rather than UNKNOWN-only was chosen deliberately. UNKNOWN exists
+only for an EMPTY list, so a mixed product + unmodeled diff would have needed a
+new "partial" signal in select, the hook, MCP and verify; the #29 fallback
+already covers all four, and verify then runs every journey and exits 3 unless
+each one passes. The exemption list is short on purpose: `requirements.txt`,
+`package.json`, `.dockerignore` and the like all change what runs.
+
+The cost, measured on the last 40 first-parent commits of each dogfooded repo:
+22/40 (testgraph), 16/36 (honeyslate) and 21/36 (signedintake) touch an
+unmodeled path, mostly `.json`; 12, 4 and 7 of them touch nothing else, and those
+used to answer NONE. A per-registry exemption list is the lever if that noise
+bites; it is not built.
+
+verify follows the same rule from the other side: an empty selection whose
+`unknown_because` is non-empty prints `journeys selected: NONE — but UNKNOWN, not
+verified-safe:` as its headline (#113) and exits 3, not 0. UNKNOWN is not a pass.
+One reason is left out of the exit decision: an entry no parser covers
+(`entries_unchecked`) never clears, so counting it would hold every NONE in such a
+repo at exit 3 for good. The headline still lists it.
+
+`git diff` also runs with `--submodule=short --ignore-submodules=none`: with
+`diff.ignoreSubmodules`, a `.gitmodules` `ignore`, or `diff.submodule=log`, a
+submodule bump produced no `diff --git` block and answered a clean NONE.
 
 ## Re-verification After the Extractor Fix (2026-09-09)
 

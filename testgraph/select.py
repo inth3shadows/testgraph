@@ -1,8 +1,9 @@
 """testgraph select — git diff -> ranked affected journeys.
 
 Recall-first: the closure over-selects on shared-symbol changes rather than
-risk dropping a truly-affected journey. Test/e2e file changes are ignored as
-seeds (they don't change product behavior).
+risk dropping a truly-affected journey. Test, docs and type-declaration changes
+are exempt (they don't change product behavior); any other path the index does
+not model degrades the answer to every journey (issue #117).
 
 Usage:
     python -m testgraph.select --repo <path> [--base SHA] [--head SHA]
@@ -46,6 +47,18 @@ DECLARATION_EXT = (".d.ts", ".d.mts", ".d.cts")
 # directory entirely, so root-level test files were seeded as product code.
 TEST_DIRS = frozenset({"tests", "e2e", "__tests__"})
 
+# Paths exempt from the unmodeled-path fallback (issue #117) because they cannot
+# change runtime behavior: prose, by extension, by a top-level docs directory,
+# or by the conventional file names — matched EXACTLY (optionally with a prose
+# extension), because a prefix match exempted `db/authors.sql` and
+# `config/licenses.json`. Deliberately short. Everything else outside
+# PRODUCT_EXT -- SQL, Dockerfile, CI YAML, CSS, JSON, toml, requirements.txt,
+# anything unrecognized -- is UNKNOWN impact, not "safe".
+DOC_EXT = (".md", ".rst", ".adoc")
+DOC_DIRS = frozenset({"docs", "doc"})
+DOC_BASENAMES = frozenset({"LICENSE", "COPYING", "CHANGELOG", "NOTICE", "AUTHORS"})
+DOC_BASENAME_EXT = ("", ".txt", ".md", ".rst", ".adoc")
+
 
 def _is_product(path):
     return (
@@ -53,6 +66,30 @@ def _is_product(path):
         and not path.endswith(DECLARATION_EXT)
         and not _is_test(path)
     )
+
+
+def _exemption(path):
+    """Why a non-product path cannot change behavior, or None when it might.
+
+    Only a test DIRECTORY exempts a non-code file. `_is_test`'s name rules
+    (`test_*`, `*.test.*`, `*.spec.*`) are conventions for code; on other files
+    they exempted `test_and_deploy.yml` and `openapi.spec.yaml`."""
+    parts = path.split("/")
+    if TEST_DIRS.intersection(parts[:-1]):
+        return "test"
+    if path.endswith(DECLARATION_EXT):
+        return "type declaration"
+    stem, ext = os.path.splitext(parts[-1])
+    if (path.endswith(DOC_EXT) or (len(parts) > 1 and parts[0] in DOC_DIRS)
+            or (stem.upper() in DOC_BASENAMES and ext.lower() in DOC_BASENAME_EXT)):
+        return "docs"
+    return None
+
+
+def _unmodeled_kind(path):
+    base = path.rsplit("/", 1)[-1]
+    ext = os.path.splitext(base)[1]
+    return f"{ext} file" if ext else base
 
 
 def _is_test(path):
@@ -126,7 +163,7 @@ def _diff_git_path(rest):
     return None
 
 
-def _parse_unified_diff(diff):
+def _parse_unified_diff(diff, paths=None):
     """Parse a `git diff --unified=0` into
     `(ranges, whole_files)` where
 
@@ -152,11 +189,21 @@ def _parse_unified_diff(diff):
     unknown, not absent. The one exception is a block git marks as a new or
     deleted file without a header, which is an empty file — no content to seed,
     and a mode-only change (`old mode`/`new mode`, no '+++'), which is a chmod.
+
+    `paths`, when given, is a set that collects EVERY path in the diff, product
+    or not, before any filtering (issue #117): the caller accounts for each one
+    instead of inferring "nothing changed" from what survived the filter.
     """
     ranges, whole_files, cur, prev = {}, {}, None, None
     blk = None  # state of the current `diff --git` block
 
+    def note(path):
+        if paths is not None and path:
+            paths.add(path)
+
     def close_block():
+        if blk:
+            note(blk["path"])
         if (blk and not blk["header"] and not blk["rename"] and not blk["empty"]
                 and not blk["mode"]):
             path = blk["path"]
@@ -183,12 +230,14 @@ def _parse_unified_diff(diff):
                 blk["empty"] = True
         elif line.startswith("rename from "):
             p = _unquote_git_path(line[len("rename from "):])
+            note(p)
             if blk:
                 blk["rename"] = True
             if _is_product(p):
                 whole_files[p] = "renamed from"
         elif line.startswith("rename to "):
             p = _unquote_git_path(line[len("rename to "):])
+            note(p)
             if blk:
                 blk["rename"] = True
             if _is_product(p):
@@ -202,12 +251,14 @@ def _parse_unified_diff(diff):
                 blk["header"] = True
             if path == "/dev/null":
                 # whole-file deletion: the surviving path is on the '---' line
+                note(prev)
                 if prev and _is_product(prev):
                     whole_files[prev] = "deleted"
                 cur = None
                 continue
             if path.startswith("b/"):
                 path = path[2:]
+            note(path)
             cur = path if _is_product(path) else None
             if cur is not None:
                 ranges.setdefault(cur, [])
@@ -228,7 +279,7 @@ def _parse_unified_diff(diff):
     return {f: r for f, r in ranges.items() if r}, whole_files
 
 
-def changed_ranges(repo, base, head):
+def changed_ranges(repo, base, head, paths=None):
     diff = subprocess.run(
         # Every flag pins something a user's git config could otherwise change
         # under us (audit C1): diff.noprefix / mnemonicPrefix drop the `b/` the
@@ -241,14 +292,19 @@ def changed_ranges(repo, base, head):
         # --end-of-options: `base`/`head` are never parsed as git options (M2).
         ["git", "-C", repo, "-c", "core.quotePath=false", "diff", "--no-color",
          "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
-         "--unified=0", "-M", "--end-of-options", f"{base}..{head}"],
+         "--unified=0", "-M",
+         # diff.ignoreSubmodules, a .gitmodules `ignore`, or diff.submodule=log
+         # drop or reshape a submodule bump so no `diff --git` block names it
+         # (#117 review): pin both so the path is always accounted for.
+         "--submodule=short", "--ignore-submodules=none",
+         "--end-of-options", f"{base}..{head}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="surrogateescape",
         check=True,
     ).stdout
-    return _parse_unified_diff(diff)
+    return _parse_unified_diff(diff, paths)
 
 
 def select(repo, base, head, db_path, registry_path, strict_registry=True):
@@ -335,7 +391,8 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
             result["blocking"] = blocking
             return result
 
-        ranges, whole_files = changed_ranges(repo, base, head)
+        diff_paths = set()
+        ranges, whole_files = changed_ranges(repo, base, head, diff_paths)
 
         # A changed file whose hunks resolve to NO node is the same failure as an
         # unmappable whole-file change, and it used to pass silently: seeds stayed
@@ -390,6 +447,23 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
                     seeds_by_file[path] = set(nodes)
             else:
                 _mark_unmapped(path, reason)
+
+        # A changed path the index does not model at all — SQL, a Dockerfile, CI
+        # YAML, CSS — never becomes a seed, and used to vanish in the parser: a
+        # migration-only diff answered "0 changed files, NONE" with no warning
+        # (issue #117). Not indexed is not "no impact". Unless the path is
+        # exempt (tests, docs, type declarations), it degrades the answer to
+        # every journey, exactly like a code file with no symbols (#29).
+        exempt_files, unmodeled_files = {}, []
+        for path in sorted(diff_paths):
+            if _is_product(path):
+                continue
+            why = _exemption(path)
+            if why:
+                exempt_files[path] = why
+            else:
+                unmodeled_files.append(path)
+                _mark_unmapped(path, f"not modeled by the index: {_unmodeled_kind(path)}")
 
         # A changed file that is NEWER than its index row is a third way to be
         # unmappable, and the quietest. The other two resolve to no node and are
@@ -541,6 +615,9 @@ def select(repo, base, head, db_path, registry_path, strict_registry=True):
         result.update(
             status="OK",
             changed_files=sorted(ranges),
+            diff_files=sorted(diff_paths),
+            exempt_files=exempt_files,
+            unmodeled_files=unmodeled_files,
             whole_file_changes=whole_files,
             recall_degraded=bool(unmapped),
             closure_confined=confined_files,
@@ -623,12 +700,21 @@ def _render(result):
         for b in result["blocking"]:
             lines.append(f"  x {b}")
         return "\n".join(lines)
+    changed = f"changed files: {len(result['changed_files'])}"
+    if "diff_files" in result:
+        changed += (
+            f" product of {len(result['diff_files'])} in diff "
+            f"({len(result.get('exempt_files', {}))} exempt, "
+            f"{len(result.get('unmodeled_files', []))} unmodeled)"
+        )
     lines.append(
-        f"changed files: {len(result['changed_files'])} | "
+        f"{changed} | "
         f"seeds: {result['seed_symbols']} | impacted symbols: {result['impacted_symbols']}"
     )
     for path, reason in sorted(result.get("whole_file_changes", {}).items()):
         lines.append(f"  whole-file: {path} ({reason})")
+    for path in result.get("unmodeled_files", []):
+        lines.append(f"  unmodeled: {path} — not in the index, impact UNKNOWN")
     if result.get("recall_degraded"):
         lines.append("  RECALL DEGRADED — unbounded impact, all journeys listed")
     for f in result.get("closure_confined", []):
