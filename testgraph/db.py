@@ -5,6 +5,8 @@ that CLI returns only immediate dependents + a file-level cross-file bucket,
 not a transitive symbol closure (verified on honeyslate 2026-07-17).
 """
 import collections
+import os
+import pathlib
 import sqlite3
 
 # Edge kinds that carry a behavior-reachability signal, walked in REVERSE
@@ -84,8 +86,73 @@ def weak_edge_reason(cap):
     return CAP_REASONS.get(cap)
 
 
+class IndexMissing(FileNotFoundError):
+    """No CodeGraph index at the given path."""
+
+
+class IndexUnreadable(IndexMissing):
+    """An index file exists but cannot be read now (locked, permissions, a
+    hot journal a read-only open cannot roll back). A subclass so every caller
+    that exits 2 on IndexMissing covers it; the message must not say "not an
+    index", which would send the user to rebuild a healthy one."""
+
+
+# sqlite's busy wait on open, in seconds (sqlite3.connect's default).
+BUSY_TIMEOUT_S = 5.0
+
+
 def connect(db_path):
-    conn = sqlite3.connect(db_path)
+    """Open a CodeGraph index READ-ONLY, or raise IndexMissing.
+
+    sqlite3.connect creates a missing file, so a mistyped --db used to leave an
+    empty database behind and fail later with `no such table: files` (#111).
+    `mode=ro` means no path through here can create or write one; checking for
+    `files` also refuses the 0-byte file that bug left behind, and any sqlite
+    file that is not an index. Temp tables, which the closure walk uses, live
+    in the temp schema and still work."""
+    if db_path == ":memory:":
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+    if not os.path.isfile(db_path):
+        raise IndexMissing(
+            f"no CodeGraph index at {db_path} — check the path, or build one "
+            f"with `codegraph init` in the repo"
+        )
+    uri = pathlib.Path(db_path).resolve().as_uri() + "?mode=ro"
+    conn = None
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT_S)
+        has_files = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'"
+        ).fetchone()
+    except sqlite3.OperationalError as e:
+        # Locked, unreadable, or deleted since the isfile check: a file that
+        # may well be an index, so do not call it "not an index".
+        if conn is not None:
+            conn.close()
+        raise IndexUnreadable(
+            f"cannot read the CodeGraph index at {db_path} ({e}) — retry once "
+            f"no other process holds it, or check its permissions"
+        ) from e
+    except sqlite3.DatabaseError as e:
+        if conn is not None:
+            conn.close()
+        # Only SQLITE_NOTADB means "not sqlite at all". Anything else here
+        # (SQLITE_CORRUPT: "database disk image is malformed") is a damaged
+        # index, which `codegraph init` leaves alone; only a rebuild helps.
+        if e.sqlite_errorcode != sqlite3.SQLITE_NOTADB:
+            raise IndexUnreadable(
+                f"cannot read the CodeGraph index at {db_path} ({e}) — it looks "
+                f"damaged; rebuild it with `codegraph index` in the repo"
+            ) from e
+        has_files = None
+    if not has_files:
+        conn.close()
+        raise IndexMissing(
+            f"{db_path} is not a CodeGraph index (no `files` table) — check the "
+            f"path, or build one with `codegraph init` in the repo"
+        )
     conn.row_factory = sqlite3.Row
     return conn
 

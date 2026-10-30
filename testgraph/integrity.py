@@ -12,6 +12,7 @@ answer — the remedy is a full `codegraph index` rebuild, never `sync`.
 """
 import hashlib
 import os
+import sqlite3
 
 from . import db as dbmod
 
@@ -163,17 +164,50 @@ def check(conn, repo_root, spot_checks, pending_max=0, schema_pin=None,
 
     # 1. pending unresolved refs (terminal 'failed' refs are external stdlib —
     #    ignored; only non-terminal 'pending' indicates an incomplete index).
+    #
+    #    This used to be `except Exception: pass`, justified as "older schema
+    #    without status column" — but it also swallowed a missing table and a
+    #    locked database, so the mid-resolution guard stopped running with no
+    #    trace (issue #110). The layout is read from the schema, not inferred
+    #    from sqlite's error wording.
     try:
-        pending = conn.execute(
-            "SELECT count(*) FROM unresolved_refs WHERE status = 'pending'"
-        ).fetchone()[0]
-        if pending > pending_max:
-            blocking.append(
-                f"{pending} unresolved refs still pending (> {pending_max}) — "
-                f"index is mid-resolution"
-            )
-    except Exception:
-        pass  # older schema without status column
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(unresolved_refs)")}
+        if not columns:
+            missing = "no unresolved_refs table"
+        elif "status" not in columns:
+            missing = "no unresolved_refs.status column"
+        else:
+            missing = None
+            pending = conn.execute(
+                "SELECT count(*) FROM unresolved_refs WHERE status = 'pending'"
+            ).fetchone()[0]
+            if pending > pending_max:
+                blocking.append(
+                    f"{pending} unresolved refs still pending (> {pending_max}) — "
+                    f"index is mid-resolution"
+                )
+    except sqlite3.Error as e:
+        missing = None
+        warnings.append(
+            f"pending-refs check failed ({type(e).__name__}: {e}) — "
+            f"cannot tell whether the index is mid-resolution"
+        )
+    # A missing table or column is an older schema only when the schema is
+    # unpinned or differs from the pin. When the pin MATCHES, the index claims
+    # a layout that has them, so it is broken: block. A warning would not do —
+    # it only demotes an EMPTY answer to UNKNOWN, and a non-empty one would
+    # still read as confident.
+    if missing and schema_pin is not None and found == schema_pin:
+        blocking.append(
+            f"index has {missing} although its schema matches the pin "
+            f"({schema_pin}) — the index is incomplete; rebuild it with "
+            f"`codegraph index` in the repo"
+        )
+    elif missing:
+        warnings.append(
+            f"pending-refs check skipped: index has {missing} — cannot tell "
+            f"whether it is mid-resolution"
+        )
 
     # 2. freshness: any tracked source newer than its index row. WARN not BLOCK
     #    — repo-wide staleness costs precision, and blocking on it would refuse

@@ -339,7 +339,11 @@ def main(argv=None):
         return 2
 
     db_path = args.db or os.path.join(args.repo, ".codegraph", "codegraph.db")
-    conn = dbmod.connect(db_path)
+    try:
+        conn = dbmod.connect(db_path)
+    except dbmod.IndexMissing as e:
+        print(str(e), file=sys.stderr)
+        return 2
     try:
         registry = reg.load(registry_path)
 
