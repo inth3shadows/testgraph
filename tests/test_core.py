@@ -499,6 +499,23 @@ class MissingIndexTests(unittest.TestCase):
         self.assertNotIn("not a CodeGraph index", str(cm.exception))
         self.assertIn("locked", str(cm.exception))
 
+    def test_corrupt_index_is_not_called_not_an_index(self):
+        """A damaged real index raises "database disk image is malformed", a
+        plain DatabaseError. `codegraph init` does nothing on it; only a
+        rebuild helps."""
+        c = sqlite3.connect(self.db)
+        c.execute("CREATE TABLE files(path TEXT)")
+        c.commit()
+        c.close()
+        with open(self.db, "r+b") as f:
+            f.seek(100)
+            f.write(b"\xff" * 300)
+        with self.assertRaises(dbmod.IndexUnreadable) as cm:
+            dbmod.connect(self.db)
+        self.assertNotIn("not a CodeGraph index", str(cm.exception))
+        self.assertIn("codegraph index", str(cm.exception))
+        self.assertNotIn("codegraph init", str(cm.exception))
+
     @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0,
                      "root reads a chmod-0 file")
     def test_unreadable_file_exits_2_not_a_traceback(self):

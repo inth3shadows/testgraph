@@ -135,8 +135,17 @@ def connect(db_path):
             f"cannot read the CodeGraph index at {db_path} ({e}) — retry once "
             f"no other process holds it, or check its permissions"
         ) from e
-    except sqlite3.DatabaseError:
-        # "file is not a database": not sqlite at all.
+    except sqlite3.DatabaseError as e:
+        if conn is not None:
+            conn.close()
+        # Only SQLITE_NOTADB means "not sqlite at all". Anything else here
+        # (SQLITE_CORRUPT: "database disk image is malformed") is a damaged
+        # index, which `codegraph init` leaves alone; only a rebuild helps.
+        if e.sqlite_errorcode != sqlite3.SQLITE_NOTADB:
+            raise IndexUnreadable(
+                f"cannot read the CodeGraph index at {db_path} ({e}) — it looks "
+                f"damaged; rebuild it with `codegraph index` in the repo"
+            ) from e
         has_files = None
     if not has_files:
         conn.close()
