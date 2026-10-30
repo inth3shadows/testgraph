@@ -9,6 +9,9 @@ implementation returned OK whenever anything was credited, and on the first real
 run printed `NO JOURNEY-LEVEL TEST: J1, J5, J6, J7` and exited 0 — four journeys
 unverified behind a green from the other four.
 """
+import contextlib
+import io
+import json
 import os
 import shutil
 import sqlite3
@@ -351,6 +354,145 @@ class ConnectionClosedTests(unittest.TestCase):
         # select opens one and verify opens one; both must be closed
         self.assertEqual(len(opened), 2)
         self.assertEqual(len(closed), len(opened))
+
+
+class UnreadableTraceTests(unittest.TestCase):
+    """Issue #108: a truncated trace made `json.load` raise, and the uncaught
+    exception exited 1 — the code for "tests failed". A missing trace read as
+    an empty one, so every selected journey was reported as having no
+    journey-level test (exit 3). Both are a broken run, not a verdict."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, {
+            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+        })
+        self.repo, run = _git_repo(self.tmp, {"app/svc.py": 22})
+        full = os.path.join(self.repo, "app", "svc.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[11] = "changed = 1\n"  # inside handler_a -> J1
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        run("git", "add", "-A")
+        run("git", "commit", "-qm", "touch")
+        self.work = os.path.join(self.tmp, "work")
+        os.makedirs(self.work)
+
+    def _run(self, trace_text):
+        work = self.work
+
+        class FixedDir:
+            def __enter__(self):
+                return work
+
+            def __exit__(self, *exc):
+                return False
+
+        def runner():
+            if trace_text is not None:
+                with open(os.path.join(work, "trace.json"), "w") as fh:
+                    fh.write(trace_text)
+            return types.SimpleNamespace(returncode=0)
+
+        with unittest.mock.patch.object(verify.tempfile, "TemporaryDirectory",
+                                        lambda: FixedDir()):
+            return verify.run(self.repo, "HEAD~1", "HEAD", registry_path=self.registry,
+                              db_path=self.db, _runner=runner, append=lambda r: True)
+
+    def test_a_truncated_trace_is_refused_not_a_crash(self):
+        summary, err = self._run('{"tests": {"t::a": [["app/svc.py", "hand')
+        self.assertIsNone(summary)
+        self.assertIn("trace", err)
+        self.assertIn("truncated or not JSON", err)
+
+    def test_a_missing_trace_is_refused_not_uncovered(self):
+        summary, err = self._run(None)
+        self.assertIsNone(summary)
+        self.assertIn("wrote no trace", err)
+
+    def test_main_exits_refused(self):
+        with unittest.mock.patch.object(verify, "run", return_value=(None, "trace broke")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = verify.main(["--repo", self.repo, "--base", "HEAD~1"])
+        self.assertEqual(rc, verify.EXIT_REFUSED)
+
+
+class AtomicTraceWriteTests(unittest.TestCase):
+    """#108: the trace was written in place, so a run killed mid-write left a
+    truncated file where a reader expects a whole one."""
+
+    def test_a_write_that_dies_leaves_no_partial_file(self):
+        from harness.plugin import tgtrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "trace.json")
+
+        seen_target = []
+
+        def dying_dump(obj, fh, **kw):
+            fh.write('{"tests": {')
+            # a SIGKILL here runs no cleanup: the target must not exist yet
+            seen_target.append(os.path.exists(out))
+            raise KeyboardInterrupt
+
+        with unittest.mock.patch.object(tgtrace, "_out_path", out), \
+                unittest.mock.patch.object(tgtrace, "_stop", lambda: None), \
+                unittest.mock.patch.object(tgtrace.json, "dump", dying_dump):
+            with self.assertRaises(KeyboardInterrupt):
+                tgtrace.pytest_unconfigure(None)
+        self.assertFalse(os.path.exists(out))
+        self.assertEqual(os.listdir(tmp), [])
+        self.assertEqual(seen_target, [False])
+
+    def test_a_whole_write_lands(self):
+        from harness.plugin import tgtrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "trace.json")
+        with unittest.mock.patch.object(tgtrace, "_out_path", out), \
+                unittest.mock.patch.object(tgtrace, "_stop", lambda: None):
+            tgtrace.pytest_unconfigure(None)
+        with open(out) as fh:
+            self.assertIn("tests", json.load(fh))
+        self.assertEqual(os.listdir(tmp), ["trace.json"])
+
+
+class AdapterTruncatedTraceTests(unittest.TestCase):
+    def test_the_adapter_refuses_a_truncated_trace(self):
+        from testgraph import pytest_adapter as pa
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        db = _db_on_disk(tmp, build_fixture())
+        registry = _registry_file(tmp, {
+            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+        })
+        repo, _ = _git_repo(tmp, {"app/svc.py": 22})
+        work = os.path.join(tmp, "work")
+        os.makedirs(work)
+
+        class FixedDir:
+            def __enter__(self):
+                return work
+
+            def __exit__(self, *exc):
+                return False
+
+        def runner():
+            with open(os.path.join(work, "junit.xml"), "w") as fh:
+                fh.write("<testsuite/>")
+            with open(os.path.join(work, "trace.json"), "w") as fh:
+                fh.write('{"tests": {')
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        with unittest.mock.patch.object(pa.tempfile, "TemporaryDirectory",
+                                        lambda: FixedDir()):
+            summary, err = pa.run(repo, registry_path=registry, db_path=db,
+                                  _runner=runner, append=lambda r: True)
+        self.assertIsNone(summary)
+        self.assertIn("truncated or not JSON", err)
 
 
 class SummaryShapeTests(unittest.TestCase):

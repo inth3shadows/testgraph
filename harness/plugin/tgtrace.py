@@ -183,8 +183,20 @@ def pytest_unconfigure(config):
     directory = os.path.dirname(os.path.abspath(_out_path))
     if directory:
         os.makedirs(directory, exist_ok=True)
-    with open(_out_path, "w") as f:
-        json.dump(payload, f, indent=1, sort_keys=True)
+    # Write beside the target and rename (#108): a run killed mid-dump used to
+    # leave a truncated file where a reader expects a whole one. os.replace is
+    # atomic on the same filesystem, so the target is either absent or complete.
+    tmp = f"{_out_path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(payload, f, indent=1, sort_keys=True)
+        os.replace(tmp, _out_path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def pytest_runtest_call(item):
