@@ -389,6 +389,33 @@ class SummaryShapeTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
+    def test_a_none_with_unknown_reasons_says_so_in_the_headline(self):
+        """#113: the headline used to read `NONE — nothing to verify` with the
+        UNKNOWN reasons only indented below it; select and the hook put
+        UNKNOWN in the headline itself (#75)."""
+        sel_ = {"base": "a", "head": "b", "warnings": ["stale index"],
+                "journeys": [], "unknown_because": ["1 trust warning(s) above"]}
+        out = verify.render(verify._summary("/tmp/demo", "HEAD", sel_), REGISTRY)
+        headline = next(l for l in out.splitlines() if "journeys selected" in l)
+        self.assertIn("UNKNOWN, not verified-safe", headline)
+        self.assertNotIn("nothing to verify", headline)
+
+    def test_a_clean_none_keeps_its_wording(self):
+        sel_ = {"base": "a", "head": "b", "warnings": [], "journeys": [],
+                "unknown_because": []}
+        out = verify.render(verify._summary("/tmp/demo", "HEAD", sel_), REGISTRY)
+        self.assertIn("journeys selected: NONE — nothing to verify", out)
+
+    def test_an_unknown_none_is_not_an_exit_0_pass(self):
+        """#117 criterion 4: verify cannot turn UNKNOWN into exit-0 PASS."""
+        sel_ = {"base": "a", "head": "b", "warnings": ["stale"], "journeys": [],
+                "unknown_because": ["1 trust warning(s) above"]}
+        self.assertEqual(verify.exit_code(verify._summary("/x", "HEAD", sel_)),
+                         verify.EXIT_INCOMPLETE)
+        clean = dict(sel_, warnings=[], unknown_because=[])
+        self.assertEqual(verify.exit_code(verify._summary("/x", "HEAD", clean)),
+                         verify.EXIT_OK)
+
     def test_uncovered_journeys_are_named_loudly_and_denied_a_pass(self):
         out = verify.render({
             "repo": "demo",

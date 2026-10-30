@@ -109,6 +109,15 @@ def render(result, repo, more_cmd=None):
             f"  NOTE: impact for {shown} did not leave the file it started "
             f"in — that file's own contribution is UNKNOWN, not verified-safe"
         )
+    # Same reasoning as the confined line: a path the index does not model
+    # forced the all-journeys fallback (issue #117), and the reader should see
+    # which one without depending on the capped warnings below.
+    unmodeled = result.get("unmodeled_files", [])
+    if unmodeled:
+        shown = ", ".join(unmodeled[:MAX_CONFINED])
+        if len(unmodeled) > MAX_CONFINED:
+            shown += f", … {len(unmodeled) - MAX_CONFINED} more"
+        lines.append(f"  NOTE: not modeled by the index: {shown} — impact UNKNOWN")
     # Warnings are the channel that carries an unapproved registry and entry
     # drift — both mean "this answer may be understated", so they are worth the
     # lines. Capped: an unbounded warning block is the noise problem again.

@@ -13,7 +13,7 @@ python3 -m testgraph.verify --repo . --base origin/main -- tests/ -q
 # exit 0  every selected journey ran and passed
 # exit 1  a journey's tests failed
 # exit 2  refused: the index can't be trusted
-# exit 3  a selected journey has no journey-level test — named, not hidden
+# exit 3  a selected journey has no journey-level test, or the selection is UNKNOWN — named, not hidden
 ```
 
 That last case is not hypothetical. Run on itself, testgraph found that the 20
@@ -176,7 +176,10 @@ It runs `codegraph sync` first. Seeds come from *line ranges*, so an index built
 before the code moved resolves the diff against stale spans, and nothing else
 refreshes these indexes on commit. If a changed file's bytes still disagree with the
 indexed copy afterwards, the answer degrades to `RECALL DEGRADED` and names the file
-instead of quietly trusting the wrong line numbers.
+instead of quietly trusting the wrong line numbers. So does a change to a file the
+index does not model at all — SQL, a `Dockerfile`, CI YAML, CSS, config — unless it is
+a test, docs or a type declaration: not indexed is not "no impact" (TECHNICAL.md
+"Unmodeled Paths Degrade Too").
 
 Each run appends one `selection` row to `~/.local/share/testgraph/ledger.jsonl`
 (`{kind, ts, repo, base, head, commit, status, n_journeys, journey_ids, duration_ms,

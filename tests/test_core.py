@@ -25,6 +25,7 @@ from testgraph import integrity  # noqa: E402
 from testgraph import registry as reg  # noqa: E402
 from testgraph import export as exp  # noqa: E402
 from testgraph import select as sel  # noqa: E402
+from testgraph import hook  # noqa: E402
 
 
 def build_fixture():
@@ -2139,6 +2140,135 @@ class ZeroSeedDegradesTests(unittest.TestCase):
         j1 = next(j for j in res["journeys"] if j["id"] == "J1")
         self.assertNotIn("reason", j1)
         self.assertGreater(res["seed_symbols"], 0)
+
+
+class UnmodeledDiffPathTests(unittest.TestCase):
+    """Issue #117: an external trial's migration-only diff reported 0 changed
+    files, 0 journeys and no warning. The parser dropped every path outside
+    PRODUCT_EXT before impact analysis, so a SQL, Dockerfile, CI or CSS change
+    read as a confident NONE. A path the index does not model is UNKNOWN impact,
+    and recall-first means every journey (the #29 fallback), not silence."""
+
+    REG = ZeroSeedDegradesTests.REG
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = _db_on_disk(self.tmp, build_fixture())
+        self.registry = _registry_file(self.tmp, self.REG)
+        self.repo, self.run = _git_repo(self.tmp, {"app/svc.py": 22})
+
+    def _commit(self, files):
+        for rel, text in files.items():
+            full = os.path.join(self.repo, rel)
+            os.makedirs(os.path.dirname(full) or self.repo, exist_ok=True)
+            with open(full, "w") as fh:
+                fh.write(text)
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "change")
+
+    def _select(self):
+        return sel.select(self.repo, "HEAD~1", "HEAD", self.db, self.registry)
+
+    UNMODELED = (
+        "packages/db/migrations/001_add_rls.sql",
+        "services/api/Dockerfile",
+        ".github/workflows/ci.yml",
+        "apps/web/src/app.css",
+    )
+
+    def test_each_unmodeled_path_alone_degrades_to_every_journey(self):
+        for rel in self.UNMODELED:
+            with self.subTest(rel=rel):
+                self._commit({rel: f"-- {rel}\n"})
+                res = self._select()
+                self.assertEqual(res["status"], "OK")
+                # 1. the raw path is accounted for, not lost
+                self.assertIn(rel, res["diff_files"])
+                self.assertIn(rel, res["unmodeled_files"])
+                # 2. named, with why its impact is unknown
+                self.assertTrue(any(rel in w and "not modeled" in w
+                                    for w in res["warnings"]), res["warnings"])
+                # 3. not a clean NONE in JSON or text
+                self.assertTrue(res["recall_degraded"])
+                self.assertEqual({"J1", "J2"}, {j["id"] for j in res["journeys"]})
+                text = sel._render(res)
+                self.assertNotIn("no product-behavior change detected", text)
+                self.assertIn(f"unmodeled: {rel}", text)
+                pushed = hook.render(res, self.repo)
+                self.assertNotIn("no product-behavior change detected", pushed)
+                self.assertIn(f"not modeled by the index: {rel}", pushed)
+
+    def test_counts_tell_raw_changes_from_eligible_ones(self):
+        self._commit({"migrations/001.sql": "x\n", "README.md": "x\n"})
+        res = self._select()
+        self.assertEqual(res["changed_files"], [])
+        self.assertEqual(sorted(res["diff_files"]),
+                         ["README.md", "migrations/001.sql"])
+        self.assertIn("0 product of 2 in diff (1 exempt, 1 unmodeled)",
+                      sel._render(res))
+
+    def test_docs_and_tests_only_diffs_keep_their_exemption(self):
+        self._commit({"README.md": "x\n", "docs/guide.txt": "x\n",
+                      "tests/fixtures/seed.sql": "x\n", "LICENSE": "x\n",
+                      "app/types.d.ts": "x\n"})
+        res = self._select()
+        self.assertFalse(res["recall_degraded"], res["warnings"])
+        self.assertEqual(res["journeys"], [])
+        self.assertEqual(res["unmodeled_files"], [])
+        self.assertEqual(set(res["exempt_files"]),
+                         {"README.md", "docs/guide.txt", "tests/fixtures/seed.sql",
+                          "LICENSE", "app/types.d.ts"})
+        self.assertEqual(res["exempt_files"]["tests/fixtures/seed.sql"], "test")
+        self.assertEqual(res["exempt_files"]["README.md"], "docs")
+
+    def test_an_unmodeled_path_is_not_hidden_behind_a_real_selection(self):
+        full = os.path.join(self.repo, "app", "svc.py")
+        with open(full) as fh:
+            lines = fh.readlines()
+        lines[11] = "changed = 1\n"  # inside handler_a (10-20) -> J1
+        with open(full, "w") as fh:
+            fh.writelines(lines)
+        self._commit({"Dockerfile": "FROM x\n"})
+        res = self._select()
+        self.assertTrue(res["recall_degraded"])
+        self.assertEqual({"J1", "J2"}, {j["id"] for j in res["journeys"]})
+        self.assertIn("Dockerfile", res["unmodeled_files"])
+        j1 = next(j for j in res["journeys"] if j["id"] == "J1")
+        self.assertNotIn("reason", j1)
+
+    def test_paths_survive_an_unreadable_diff_git_line(self):
+        """The `diff --git` line is only a fallback; the headers must still
+        account for the path when it cannot be split."""
+        diff = ("diff --git ??? ???\n"
+                "deleted file mode 100644\n"
+                "--- a/db/old.sql\n"
+                "+++ /dev/null\n"
+                "@@ -1 +0,0 @@\n"
+                "-x\n"
+                "diff --git ??? ???\n"
+                "--- a/db/new.sql\n"
+                "+++ b/db/new.sql\n"
+                "@@ -1 +1 @@\n"
+                "-x\n"
+                "+y\n")
+        paths = set()
+        sel._parse_unified_diff(diff, paths)
+        self.assertEqual(paths, {"db/old.sql", "db/new.sql"})
+
+    def test_a_deleted_or_renamed_unmodeled_path_counts(self):
+        self._commit({"db/schema.sql": "x\n"})
+        self.run("git", "mv", "db/schema.sql", "db/schema2.sql")
+        self.run("git", "commit", "-qm", "rename")
+        res = self._select()
+        self.assertTrue(res["recall_degraded"])
+        self.assertIn("db/schema2.sql", res["unmodeled_files"])
+        os.remove(os.path.join(self.repo, "db", "schema2.sql"))
+        self.run("git", "add", "-A")
+        self.run("git", "commit", "-qm", "delete")
+        res = self._select()
+        self.assertIn("db/schema2.sql", res["unmodeled_files"])
+        self.assertTrue(res["recall_degraded"])
 
 
 class ClosureConfinedTests(unittest.TestCase):
