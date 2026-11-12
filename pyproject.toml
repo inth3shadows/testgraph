@@ -62,7 +62,7 @@ packages = ["testgraph"]
 
 # The one exception: `verify` needs the trace plugin at runtime, so the wheel carries
 # that single file (see `pytest_adapter.plugin_dir`). `harness/plugin/tgtrace.py` stays
-# the source of truth; nothing else from `harness/` ships. The sdist `include` above
+# the source of truth; nothing else from `harness/` ships. The sdist `include` below
 # must list it too: `uv build` builds the wheel FROM the sdist.
 [tool.hatch.build.targets.wheel.force-include]
 "harness/plugin/tgtrace.py" = "testgraph/_plugin/tgtrace.py"

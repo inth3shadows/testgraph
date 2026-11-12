@@ -32,8 +32,8 @@ pip install testgraph
 ```
 
 No runtime dependencies — the stdlib `sqlite3` to read the CodeGraph index, and
-`git` for the diff. The wheel ships `testgraph/` alone: the measurement harness
-and the three dogfood registries live in the repo, not the package.
+`git` for the diff. The wheel ships the `testgraph/` package and its trace plugin: the
+measurement harness and the three dogfood registries live in the repo, not the package.
 
 From source, if you want those too:
 

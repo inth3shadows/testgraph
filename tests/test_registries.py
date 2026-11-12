@@ -213,8 +213,8 @@ class RegistryDiscoveryTests(unittest.TestCase):
     """Where `resolve_for_repo` looks, and why the old answer was unusable.
 
     The search directory used to be package-relative and NOTHING else. That works
-    in a source checkout and is silently useless anywhere else: the wheel ships
-    `testgraph/` alone, so on `pip install testgraph` the path resolves to
+    in a source checkout and is silently useless anywhere else: the wheel does not
+    ship `journeys/`, so on `pip install testgraph` the path resolves to
     `site-packages/journeys`, which does not exist. Every repo answered "no
     journey registry found" forever — including through the MCP server, which
     would have returned that to every agent that ever called it. Measured on a

@@ -248,16 +248,20 @@ def plugin_dir(start=None):
     ship it — but `verify` cannot run without the trace plugin, so the wheel
     carries that ONE file as `testgraph/_plugin/tgtrace.py` (a build-time
     `force-include` of `harness/plugin/tgtrace.py`; the source of truth stays in
-    `harness/`). An installed package finds it there; a source checkout finds
-    `harness/plugin`. None when neither exists, which the caller turns into one
-    clear error instead of an opaque pytest `-p tgtrace` import failure."""
+    `harness/`). The checkout's `harness/plugin` is checked FIRST, so a stray
+    `testgraph/_plugin/` copy in a checkout can never shadow the file being edited;
+    an installed package has no `harness/` beside it and finds `_plugin`. None when
+    neither exists, which the caller turns into one clear error instead of an
+    opaque pytest `-p tgtrace` import failure."""
+    root = start or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidate = os.path.join(root, "harness", "plugin")
+    if os.path.isfile(os.path.join(candidate, "tgtrace.py")):
+        return candidate
     if start is None:
         packaged = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_plugin")
         if os.path.isfile(os.path.join(packaged, "tgtrace.py")):
             return packaged
-    root = start or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    candidate = os.path.join(root, "harness", "plugin")
-    return candidate if os.path.isfile(os.path.join(candidate, "tgtrace.py")) else None
+    return None
 
 
 def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,

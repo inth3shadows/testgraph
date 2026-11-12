@@ -29,6 +29,7 @@ class AccuracyVerdict(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("S1 VERDICT : FAIL", text)
         self.assertIn("commits scored: 0", text)
+        self.assertIn("MIN RECALL : n/a", text)
 
     def test_one_blocked_commit_fails_the_run(self):
         labels = accuracy.json.load(open(os.path.join(accuracy.HERE, "labels_honeyslate.json")))
