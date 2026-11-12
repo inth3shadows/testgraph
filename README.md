@@ -32,8 +32,8 @@ pip install testgraph
 ```
 
 No runtime dependencies — the stdlib `sqlite3` to read the CodeGraph index, and
-`git` for the diff. The wheel ships `testgraph/` alone: the measurement harness
-and the three dogfood registries live in the repo, not the package.
+`git` for the diff. The wheel ships the `testgraph/` package and its trace plugin: the
+measurement harness and the three dogfood registries live in the repo, not the package.
 
 From source, if you want those too:
 
@@ -86,7 +86,8 @@ than none: every downstream check then reports its own mismatch as a stale index
 `python3 -m testgraph.propose --repo <path>` drafts into (2) by default.
 
 Note for anyone reading this on PyPI: (3) does not exist in an installed wheel,
-which ships `testgraph/` alone. Put your registry in (2).
+which ships the `testgraph/` package and its trace plugin, not `journeys/`. Put your
+registry in (2).
 
 ## Prerequisites
 

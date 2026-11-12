@@ -19,8 +19,8 @@ def load(path):
 # Where a registry lives, in search order. See `search_dirs`.
 #
 # This used to be the package-relative directory ALONE, which works only in a
-# source checkout and is silently useless anywhere else: the wheel ships
-# `testgraph/` and nothing beside it, so on a `pip install testgraph` the path
+# source checkout and is silently useless anywhere else: the wheel does not ship
+# `journeys/`, so on a `pip install testgraph` the path
 # resolves to `site-packages/journeys`, which does not exist. Every repo then
 # answered "no journey registry found" forever — including through the MCP
 # server, which would have returned that to every agent that ever called it.
