@@ -173,7 +173,8 @@ A journey with **no covering test** is named as loudly as a covered one. That is
 the actionable half: on testgraph's own 389-test suite, J6 has zero covering
 tests, and nothing but that line would say so.
 
-This adapter needs a source checkout — `harness/` is not in the wheel.
+The trace plugin it loads ships in the wheel (`testgraph/_plugin/tgtrace.py`), so this
+works from `pip install testgraph` as well as from a checkout.
 
 ## Checking the Graph Against Reality
 

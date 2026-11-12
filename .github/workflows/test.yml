@@ -51,3 +51,19 @@ jobs:
       - run: python3 -m unittest discover -s tests
         env:
           TG_REQUIRE_PYTEST: "1"
+
+  # The release builds with `uv build` (sdist first, then the wheel FROM the sdist), so
+  # anything the wheel needs must survive the sdist. A wheel-only build hid exactly that
+  # (#165 review): the trace plugin was force-included from a path the sdist dropped.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0   # hatch-vcs derives the version from tags
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - run: uv build
+      - name: The wheel built from the sdist carries the trace plugin
+        run: |
+          python3 -m zipfile -l dist/*.whl | grep -q 'testgraph/_plugin/tgtrace.py' \
+            || { echo "::error::wheel has no testgraph/_plugin/tgtrace.py"; exit 1; }

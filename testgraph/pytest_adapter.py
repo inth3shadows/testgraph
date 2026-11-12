@@ -236,6 +236,11 @@ def write_outcomes(repo_name, commit, attribution, append=None):
     return written
 
 
+PLUGIN_MISSING = ("cannot find the tgtrace plugin: an installed testgraph carries it at "
+                  "testgraph/_plugin/tgtrace.py, a checkout at harness/plugin/tgtrace.py — "
+                  "reinstall the package, or restore the file in the checkout")
+
+
 def plugin_dir(start=None):
     """Where `tgtrace.py` lives, or None.
 
@@ -280,10 +285,7 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
 
     plugins = plugin_dir()
     if plugins is None:
-        return None, (
-            "cannot find the tgtrace plugin (testgraph/_plugin/ in an installed "
-            "wheel, harness/plugin/ in a checkout) — reinstall testgraph"
-        )
+        return None, PLUGIN_MISSING
 
     db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")
     if not os.path.isfile(db_path):

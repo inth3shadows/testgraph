@@ -90,12 +90,13 @@ def main():
         print(f"    {mstr}")
     mean_p = sum(precisions) / len(precisions) if precisions else float("nan")
     print("\n--- summary ---")
-    print(f"  MIN RECALL : {min_recall:.2f}   (S1 requires 1.00)")
+    scored = sum(1 for r in rows if len(r) == 5)
+    # With nothing scored, `min_recall` is still its 1.0 seed: print n/a, not a perfect score.
+    print(f"  MIN RECALL : {f'{min_recall:.2f}' if scored else 'n/a'}   (S1 requires 1.00)")
     print(f"  mean precision (non-empty oracles): {mean_p:.2f}")
     # #97: `min_recall` starts at 1.0 and error rows `continue` past it, so a run that
     # scored NOTHING (every worktree failed) used to print PASS. A commit that errored or
     # was BLOCKED produced no answer to score, which is not a pass either.
-    scored = sum(1 for r in rows if len(r) == 5)
     errored = [r for r in rows if len(r) == 3]
     ok = scored > 0 and not errored and min_recall >= 1.0
     print(f"  commits scored: {scored} / {len(labels['commits'])}"

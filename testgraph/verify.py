@@ -171,8 +171,7 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"
     plugins = pa.plugin_dir()
     if plugins is None:
-        return None, ("cannot find the tgtrace plugin (testgraph/_plugin/ in an "
-                      "installed wheel, harness/plugin/ in a checkout)")
+        return None, pa.PLUGIN_MISSING
 
     # Strict (the default): an unresolvable journey BLOCKs and the run is
     # refused. `strict_registry=False` is reserved for history analysis

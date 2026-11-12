@@ -86,7 +86,8 @@ than none: every downstream check then reports its own mismatch as a stale index
 `python3 -m testgraph.propose --repo <path>` drafts into (2) by default.
 
 Note for anyone reading this on PyPI: (3) does not exist in an installed wheel,
-which ships `testgraph/` alone. Put your registry in (2).
+which ships the `testgraph/` package and its trace plugin, not `journeys/`. Put your
+registry in (2).
 
 ## Prerequisites
 
