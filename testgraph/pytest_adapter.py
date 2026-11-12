@@ -239,12 +239,17 @@ def write_outcomes(repo_name, commit, attribution, append=None):
 def plugin_dir(start=None):
     """Where `tgtrace.py` lives, or None.
 
-    The installed wheel ships `testgraph/` ONLY — `harness/` is a repo
-    artifact with no import contract (the packaging decision recorded in
-    `testgraph-public-release.md`). So this resolves relative to the source
-    checkout and returns None rather than guessing when it is not there; the
-    caller turns that into one clear error instead of an opaque pytest
-    `-p tgtrace` import failure twenty lines into a subprocess log."""
+    `harness/` is a repo artifact with no import contract, so the wheel does not
+    ship it — but `verify` cannot run without the trace plugin, so the wheel
+    carries that ONE file as `testgraph/_plugin/tgtrace.py` (a build-time
+    `force-include` of `harness/plugin/tgtrace.py`; the source of truth stays in
+    `harness/`). An installed package finds it there; a source checkout finds
+    `harness/plugin`. None when neither exists, which the caller turns into one
+    clear error instead of an opaque pytest `-p tgtrace` import failure."""
+    if start is None:
+        packaged = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_plugin")
+        if os.path.isfile(os.path.join(packaged, "tgtrace.py")):
+            return packaged
     root = start or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidate = os.path.join(root, "harness", "plugin")
     return candidate if os.path.isfile(os.path.join(candidate, "tgtrace.py")) else None
@@ -276,9 +281,8 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
     plugins = plugin_dir()
     if plugins is None:
         return None, (
-            "cannot find harness/plugin/tgtrace.py — it ships with the source "
-            "checkout, not the installed wheel, so this adapter needs to run "
-            "from a checkout"
+            "cannot find the tgtrace plugin (testgraph/_plugin/ in an installed "
+            "wheel, harness/plugin/ in a checkout) — reinstall testgraph"
         )
 
     db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")

@@ -60,5 +60,11 @@ version-file = "testgraph/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["testgraph"]
 
+# The one exception: `verify` needs the trace plugin at runtime, so the wheel carries
+# that single file (see `pytest_adapter.plugin_dir`). `harness/plugin/tgtrace.py` stays
+# the source of truth; nothing else from `harness/` ships.
+[tool.hatch.build.targets.wheel.force-include]
+"harness/plugin/tgtrace.py" = "testgraph/_plugin/tgtrace.py"
+
 [tool.hatch.build.targets.sdist]
 include = ["testgraph", "journeys", "skills", "hooks", "README.md", "USAGE.md", "TECHNICAL.md", "LICENSE"]

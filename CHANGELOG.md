@@ -128,6 +128,16 @@ below is on `main` or in the branch that introduced this file.
 
 ### Fixed
 
+- **`verify` works from an installed wheel.** The wheel shipped `testgraph/` only, so
+  the README's headline `verify` command failed after `pip install testgraph` with
+  "cannot find harness/plugin/tgtrace.py". The wheel now carries the trace plugin as
+  `testgraph/_plugin/tgtrace.py` (a build-time copy; `harness/plugin/` stays the source).
+- **`harness/accuracy.py` no longer reports PASS on a run that scored nothing** (#97).
+  A failed worktree, failed index or BLOCKED commit skipped scoring without lowering
+  `min_recall` (which starts at 1.0), so a machine without the bare repo printed
+  `S1 VERDICT : PASS` and exited 0. It now fails when no commit was scored or any errored,
+  and prints the scored count.
+
 - **`verify --json` changed shape on its quiet exits** (#89). The refused and
   nothing-selected paths built their own summary without `repo` and `commit`,
   so a consumer aggregating runs hit a `KeyError` on exactly the runs most
