@@ -189,11 +189,24 @@ It needs the repo's dependencies installed (`node_modules` with `vitest`, at the
 a workspace root). Nothing is written into the repo: a generated config in a temp dir
 imports the repo's own `vitest.config.*` (or `vite.config.*`) and adds the
 `tgtrace-vitest.ts` setup file, which records each test's named functions through V8
-precise coverage. Rows carry `edge_provenance=trace`, like the pytest adapter's.
+precise coverage. Rows carry `edge_provenance=trace`, like the pytest adapter's. (Vitest
+still writes its own cache to `node_modules/.vite`, as any `vitest run` does.)
 
-Limits: anonymous functions are not recorded (attribution matches named entry
-symbols, so this costs nothing there); tests marked `.concurrent` in one file share a
-coverage window; `verify` does not run Vitest suites yet.
+A run that cannot be read is refused (exit 2), never recorded: any passed or failed test
+without a trace, a test that never finished (killed worker), two tests with the same id
+(same title in one describe, e.g. a repeated `test.each` row), a file that failed outside
+any test (import error, throwing `beforeAll`/`afterAll`; Vitest reports the tests under
+a throwing `beforeAll` as skipped, so only the file's status shows it), and a report of
+the wrong shape. An all-skipped run, or a `-t` filter that matches nothing, is an empty
+success.
+
+Limits: `test.projects` and `vitest.workspace.*` configs are not supported yet (projects
+do not inherit `setupFiles`, so nothing would be traced) and are refused up front;
+anonymous functions are not recorded (attribution matches named entry symbols, so this
+costs nothing there); tests marked `.concurrent` in one file share a coverage window,
+so their traces can bleed into each other; a failing test next to tests skipped by a
+throwing `beforeAll` in the same file is not distinguishable from `it.skip`; `verify`
+does not run Vitest suites yet.
 
 ## Checking the Graph Against Reality
 
