@@ -176,6 +176,25 @@ tests, and nothing but that line would say so.
 The trace plugin it loads ships in the wheel (`testgraph/_plugin/tgtrace.py`), so this
 works from `pip install testgraph` as well as from a checkout.
 
+### Vitest suites
+
+The same attribution for a TypeScript repo whose tests run on Vitest (4.x):
+
+```bash
+python3 -m testgraph.vitest_adapter --repo . --dry-run
+python3 -m testgraph.vitest_adapter --repo . --json -- src/lib   # vitest's own args after --
+```
+
+It needs the repo's dependencies installed (`node_modules` with `vitest`, at the repo or
+a workspace root). Nothing is written into the repo: a generated config in a temp dir
+imports the repo's own `vitest.config.*` (or `vite.config.*`) and adds the
+`tgtrace-vitest.ts` setup file, which records each test's named functions through V8
+precise coverage. Rows carry `edge_provenance=trace`, like the pytest adapter's.
+
+Limits: anonymous functions are not recorded (attribution matches named entry
+symbols, so this costs nothing there); tests marked `.concurrent` in one file share a
+coverage window; `verify` does not run Vitest suites yet.
+
 ## Checking the Graph Against Reality
 
 `reconcile` puts CodeGraph's edges on trial, using the same run:
