@@ -26,13 +26,12 @@ import re
 import subprocess
 import sys
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-from testgraph import pytest_adapter as pa  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+from testgraph import pytest_adapter as pa  # noqa: E402
 # ONLY this directory goes on the target's PYTHONPATH. `harness/` itself holds
 # `trace.py`, which would shadow the stdlib `trace` module for every import in
 # the traced suite.

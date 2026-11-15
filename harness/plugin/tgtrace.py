@@ -58,6 +58,7 @@ _skip = tuple(
 )
 
 _current = None          # set() while a test body is running, else None
+_started = False         # tracing began; unconfigure does nothing otherwise
 _results = {}
 _declared = {}           # nodeid -> [journey id, ...] the test CLAIMS to cover
 
@@ -141,7 +142,9 @@ _HAVE_MONITORING = hasattr(sys, "monitoring")
 
 
 def _start():
+    global _started
     _start_monitoring() if _HAVE_MONITORING else _start_profile()
+    _started = True
 
 
 def _stop():
@@ -179,8 +182,14 @@ def pytest_configure(config):
 
 
 def pytest_unconfigure(config):
-    if not _out_path:
+    # pytest calls this even when pytest_configure RAISED (an xdist or
+    # stream-target refusal). Stopping a tracer that never started raised on
+    # sys.monitoring, and writing the empty payload replaced the refused
+    # target on setprofile (#154 review R3-1).
+    global _started
+    if not _out_path or not _started:
         return
+    _started = False
     _stop()
     payload = {
         "root": _root,
@@ -204,7 +213,13 @@ def _not_a_file_target(path):
     A copy of `testgraph.pytest_adapter.not_a_file_target`, because this
     plugin imports nothing from testgraph; WriterParityTests in
     tests/test_pytest_adapter.py holds the two to identical answers."""
+    if path.endswith(os.sep) or os.path.basename(path) in (".", ".."):
+        return True  # names a directory, however it is spelled (R3-6)
     p = os.path.abspath(path)
+    # Resolve the DIRECTORY, not the leaf: `/dev/stdout` itself resolves into
+    # whatever stdout is redirected to, but a symlinked parent (`d -> /dev`)
+    # or a POSIX `//dev` must still read as /dev (#154 review R3-4).
+    p = os.path.join(os.path.realpath(os.path.dirname(p)), os.path.basename(p))
     if p.startswith(_DEVICE_PREFIXES) and not p.startswith(_FILE_UNDER_DEV):
         return True
     return os.path.exists(p) and not os.path.isfile(p)
@@ -219,7 +234,8 @@ def _write(out_path, payload):
     crash from leaving a zero-length target, which ext4/xfs can otherwise do
     when the rename reaches disk before the data. Stream targets were refused
     in `pytest_configure`."""
-    directory = os.path.dirname(os.path.abspath(out_path))
+    out_path = os.path.abspath(out_path)  # one spelling for check and write (R3-6)
+    directory = os.path.dirname(out_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
     tmp = f"{out_path}.tmp.{os.getpid()}"

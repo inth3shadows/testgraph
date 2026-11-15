@@ -12,8 +12,14 @@ from . import db as dbmod
 
 
 def load(path):
+    """Parse a registry file. Raises OSError or ValueError, including for JSON
+    that is not an object: a list used to load fine and crash later, in
+    whichever caller first indexed it (#154 review R3-5)."""
     with open(path) as f:
-        return json.load(f)
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"the registry is a JSON {type(data).__name__}, not an object")
+    return data
 
 
 # Where a registry lives, in search order. See `search_dirs`.

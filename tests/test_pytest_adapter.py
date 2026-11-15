@@ -8,6 +8,7 @@ one outcome this project exists to prevent, so each of those paths is asserted
 to be REPORTED rather than swallowed.
 """
 import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -25,6 +26,8 @@ from testgraph.results import covers  # noqa: E402
 from testgraph import ledger  # noqa: E402
 from testgraph import pytest_adapter as pa  # noqa: E402
 from test_core import _db_on_disk, _git_repo, _registry_file, build_fixture  # noqa: E402
+
+HAVE_PYTEST = importlib.util.find_spec("pytest") is not None
 
 
 def build_conn():
@@ -572,6 +575,57 @@ class ReviewRound1Tests(_AdapterRunFixture, unittest.TestCase):
                 self.assertIn("--trace-out", err)
         self.assertEqual(ran, [], "the suite ran before --trace-out was checked")
 
+    def test_r3_3_a_non_string_declaration_is_not_a_broken_trace(self):
+        """`covers(1)` is a bad decorator, not a broken run: tgtrace writes
+        what `tg_journeys` holds, so an int must not refuse every verdict."""
+        summary, err = self._run(trace='{"tests": {}, "declared": {"t": [1]}}',
+                                 junit=JUNIT_OK)
+        self.assertIsNone(err)
+
+    def test_r3_7_a_directory_trace_out_says_directory(self):
+        summary, err = self._run(trace=self.WHOLE, junit=JUNIT_OK, trace_out=self.tmp)
+        self.assertIsNone(summary)
+        self.assertIn("is a directory", err)
+
+    def test_r3_6_a_trace_out_naming_a_directory_is_refused_before_the_run(self):
+        ran = []
+
+        def runner():
+            ran.append(1)
+            return types.SimpleNamespace(returncode=0, stderr="")
+        for out in (os.path.join(self.tmp, "x", "new.json") + "/.",
+                    os.path.join(self.tmp, "nosuchdir") + "/."):
+            with self.subTest(out):
+                summary, err = pa.run(self.repo, registry_path=self.registry,
+                                      db_path=self.db, _runner=runner,
+                                      _workdir=self.work, append=lambda r: True,
+                                      trace_out=out)
+                self.assertIsNone(summary)
+                self.assertIn("--trace-out", err)
+        self.assertEqual(ran, [])
+
+    def test_r3_6_a_dotted_trace_out_is_written_where_the_check_looked(self):
+        os.makedirs(os.path.join(self.tmp, "real"))
+        out = os.path.join(self.tmp, "gone", "..", "real", "t.json")
+        summary, err = self._run(trace=self.WHOLE, junit=JUNIT_OK, trace_out=out)
+        self.assertIsNone(err)
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "real", "t.json")))
+
+    def test_r3_5_a_registry_that_is_not_an_object_is_refused_before_the_run(self):
+        bad = os.path.join(self.tmp, "list.json")
+        with open(bad, "w") as fh:
+            fh.write("[]")
+        ran = []
+
+        def runner():
+            ran.append(1)
+            return types.SimpleNamespace(returncode=0, stderr="")
+        summary, err = pa.run(self.repo, registry_path=bad, db_path=self.db,
+                              _runner=runner, _workdir=self.work, append=lambda r: True)
+        self.assertIsNone(summary)
+        self.assertIn("not an object", err)
+        self.assertEqual(ran, [])
+
     def test_declared_null_is_accepted_as_empty(self):
         """verify has always read `declared` as `.get("declared") or {}`;
         the shape check must not turn that into a refusal (R2-3 parity)."""
@@ -609,13 +663,20 @@ class WriterParityTests(unittest.TestCase):
             import tgtrace
         finally:
             sys.path.pop(0)
-        return {"adapter": pa.write_json_atomic, "tgtrace": tgtrace._write,
-                "tgtrace_rule": tgtrace._not_a_file_target}
+        return {"adapter": pa.write_json_atomic, "tgtrace": tgtrace._write}
+
+    def _tgtrace_rule(self):
+        sys.path.insert(0, os.path.join(ROOT_DIR, "harness", "plugin"))
+        try:
+            import tgtrace
+        finally:
+            sys.path.pop(0)
+        return tgtrace._not_a_file_target
 
     def test_both_copies_of_the_target_rule_agree(self):
         """One rule, two copies (tgtrace cannot import testgraph): same
         answer on every case, and the answer is the intended one."""
-        rules = self._writers()
+        tg_rule = self._tgtrace_rule()
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         regular = os.path.join(tmp, "t.json")
@@ -628,17 +689,23 @@ class WriterParityTests(unittest.TestCase):
             fifo: True, tmp: True,
             "/dev/shm/x.json": False, regular: False,
             os.path.join(tmp, "absent.json"): False,
+            # a path that names a directory, however spelled (R3-6)
+            os.path.join(tmp, "new.json") + "/.": True,
+            os.path.join(tmp, "new.json") + "/": True,
+            os.path.join(tmp, "a", ".."): True,
+            # a dotted path to a real file location is still a file
+            os.path.join(tmp, "a", "..", "b.json"): False,
         }
         for path, expected in cases.items():
             with self.subTest(path):
                 self.assertEqual(pa.not_a_file_target(path), expected)
-                self.assertEqual(rules["tgtrace_rule"](path), expected)
+                self.assertEqual(tg_rule(path), expected)
         # relative paths are judged after abspath (R2-4)
         cwd = os.getcwd()
         self.addCleanup(os.chdir, cwd)
         os.chdir("/dev")
         self.assertTrue(pa.not_a_file_target("stdout"))
-        self.assertTrue(rules["tgtrace_rule"]("stdout"))
+        self.assertTrue(tg_rule("stdout"))
 
     def test_relative_and_dotted_dev_paths_with_stdout_redirected_to_a_file(self):
         """R2-4: with stdout redirected to a file, `/dev/stdout` resolves to a
@@ -648,17 +715,20 @@ class WriterParityTests(unittest.TestCase):
         code = (
             "import sys; sys.path[:0] = [sys.argv[1], sys.argv[1] + '/harness/plugin']\n"
             "from testgraph import pytest_adapter as pa; import tgtrace\n"
-            "for p in ('stdout', '/tmp/../dev/stdout'):\n"
+            "for p in ('stdout', '/tmp/../dev/stdout', '//dev/stdout', sys.argv[2] + '/stdout'):\n"
             "    sys.stderr.write(f'{pa.not_a_file_target(p)} {tgtrace._not_a_file_target(p)}\\n')\n"
         )
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        link = os.path.join(tmp, "devlnk")
+        os.symlink("/dev", link)   # a symlinked parent (R3-4)
         with open(os.path.join(tmp, "out.txt"), "w") as fh:
-            proc = subprocess.run([sys.executable, "-c", code, ROOT_DIR], cwd="/dev",
+            proc = subprocess.run([sys.executable, "-c", code, ROOT_DIR, link], cwd="/dev",
                                   stdout=fh, stderr=subprocess.PIPE, text=True)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stderr.split(), ["True"] * 4)
+        self.assertEqual(proc.stderr.split(), ["True"] * 8)
 
+    @unittest.skipUnless(HAVE_PYTEST, "pytest is not installed")  # R3-2
     def test_tgtrace_refuses_a_stream_before_any_test_runs(self):
         """R2-2: writing a stream in place corrupted it (a second open of
         /dev/stdout has its own offset). Real pytest, stdout redirected to a
@@ -684,7 +754,7 @@ class WriterParityTests(unittest.TestCase):
     def test_both_name_their_temp_file_the_same_way(self):
         """F8: the harness sweep matches `<out>.tmp.<pid>`; a killed adapter
         used to leave `.<name>.tmp.<pid>`, which nothing swept."""
-        for name, write in list(self._writers().items())[:2]:
+        for name, write in self._writers().items():
             with self.subTest(name):
                 tmp = tempfile.mkdtemp()
                 self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)

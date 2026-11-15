@@ -323,7 +323,11 @@ def payload_shape_error(trace):
     if not isinstance(declared, dict):
         return "`declared` is not an object"
     for nodeid, journeys in declared.items():
-        if not isinstance(journeys, list) or any(not isinstance(j, str) for j in journeys):
+        # Each id must be hashable (it is looked up). It need NOT be a string:
+        # tgtrace writes whatever `covers(...)` was given, and `covers(1)` is a
+        # bad declaration that verify reports, not a broken trace (R3-3).
+        if not isinstance(journeys, list) or any(
+                isinstance(j, (list, dict)) for j in journeys):
             return f"`declared[{nodeid!r}]` is not a list of journey ids"
     return None
 
@@ -393,7 +397,13 @@ def not_a_file_target(path):
     The same rule is in tgtrace (`_not_a_file_target`), which cannot import
     this module; tests/test_pytest_adapter.py:WriterParityTests holds the two
     copies to identical answers. harness/trace.py imports this one."""
+    if path.endswith(os.sep) or os.path.basename(path) in (".", ".."):
+        return True  # names a directory, however it is spelled (R3-6)
     p = os.path.abspath(path)
+    # Resolve the DIRECTORY, not the leaf: `/dev/stdout` itself resolves into
+    # whatever stdout is redirected to, but a symlinked parent (`d -> /dev`)
+    # or a POSIX `//dev` must still read as /dev (#154 review R3-4).
+    p = os.path.join(os.path.realpath(os.path.dirname(p)), os.path.basename(p))
     if p.startswith(_DEVICE_PREFIXES) and not p.startswith(_FILE_UNDER_DEV):
         return True
     return os.path.exists(p) and not os.path.isfile(p)
@@ -404,8 +414,9 @@ def trace_out_error(path):
 
     Checked BEFORE the suite runs (#154 review F9): finding out after a
     half-hour run that the directory does not exist throws the run away."""
-    if path.endswith(os.sep):
-        return f"--trace-out {path} names a directory, not a file"
+    if (path.endswith(os.sep) or os.path.basename(path) in (".", "..")
+            or os.path.isdir(path)):
+        return f"--trace-out {path} is a directory, not a file"
     if not_a_file_target(path):
         return (f"--trace-out {path} is not a regular file path; the trace is "
                 f"written to a temp file and renamed, so streams and devices "
@@ -426,6 +437,9 @@ def write_json_atomic(path, obj):
     reader (reconcile) refuses. The temp is named `<path>.tmp.<pid>`, as
     tgtrace names its own, so harness/trace.py's sweep finds both. Callers
     refuse stream targets first (`trace_out_error`)."""
+    # One spelling for the check and the write (R3-6): `gone/../t.json`
+    # passes a check on abspath but fails as a raw temp path.
+    path = os.path.abspath(path)
     tmp = f"{path}.tmp.{os.getpid()}"
     try:
         with open(tmp, "w") as f:

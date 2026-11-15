@@ -496,12 +496,43 @@ class AtomicTraceWriteTests(unittest.TestCase):
                 self.assertIn("not a regular file path", str(cm.exception))
         self.assertEqual(sorted(os.listdir(tmp)), ["pipe"])
 
+    def test_r3_1_unconfigure_after_a_refusal_touches_nothing(self):
+        """pytest calls pytest_unconfigure even when pytest_configure raised.
+        It used to run _stop + _write anyway: on the setprofile backend (3.11)
+        that replaced the refused FIFO with a regular file; on sys.monitoring
+        it raised `tool 3 is not in use`, exit 1. Both backends, both
+        refusals (stream target, xdist)."""
+        from harness.plugin import tgtrace
+        import stat
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fifo = os.path.join(tmp, "pipe")
+        os.mkfifo(fifo)
+        plain = os.path.join(tmp, "t.json")
+        for backend in (True, False):
+            for target, xdist in ((fifo, None), (plain, 2)):
+                with self.subTest(monitoring=backend, target=target), \
+                        unittest.mock.patch.object(tgtrace, "_HAVE_MONITORING", backend), \
+                        unittest.mock.patch.object(tgtrace, "_out_path", target), \
+                        unittest.mock.patch.object(tgtrace, "_started", False):
+                    os.environ.pop("PYTEST_XDIST_WORKER", None)
+                    config = types.SimpleNamespace(
+                        option=types.SimpleNamespace(numprocesses=xdist))
+                    with self.assertRaises(RuntimeError):
+                        tgtrace.pytest_configure(config)
+                    tgtrace.pytest_unconfigure(config)  # must not raise or write
+        self.assertTrue(stat.S_ISFIFO(os.stat(fifo).st_mode))
+        self.assertFalse(os.path.exists(plain))
+
     def test_a_whole_write_lands(self):
         from harness.plugin import tgtrace
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         out = os.path.join(tmp, "trace.json")
+        # `_started`: unconfigure writes only after configure started tracing
+        # (R3-1); this simulates a run that did.
         with unittest.mock.patch.object(tgtrace, "_out_path", out), \
+                unittest.mock.patch.object(tgtrace, "_started", True), \
                 unittest.mock.patch.object(tgtrace, "_stop", lambda: None):
             tgtrace.pytest_unconfigure(None)
         with open(out) as fh:
