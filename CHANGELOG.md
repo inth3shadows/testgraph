@@ -128,6 +128,30 @@ below is on `main` or in the branch that introduced this file.
 
 ### Fixed
 
+- **A refusal under `--json` is JSON** (#154). `verify --json` and
+  `pytest_adapter --json` printed a refusal as prose, so a JSON consumer could not
+  parse the reason. They now print `{"refused": true, "error": "..."}`, still exit 2.
+- **`verify` and the pytest adapter refuse a broken run in the same order and
+  words** (#154). Both now run pytest through one helper: a missing trace (with
+  pytest's stderr tail), then a truncated one, then one that is not an object. The
+  adapter's missing-JUnit refusal now carries the stderr tail too.
+- **Trace files survive crashes** (#154). tgtrace flushes and fsyncs before its
+  atomic rename, so an OS crash can no longer leave a zero-length trace;
+  `pytest_adapter --trace-out` is written the same way instead of with a plain
+  open-and-dump.
+- **Stream targets are refused up front** (#154). `TGTRACE_OUT`, `--trace-out` and
+  `harness/trace.py --out` must name a file: `/dev/stdout`, pipes and other device
+  paths are refused before any test runs, with a message saying why. Writing a
+  stream in place was tried and dropped, because a second open of `/dev/stdout`
+  has its own file offset and pytest's output overwrote the JSON. `/dev/shm`
+  counts as a file location.
+- **More broken runs are refused instead of crashing** (#154). A truncated JUnit
+  report, a trace whose `tests`/`declared` entries are not tgtrace's shape, and a
+  registry that is unreadable or not a JSON object now refuse with exit 2; they
+  used to raise and exit 1, the code for "tests failed". `--trace-out` is checked
+  before the suite runs, not after.
+- **`harness/trace.py`** reads an unreadable or foreign trace as no trace instead of
+  raising, and removes only the `<out>.tmp.<pid>` files left by dead processes.
 - **`verify` works from an installed wheel.** The wheel shipped `testgraph/` only, so
   the README's headline `verify` command failed after `pip install testgraph` with
   "cannot find harness/plugin/tgtrace.py". The wheel now carries the trace plugin as

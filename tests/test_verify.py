@@ -352,24 +352,15 @@ class ConnectionClosedTests(unittest.TestCase):
         work = os.path.join(tmp, "work")
         os.makedirs(work)
 
-        class FixedDir:
-            def __enter__(self):
-                return work
-
-            def __exit__(self, *exc):
-                return False
-
         def runner():
             with open(os.path.join(work, "trace.json"), "w") as fh:
                 fh.write('{"tests": {}, "declared": {}}')
             return types.SimpleNamespace(returncode=0)
 
         with unittest.mock.patch.object(
-                verify.dbmod, "connect", lambda p: Proxy(real(p))), \
-                unittest.mock.patch.object(verify.tempfile, "TemporaryDirectory",
-                                           lambda: FixedDir()):
+                verify.dbmod, "connect", lambda p: Proxy(real(p))):
             summary, err = verify.run(repo, "HEAD~1", "HEAD", registry_path=registry,
-                                      db_path=db, _runner=runner,
+                                      db_path=db, _runner=runner, _workdir=work,
                                       append=lambda row: True)
         self.assertIsNone(err)
         self.assertIsNotNone(summary["marker_expression"])
@@ -378,7 +369,7 @@ class ConnectionClosedTests(unittest.TestCase):
         self.assertEqual(len(closed), len(opened))
 
 
-class UnreadableTraceTests(unittest.TestCase):
+class _VerifyRunFixture:
     """Issue #108: a truncated trace made `json.load` raise, and the uncaught
     exception exited 1 — the code for "tests failed". A missing trace read as
     an empty one, so every selected journey was reported as having no
@@ -406,24 +397,18 @@ class UnreadableTraceTests(unittest.TestCase):
     def _run(self, trace_text):
         work = self.work
 
-        class FixedDir:
-            def __enter__(self):
-                return work
-
-            def __exit__(self, *exc):
-                return False
-
         def runner():
             if trace_text is not None:
                 with open(os.path.join(work, "trace.json"), "w") as fh:
                     fh.write(trace_text)
             return types.SimpleNamespace(returncode=0)
 
-        with unittest.mock.patch.object(verify.tempfile, "TemporaryDirectory",
-                                        lambda: FixedDir()):
-            return verify.run(self.repo, "HEAD~1", "HEAD", registry_path=self.registry,
-                              db_path=self.db, _runner=runner, append=lambda r: True)
+        return verify.run(self.repo, "HEAD~1", "HEAD", registry_path=self.registry,
+                          db_path=self.db, _runner=runner, _workdir=work,
+                          append=lambda r: True)
 
+
+class UnreadableTraceTests(_VerifyRunFixture, unittest.TestCase):
     def test_a_truncated_trace_is_refused_not_a_crash(self):
         summary, err = self._run('{"tests": {"t::a": [["app/svc.py", "hand')
         self.assertIsNone(summary)
@@ -442,22 +427,12 @@ class UnreadableTraceTests(unittest.TestCase):
     def test_the_refusal_carries_pytest_stderr(self):
         """Review H3: the real cause (an xdist refusal, a bad flag) was in
         pytest's stderr, which was dropped."""
-        work = self.work
-
-        class FixedDir:
-            def __enter__(self):
-                return work
-
-            def __exit__(self, *exc):
-                return False
-
         runner = lambda: types.SimpleNamespace(
             returncode=4, stderr="ERROR: usage: unrecognized arguments: --bogus")
-        with unittest.mock.patch.object(verify.tempfile, "TemporaryDirectory",
-                                        lambda: FixedDir()):
-            summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
-                                      registry_path=self.registry, db_path=self.db,
-                                      _runner=runner, append=lambda r: True)
+        summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
+                                  registry_path=self.registry, db_path=self.db,
+                                  _runner=runner, _workdir=self.work,
+                                  append=lambda r: True)
         self.assertIn("unrecognized arguments: --bogus", err)
 
     def test_a_missing_trace_is_refused_not_uncovered(self):
@@ -471,6 +446,17 @@ class UnreadableTraceTests(unittest.TestCase):
             rc = verify.main(["--repo", self.repo, "--base", "HEAD~1"])
         self.assertEqual(rc, verify.EXIT_REFUSED)
 
+    def test_a_json_refusal_is_json(self):
+        """#154: `--json` printed the refusal as prose, so a JSON consumer
+        could not parse the reason."""
+        out = io.StringIO()
+        with unittest.mock.patch.object(verify, "run", return_value=(None, "trace broke")), \
+                contextlib.redirect_stdout(out):
+            rc = verify.main(["--repo", self.repo, "--base", "HEAD~1", "--json"])
+        self.assertEqual(rc, verify.EXIT_REFUSED)
+        self.assertEqual(json.loads(out.getvalue()),
+                         {"refused": True, "error": "trace broke"})
+
 
 class AtomicTraceWriteTests(unittest.TestCase):
     """#108: the trace was written in place, so a run killed mid-write left a
@@ -481,77 +467,77 @@ class AtomicTraceWriteTests(unittest.TestCase):
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         out = os.path.join(tmp, "trace.json")
-
-        seen_target = []
-
-        def dying_dump(obj, fh, **kw):
-            fh.write('{"tests": {')
-            # a SIGKILL here runs no cleanup: the target must not exist yet
-            seen_target.append(os.path.exists(out))
-            raise KeyboardInterrupt
-
-        with unittest.mock.patch.object(tgtrace, "_out_path", out), \
-                unittest.mock.patch.object(tgtrace, "_stop", lambda: None), \
-                unittest.mock.patch.object(tgtrace.json, "dump", dying_dump):
-            with self.assertRaises(KeyboardInterrupt):
-                tgtrace.pytest_unconfigure(None)
+        # json.dump streams, so the temp file is part-written when it reaches
+        # the unserializable value: a real mid-dump death, with no patch on
+        # the json module the rest of the process shares (#154).
+        with self.assertRaises(TypeError):
+            tgtrace._write(out, {"tests": {}, "z": object()})
         self.assertFalse(os.path.exists(out))
         self.assertEqual(os.listdir(tmp), [])
-        self.assertEqual(seen_target, [False])
+
+    def test_a_stream_target_is_refused_at_configure(self):
+        """R2-2: a stream was written in place, and a second open of
+        /dev/stdout has its own offset, so pytest's output overwrote the
+        JSON. Now refused before any test runs; a FIFO is left alone."""
+        from harness.plugin import tgtrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fifo = os.path.join(tmp, "pipe")
+        os.mkfifo(fifo)
+        config = types.SimpleNamespace(option=types.SimpleNamespace(numprocesses=None))
+        for target in (fifo, "/dev/stdout"):
+            with self.subTest(target), \
+                    unittest.mock.patch.object(tgtrace, "_out_path", target), \
+                    unittest.mock.patch.object(tgtrace, "_start", lambda: None), \
+                    unittest.mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("PYTEST_XDIST_WORKER", None)
+                with self.assertRaises(RuntimeError) as cm:
+                    tgtrace.pytest_configure(config)
+                self.assertIn("not a regular file path", str(cm.exception))
+        self.assertEqual(sorted(os.listdir(tmp)), ["pipe"])
+
+    def test_r3_1_unconfigure_after_a_refusal_touches_nothing(self):
+        """pytest calls pytest_unconfigure even when pytest_configure raised.
+        It used to run _stop + _write anyway: on the setprofile backend (3.11)
+        that replaced the refused FIFO with a regular file; on sys.monitoring
+        it raised `tool 3 is not in use`, exit 1. Both backends, both
+        refusals (stream target, xdist)."""
+        from harness.plugin import tgtrace
+        import stat
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fifo = os.path.join(tmp, "pipe")
+        os.mkfifo(fifo)
+        plain = os.path.join(tmp, "t.json")
+        for backend in (True, False):
+            for target, xdist in ((fifo, None), (plain, 2)):
+                with self.subTest(monitoring=backend, target=target), \
+                        unittest.mock.patch.object(tgtrace, "_HAVE_MONITORING", backend), \
+                        unittest.mock.patch.object(tgtrace, "_out_path", target), \
+                        unittest.mock.patch.object(tgtrace, "_started", False):
+                    os.environ.pop("PYTEST_XDIST_WORKER", None)
+                    config = types.SimpleNamespace(
+                        option=types.SimpleNamespace(numprocesses=xdist))
+                    with self.assertRaises(RuntimeError):
+                        tgtrace.pytest_configure(config)
+                    tgtrace.pytest_unconfigure(config)  # must not raise or write
+        self.assertTrue(stat.S_ISFIFO(os.stat(fifo).st_mode))
+        self.assertFalse(os.path.exists(plain))
 
     def test_a_whole_write_lands(self):
         from harness.plugin import tgtrace
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         out = os.path.join(tmp, "trace.json")
+        # `_started`: unconfigure writes only after configure started tracing
+        # (R3-1); this simulates a run that did.
         with unittest.mock.patch.object(tgtrace, "_out_path", out), \
+                unittest.mock.patch.object(tgtrace, "_started", True), \
                 unittest.mock.patch.object(tgtrace, "_stop", lambda: None):
             tgtrace.pytest_unconfigure(None)
         with open(out) as fh:
             self.assertIn("tests", json.load(fh))
         self.assertEqual(os.listdir(tmp), ["trace.json"])
-
-
-class AdapterTruncatedTraceTests(unittest.TestCase):
-    def test_the_adapter_refuses_a_truncated_trace(self):
-        from testgraph import pytest_adapter as pa
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        db = _db_on_disk(tmp, build_fixture())
-        registry = _registry_file(tmp, {
-            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
-        })
-        repo, _ = _git_repo(tmp, {"app/svc.py": 22})
-        work = os.path.join(tmp, "work")
-        os.makedirs(work)
-
-        class FixedDir:
-            def __enter__(self):
-                return work
-
-            def __exit__(self, *exc):
-                return False
-
-        def runner():
-            with open(os.path.join(work, "junit.xml"), "w") as fh:
-                fh.write("<testsuite/>")
-            with open(os.path.join(work, "trace.json"), "w") as fh:
-                fh.write(self.trace_text)
-            return types.SimpleNamespace(returncode=0, stderr="")
-
-        with unittest.mock.patch.object(pa.tempfile, "TemporaryDirectory",
-                                        lambda: FixedDir()):
-            summary, err = pa.run(repo, registry_path=registry, db_path=db,
-                                  _runner=runner, append=lambda r: True)
-        self.assertIsNone(summary)
-        self.assertIn(self.expect, err)
-
-    trace_text, expect = '{"tests": {', "truncated or not JSON"
-
-
-class AdapterNonObjectTraceTests(AdapterTruncatedTraceTests):
-    """Review H1, adapter side: `[]` crashed at `trace.get("tests")`."""
-    trace_text, expect = "[]", "not a tgtrace payload"
 
 
 class SummaryShapeTests(unittest.TestCase):
@@ -685,6 +671,53 @@ class CoversTests(unittest.TestCase):
         class C:
             pass
         self.assertEqual(res.declared_journeys(C), ("J1",))
+
+
+
+class ReviewRound1VerifyTests(_VerifyRunFixture, unittest.TestCase):
+    """Round-1 review of #154 (.review ledger C1, F3, F9)."""
+
+    def test_c1_a_missing_junit_report_is_no_verdicts_not_a_pass(self):
+        summary, err = self._run('{"tests": {}, "declared": {}}')
+        self.assertIsNone(err)
+        self.assertNotEqual(verify.exit_code(summary), verify.EXIT_OK)
+        self.assertEqual(summary["collected"], 0)
+
+    def test_f3_a_truncated_junit_report_refuses_verify(self):
+        work = self.work
+
+        def runner():
+            with open(os.path.join(work, "trace.json"), "w") as fh:
+                fh.write('{"tests": {}, "declared": {}}')
+            with open(os.path.join(work, "junit.xml"), "w") as fh:
+                fh.write("<testsuites><testsuite>")
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
+                                  registry_path=self.registry, db_path=self.db,
+                                  _runner=runner, _workdir=work, append=lambda r: True)
+        self.assertIsNone(summary)
+        self.assertIn("JUnit XML is truncated or not XML", err)
+
+    def test_r2_6_a_registry_that_is_not_an_object_is_refused(self):
+        bad = os.path.join(self.tmp, "list.json")
+        with open(bad, "w") as fh:
+            fh.write("[]")
+        summary, err = verify.run(self.repo, "HEAD~1", "HEAD", registry_path=bad,
+                                  db_path=self.db, append=lambda r: True)
+        self.assertIsNone(summary)
+        self.assertIn("not an object", err)
+
+    def test_f9_an_unreadable_registry_is_a_json_refusal(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = verify.main(["--repo", self.repo, "--base", "HEAD~1",
+                              "--registry", os.path.join(self.tmp, "nope.json"),
+                              "--db", self.db, "--json"])
+        self.assertEqual(rc, verify.EXIT_REFUSED)
+        body = json.loads(out.getvalue())
+        self.assertTrue(body["refused"])
+        self.assertIn("nope.json", body["error"])
 
 
 if __name__ == "__main__":

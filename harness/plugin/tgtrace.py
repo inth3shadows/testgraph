@@ -58,6 +58,7 @@ _skip = tuple(
 )
 
 _current = None          # set() while a test body is running, else None
+_started = False         # tracing began; unconfigure does nothing otherwise
 _results = {}
 _declared = {}           # nodeid -> [journey id, ...] the test CLAIMS to cover
 
@@ -141,7 +142,9 @@ _HAVE_MONITORING = hasattr(sys, "monitoring")
 
 
 def _start():
+    global _started
     _start_monitoring() if _HAVE_MONITORING else _start_profile()
+    _started = True
 
 
 def _stop():
@@ -167,12 +170,26 @@ def pytest_configure(config):
             "overwrite one another's trace and the result would silently be "
             "empty. Re-run without -n/--numprocesses."
         )
+    # Refused here, before any test runs, rather than failing at unconfigure
+    # after the whole suite (#154 review R2-2).
+    if _not_a_file_target(_out_path):
+        raise RuntimeError(
+            f"TGTRACE_OUT={_out_path} is not a regular file path: the trace is "
+            f"written to a temp file and renamed, so streams and devices "
+            f"(/dev/stdout, pipes) are refused. Point it at a file."
+        )
     _start()
 
 
 def pytest_unconfigure(config):
-    if not _out_path:
+    # pytest calls this even when pytest_configure RAISED (an xdist or
+    # stream-target refusal). Stopping a tracer that never started raised on
+    # sys.monitoring, and writing the empty payload replaced the refused
+    # target on setprofile (#154 review R3-1).
+    global _started
+    if not _out_path or not _started:
         return
+    _started = False
     _stop()
     payload = {
         "root": _root,
@@ -180,17 +197,54 @@ def pytest_unconfigure(config):
         "tests": {tid: sorted(map(list, syms)) for tid, syms in _results.items()},
         "declared": {tid: list(j) for tid, j in sorted(_declared.items())},
     }
-    directory = os.path.dirname(os.path.abspath(_out_path))
+    _write(_out_path, payload)
+
+
+# Device and process paths are streams however they resolve: `/dev/stdout`
+# redirected to a file resolves to a REGULAR file. `/dev/shm` is ordinary
+# tmpfs storage, not a stream (#154 review R2-1).
+_DEVICE_PREFIXES = ("/dev/", "/proc/")
+_FILE_UNDER_DEV = ("/dev/shm/",)
+
+
+def _not_a_file_target(path):
+    """True when `path` cannot hold a trace file: a stream or device path.
+
+    A copy of `testgraph.pytest_adapter.not_a_file_target`, because this
+    plugin imports nothing from testgraph; WriterParityTests in
+    tests/test_pytest_adapter.py holds the two to identical answers."""
+    if path.endswith(os.sep) or os.path.basename(path) in (".", ".."):
+        return True  # names a directory, however it is spelled (R3-6)
+    p = os.path.abspath(path)
+    # Resolve the DIRECTORY, not the leaf: `/dev/stdout` itself resolves into
+    # whatever stdout is redirected to, but a symlinked parent (`d -> /dev`)
+    # or a POSIX `//dev` must still read as /dev (#154 review R3-4).
+    p = os.path.join(os.path.realpath(os.path.dirname(p)), os.path.basename(p))
+    if p.startswith(_DEVICE_PREFIXES) and not p.startswith(_FILE_UNDER_DEV):
+        return True
+    return os.path.exists(p) and not os.path.isfile(p)
+
+
+def _write(out_path, payload):
+    """Write the payload so `out_path` is either absent or whole.
+
+    Beside the target, then rename (#108): a run killed mid-dump used to leave
+    a truncated file where a reader expects a whole one. os.replace is atomic
+    on the same filesystem; the flush + fsync before it (#154) keeps an OS
+    crash from leaving a zero-length target, which ext4/xfs can otherwise do
+    when the rename reaches disk before the data. Stream targets were refused
+    in `pytest_configure`."""
+    out_path = os.path.abspath(out_path)  # one spelling for check and write (R3-6)
+    directory = os.path.dirname(out_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    # Write beside the target and rename (#108): a run killed mid-dump used to
-    # leave a truncated file where a reader expects a whole one. os.replace is
-    # atomic on the same filesystem, so the target is either absent or complete.
-    tmp = f"{_out_path}.tmp.{os.getpid()}"
+    tmp = f"{out_path}.tmp.{os.getpid()}"
     try:
         with open(tmp, "w") as f:
             json.dump(payload, f, indent=1, sort_keys=True)
-        os.replace(tmp, _out_path)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, out_path)
     except BaseException:
         try:
             os.remove(tmp)

@@ -22,15 +22,52 @@ and is reported as `no_trace`, never as "nothing to select".
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+from testgraph import pytest_adapter as pa  # noqa: E402
 # ONLY this directory goes on the target's PYTHONPATH. `harness/` itself holds
 # `trace.py`, which would shadow the stdlib `trace` module for every import in
 # the traced suite.
 PLUGIN_DIR = os.path.join(HERE, "plugin")
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, OverflowError):
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    return True
+
+
+def _sweep_stale_temps(out):
+    """Remove `<out>.tmp.<pid>` files whose writer is dead.
+
+    A run SIGKILLed mid-dump leaves tgtrace's temp behind (#154) and nothing
+    else removes it. Only `.tmp.<digits>` names, and only dead pids: a broader
+    glob took unrelated files (`a.json.tmp.json`) and a CONCURRENT run's
+    in-progress temp, whose rename then failed (#154 review F6)."""
+    name = re.compile(re.escape(os.path.basename(out)) + r"\.tmp\.(\d+)$")
+    directory = os.path.dirname(out)
+    try:
+        siblings = os.listdir(directory)
+    except OSError:
+        return
+    for sib in siblings:
+        m = name.match(sib)
+        if m and not _pid_alive(int(m.group(1))):
+            try:
+                os.remove(os.path.join(directory, sib))
+            except OSError:
+                pass
 
 
 def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
@@ -47,9 +84,18 @@ def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
     — the exact honeyslate case — would load the PREVIOUS run's trace and report
     it as fresh."""
     repo = os.path.abspath(repo)
+    if pa.not_a_file_target(out):
+        # This runner deletes `out` first and reads it back after, so a stream
+        # can be neither: deleting a FIFO removes it from under its reader,
+        # and /dev/stdout cannot be unlinked at all (#154 review F5). The rule
+        # is the adapter's, imported, so it cannot drift into a third copy
+        # (R2-4, R2-8).
+        raise ValueError(f"--out {out} is not a regular file path; this "
+                         f"runner reads the trace back, so it needs one")
     out = os.path.abspath(out)
     if os.path.exists(out):
         os.remove(out)
+    _sweep_stale_temps(out)
     env = dict(env if env is not None else os.environ)
     env["TGTRACE_OUT"] = out
     env["TGTRACE_ROOT"] = os.path.join(repo, root)
@@ -69,8 +115,16 @@ def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
         return None, None
     payload = None
     if os.path.exists(out):
-        with open(out) as f:
-            payload = json.load(f)
+        # tgtrace writes atomically, but an OS crash or a hand-edited file can
+        # still leave something unreadable. That is the no-trace case the
+        # caller already handles, not a traceback (#154).
+        try:
+            with open(out) as f:
+                payload = json.load(f)
+        except (OSError, ValueError):
+            payload = None
+        if not isinstance(payload, dict) or pa.payload_shape_error(payload):
+            payload = None
     return rc, payload
 
 
@@ -85,16 +139,21 @@ def main(argv=None):
     ap.add_argument("pytest_args", nargs="*", help="extra args passed to pytest")
     args = ap.parse_args(argv)
 
-    rc, payload = run(
-        args.repo, args.python, args.tests, args.root, args.out,
-        extra_args=args.pytest_args, timeout=args.timeout,
-    )
+    try:
+        rc, payload = run(
+            args.repo, args.python, args.tests, args.root, args.out,
+            extra_args=args.pytest_args, timeout=args.timeout,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     if payload is None:
         why = (
             f"timed out after {args.timeout}s"
             if rc is None
-            else f"exited {rc} before the plugin could report "
-            f"(a collection error, or the plugin was not loaded)"
+            else f"exited {rc} with no readable trace "
+            f"(a collection error, the plugin was not loaded, or the file is "
+            f"truncated or not a tgtrace object)"
         )
         print(f"no trace written to {args.out} — pytest {why}", file=sys.stderr)
         return 1
@@ -112,7 +171,7 @@ def main(argv=None):
         )
         return 1
     print(f"traced {len(tests)} test(s), {len(symbols)} distinct symbol(s)")
-    print(f"  backend: {payload['backend']}   root: {payload['root']}")
+    print(f"  backend: {payload.get('backend', '?')}   root: {payload.get('root', '?')}")
     print(f"  wrote {args.out}")
     empty = [t for t, s in tests.items() if not s]
     if empty:

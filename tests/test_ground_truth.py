@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -326,6 +327,123 @@ class CollectorTest(unittest.TestCase):
             tgtrace._stop_profile()
         self.assertIn(("worker.py", "work"), tgtrace._current)
         self.assertIsNone(sys.getprofile())
+
+
+
+class _TraceRunnerFixture:
+    """#154: harness/trace.py read the trace with an unguarded `json.load`,
+    and never removed the `<out>.tmp.<pid>` a SIGKILLed tgtrace leaves."""
+
+    def _fake_python(self, tmp, body):
+        # Stands in for the target's interpreter: ignores pytest's argv and
+        # writes `body` (or nothing) to TGTRACE_OUT.
+        path = os.path.join(tmp, "fakepy")
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n")
+            if body is not None:
+                fh.write(f"printf '%s' '{body}' > \"$TGTRACE_OUT\"\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def _run(self, body):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "traces", "t.json")
+        os.makedirs(os.path.dirname(out))
+        stale = out + ".tmp.4242"
+        open(stale, "w").close()
+        rc, payload = htrace.run(tmp, self._fake_python(tmp, body), ".", ".", out)
+        return rc, payload, stale
+
+
+class TraceRunnerTest(_TraceRunnerFixture, unittest.TestCase):
+    def test_a_truncated_trace_is_the_no_trace_case(self):
+        rc, payload, _ = self._run('{"tests": {')
+        self.assertEqual(rc, 0)
+        self.assertIsNone(payload)
+
+    def test_a_non_object_trace_is_the_no_trace_case(self):
+        rc, payload, _ = self._run("[]")
+        self.assertIsNone(payload)
+
+    def test_a_stale_temp_file_is_removed_before_the_run(self):
+        rc, payload, stale = self._run('{"tests": {}}')
+        self.assertEqual(payload, {"tests": {}})
+        self.assertFalse(os.path.exists(stale))
+
+
+
+class TraceRunnerReviewTest(_TraceRunnerFixture, unittest.TestCase):
+    """Round-1 review of #154 (.review ledger F4, F5, F6)."""
+
+    def test_f4_an_object_without_tgtrace_fields_is_the_no_trace_case(self):
+        for body in ("{}", '{"tests": 3}', '{"tests": {"t": 3}}'):
+            with self.subTest(body):
+                rc, payload, _ = self._run(body)
+                self.assertIsNone(payload)
+
+    def test_f4_a_minimal_tgtrace_object_is_kept(self):
+        rc, payload, _ = self._run('{"tests": {"t": [["a", "b"]]}}')
+        self.assertEqual(payload, {"tests": {"t": [["a", "b"]]}})
+
+    def test_f4_main_survives_a_trace_without_backend(self):
+        from harness import trace as htrace
+        import contextlib, io
+        with unittest.mock.patch.object(
+                htrace, "run", return_value=(0, {"tests": {"t": [["a", "b"]]}})), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = htrace.main(["--repo", ".", "--python", "x", "--out", "o.json"])
+        self.assertEqual(rc, 0)
+
+    def test_f5_a_non_regular_out_is_refused_and_left_alone(self):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        fifo = os.path.join(tmp, "pipe")
+        os.mkfifo(fifo)
+        import stat
+        with self.assertRaises(ValueError):
+            htrace.run(tmp, "/bin/false", ".", ".", fifo)
+        self.assertTrue(stat.S_ISFIFO(os.stat(fifo).st_mode))
+        # judged after abspath, so a relative or dotted path into /dev is
+        # refused too (R2-4)
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        for out in ("/tmp/../dev/stdout",):
+            with self.assertRaises(ValueError):
+                htrace.run(tmp, "/bin/false", ".", ".", out)
+        os.chdir("/dev")
+        with self.assertRaises(ValueError):
+            htrace.run(tmp, "/bin/false", ".", ".", "stdout")
+
+    @unittest.skipUnless(os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK),
+                         "no writable /dev/shm")
+    def test_r2_1_an_out_under_dev_shm_is_a_file(self):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        shm = tempfile.mkdtemp(dir="/dev/shm")
+        self.addCleanup(__import__("shutil").rmtree, shm, ignore_errors=True)
+        out = os.path.join(shm, "t.json")
+        rc, payload = htrace.run(tmp, self._fake_python(tmp, '{"tests": {}}'),
+                                 ".", ".", out)
+        self.assertEqual(payload, {"tests": {}})
+
+    def test_f6_the_sweep_takes_only_dead_pids(self):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "a.json")
+        live = f"{out}.tmp.{os.getpid()}"
+        keep = [live, out + ".tmp.json", out + ".tmp.12x"]
+        dead = out + ".tmp.999999999"
+        for f in keep + [dead]:
+            open(f, "w").close()
+        htrace.run(tmp, self._fake_python(tmp, '{"tests": {}}'), ".", ".", out)
+        for f in keep:
+            self.assertTrue(os.path.exists(f), f)
+        self.assertFalse(os.path.exists(dead))
 
 
 if __name__ == "__main__":
