@@ -167,6 +167,14 @@ def pytest_configure(config):
             "overwrite one another's trace and the result would silently be "
             "empty. Re-run without -n/--numprocesses."
         )
+    # Refused here, before any test runs, rather than failing at unconfigure
+    # after the whole suite (#154 review R2-2).
+    if _not_a_file_target(_out_path):
+        raise RuntimeError(
+            f"TGTRACE_OUT={_out_path} is not a regular file path: the trace is "
+            f"written to a temp file and renamed, so streams and devices "
+            f"(/dev/stdout, pipes) are refused. Point it at a file."
+        )
     _start()
 
 
@@ -183,24 +191,23 @@ def pytest_unconfigure(config):
     _write(_out_path, payload)
 
 
-# Paths that name a stream however they resolve: `/dev/stdout` redirected to a
-# file resolves to a REGULAR file, so `isfile` alone would send it down the
-# temp-and-rename path, which cannot create a file in /dev (#154 review F2).
-_STREAM_PREFIXES = ("/dev/", "/proc/")
+# Device and process paths are streams however they resolve: `/dev/stdout`
+# redirected to a file resolves to a REGULAR file. `/dev/shm` is ordinary
+# tmpfs storage, not a stream (#154 review R2-1).
+_DEVICE_PREFIXES = ("/dev/", "/proc/")
+_FILE_UNDER_DEV = ("/dev/shm/",)
 
 
-def _is_stream(path):
-    """True when `path` must be written in place, not via temp + rename.
+def _not_a_file_target(path):
+    """True when `path` cannot hold a trace file: a stream or device path.
 
-    Kept in step with `testgraph.pytest_adapter.is_stream` by
-    tests/test_pytest_adapter.py:WriterParityTests — this plugin imports
-    nothing from testgraph, so the rule exists twice."""
-    if os.path.abspath(path).startswith(_STREAM_PREFIXES):
+    A copy of `testgraph.pytest_adapter.not_a_file_target`, because this
+    plugin imports nothing from testgraph; WriterParityTests in
+    tests/test_pytest_adapter.py holds the two to identical answers."""
+    p = os.path.abspath(path)
+    if p.startswith(_DEVICE_PREFIXES) and not p.startswith(_FILE_UNDER_DEV):
         return True
-    # A directory is neither: writing to it fails either way, and callers
-    # that can refuse one up front (`--trace-out`) need to see it as such.
-    return (os.path.exists(path) and not os.path.isfile(path)
-            and not os.path.isdir(path))
+    return os.path.exists(p) and not os.path.isfile(p)
 
 
 def _write(out_path, payload):
@@ -210,15 +217,8 @@ def _write(out_path, payload):
     a truncated file where a reader expects a whole one. os.replace is atomic
     on the same filesystem; the flush + fsync before it (#154) keeps an OS
     crash from leaving a zero-length target, which ext4/xfs can otherwise do
-    when the rename reaches disk before the data.
-
-    A stream target (`/dev/stdout`, `/proc/self/fd/N`, a FIFO; see
-    `_is_stream`) has no directory to put a temp file in and nothing to rename
-    over, so it is written directly: atomicity is meaningless for a stream."""
-    if _is_stream(out_path):
-        with open(out_path, "w") as f:
-            json.dump(payload, f, indent=1, sort_keys=True)
-        return
+    when the rename reaches disk before the data. Stream targets were refused
+    in `pytest_configure`."""
     directory = os.path.dirname(os.path.abspath(out_path))
     if directory:
         os.makedirs(directory, exist_ok=True)

@@ -138,17 +138,20 @@ below is on `main` or in the branch that introduced this file.
 - **Trace files survive crashes** (#154). tgtrace flushes and fsyncs before its
   atomic rename, so an OS crash can no longer leave a zero-length trace;
   `pytest_adapter --trace-out` is written the same way instead of with a plain
-  open-and-dump. Both writers treat `/dev/*`, `/proc/*` and FIFOs as streams and
-  write them in place, so `TGTRACE_OUT=/dev/stdout` works even with stdout
-  redirected to a file, and `--trace-out` to a pipe still works.
+  open-and-dump.
+- **Stream targets are refused up front** (#154). `TGTRACE_OUT`, `--trace-out` and
+  `harness/trace.py --out` must name a file: `/dev/stdout`, pipes and other device
+  paths are refused before any test runs, with a message saying why. Writing a
+  stream in place was tried and dropped, because a second open of `/dev/stdout`
+  has its own file offset and pytest's output overwrote the JSON. `/dev/shm`
+  counts as a file location.
 - **More broken runs are refused instead of crashing** (#154). A truncated JUnit
-  report, a trace object without tgtrace's `tests`/`declared` shape, and an
-  unreadable registry in `verify` now refuse with exit 2; they used to raise and
-  exit 1, the code for "tests failed". `--trace-out` is checked before the suite
-  runs, not after.
+  report, a trace whose `tests`/`declared` entries are not tgtrace's shape, and a
+  registry that is unreadable or not a JSON object now refuse with exit 2; they
+  used to raise and exit 1, the code for "tests failed". `--trace-out` is checked
+  before the suite runs, not after.
 - **`harness/trace.py`** reads an unreadable or foreign trace as no trace instead of
-  raising, refuses a non-regular `--out` (it deletes the path first and reads it
-  back), and removes only the `<out>.tmp.<pid>` files left by dead processes.
+  raising, and removes only the `<out>.tmp.<pid>` files left by dead processes.
 - **`verify` works from an installed wheel.** The wheel shipped `testgraph/` only, so
   the README's headline `verify` command failed after `pip install testgraph` with
   "cannot find harness/plugin/tgtrace.py". The wheel now carries the trace plugin as

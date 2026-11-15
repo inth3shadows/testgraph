@@ -26,6 +26,11 @@ import re
 import subprocess
 import sys
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from testgraph import pytest_adapter as pa  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 # ONLY this directory goes on the target's PYTHONPATH. `harness/` itself holds
@@ -80,11 +85,12 @@ def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
     — the exact honeyslate case — would load the PREVIOUS run's trace and report
     it as fresh."""
     repo = os.path.abspath(repo)
-    if out.startswith(("/dev/", "/proc/")) or (
-            os.path.exists(out) and not os.path.isfile(out)):
+    if pa.not_a_file_target(out):
         # This runner deletes `out` first and reads it back after, so a stream
         # can be neither: deleting a FIFO removes it from under its reader,
-        # and /dev/stdout cannot be unlinked at all (#154 review F5).
+        # and /dev/stdout cannot be unlinked at all (#154 review F5). The rule
+        # is the adapter's, imported, so it cannot drift into a third copy
+        # (R2-4, R2-8).
         raise ValueError(f"--out {out} is not a regular file path; this "
                          f"runner reads the trace back, so it needs one")
     out = os.path.abspath(out)
@@ -118,8 +124,7 @@ def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
                 payload = json.load(f)
         except (OSError, ValueError):
             payload = None
-        if not (isinstance(payload, dict) and isinstance(payload.get("tests"), dict)
-                and all(isinstance(v, list) for v in payload["tests"].values())):
+        if not isinstance(payload, dict) or pa.payload_shape_error(payload):
             payload = None
     return rc, payload
 

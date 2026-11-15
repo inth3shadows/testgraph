@@ -330,7 +330,7 @@ class CollectorTest(unittest.TestCase):
 
 
 
-class TraceRunnerTest(unittest.TestCase):
+class _TraceRunnerFixture:
     """#154: harness/trace.py read the trace with an unguarded `json.load`,
     and never removed the `<out>.tmp.<pid>` a SIGKILLed tgtrace leaves."""
 
@@ -356,6 +356,8 @@ class TraceRunnerTest(unittest.TestCase):
         rc, payload = htrace.run(tmp, self._fake_python(tmp, body), ".", ".", out)
         return rc, payload, stale
 
+
+class TraceRunnerTest(_TraceRunnerFixture, unittest.TestCase):
     def test_a_truncated_trace_is_the_no_trace_case(self):
         rc, payload, _ = self._run('{"tests": {')
         self.assertEqual(rc, 0)
@@ -372,7 +374,7 @@ class TraceRunnerTest(unittest.TestCase):
 
 
 
-class TraceRunnerReviewTest(TraceRunnerTest):
+class TraceRunnerReviewTest(_TraceRunnerFixture, unittest.TestCase):
     """Round-1 review of #154 (.review ledger F4, F5, F6)."""
 
     def test_f4_an_object_without_tgtrace_fields_is_the_no_trace_case(self):
@@ -404,6 +406,29 @@ class TraceRunnerReviewTest(TraceRunnerTest):
         with self.assertRaises(ValueError):
             htrace.run(tmp, "/bin/false", ".", ".", fifo)
         self.assertTrue(stat.S_ISFIFO(os.stat(fifo).st_mode))
+        # judged after abspath, so a relative or dotted path into /dev is
+        # refused too (R2-4)
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        for out in ("/tmp/../dev/stdout",):
+            with self.assertRaises(ValueError):
+                htrace.run(tmp, "/bin/false", ".", ".", out)
+        os.chdir("/dev")
+        with self.assertRaises(ValueError):
+            htrace.run(tmp, "/bin/false", ".", ".", "stdout")
+
+    @unittest.skipUnless(os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK),
+                         "no writable /dev/shm")
+    def test_r2_1_an_out_under_dev_shm_is_a_file(self):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        shm = tempfile.mkdtemp(dir="/dev/shm")
+        self.addCleanup(__import__("shutil").rmtree, shm, ignore_errors=True)
+        out = os.path.join(shm, "t.json")
+        rc, payload = htrace.run(tmp, self._fake_python(tmp, '{"tests": {}}'),
+                                 ".", ".", out)
+        self.assertEqual(payload, {"tests": {}})
 
     def test_f6_the_sweep_takes_only_dead_pids(self):
         from harness import trace as htrace

@@ -369,7 +369,7 @@ class ConnectionClosedTests(unittest.TestCase):
         self.assertEqual(len(closed), len(opened))
 
 
-class UnreadableTraceTests(unittest.TestCase):
+class _VerifyRunFixture:
     """Issue #108: a truncated trace made `json.load` raise, and the uncaught
     exception exited 1 — the code for "tests failed". A missing trace read as
     an empty one, so every selected journey was reported as having no
@@ -407,6 +407,8 @@ class UnreadableTraceTests(unittest.TestCase):
                           db_path=self.db, _runner=runner, _workdir=work,
                           append=lambda r: True)
 
+
+class UnreadableTraceTests(_VerifyRunFixture, unittest.TestCase):
     def test_a_truncated_trace_is_refused_not_a_crash(self):
         summary, err = self._run('{"tests": {"t::a": [["app/svc.py", "hand')
         self.assertIsNone(summary)
@@ -473,22 +475,25 @@ class AtomicTraceWriteTests(unittest.TestCase):
         self.assertFalse(os.path.exists(out))
         self.assertEqual(os.listdir(tmp), [])
 
-    def test_a_stream_target_is_written_directly(self):
-        """#154: `TGTRACE_OUT=/dev/stdout` failed, because the temp file
-        cannot be created beside a device node. A FIFO stands in for it."""
+    def test_a_stream_target_is_refused_at_configure(self):
+        """R2-2: a stream was written in place, and a second open of
+        /dev/stdout has its own offset, so pytest's output overwrote the
+        JSON. Now refused before any test runs; a FIFO is left alone."""
         from harness.plugin import tgtrace
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         fifo = os.path.join(tmp, "pipe")
         os.mkfifo(fifo)
-        got = []
-        import threading
-        reader = threading.Thread(
-            target=lambda: got.append(open(fifo).read()), daemon=True)
-        reader.start()
-        tgtrace._write(fifo, {"tests": {}})
-        reader.join(5)
-        self.assertEqual(json.loads(got[0]), {"tests": {}})
+        config = types.SimpleNamespace(option=types.SimpleNamespace(numprocesses=None))
+        for target in (fifo, "/dev/stdout"):
+            with self.subTest(target), \
+                    unittest.mock.patch.object(tgtrace, "_out_path", target), \
+                    unittest.mock.patch.object(tgtrace, "_start", lambda: None), \
+                    unittest.mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("PYTEST_XDIST_WORKER", None)
+                with self.assertRaises(RuntimeError) as cm:
+                    tgtrace.pytest_configure(config)
+                self.assertIn("not a regular file path", str(cm.exception))
         self.assertEqual(sorted(os.listdir(tmp)), ["pipe"])
 
     def test_a_whole_write_lands(self):
@@ -638,7 +643,7 @@ class CoversTests(unittest.TestCase):
 
 
 
-class ReviewRound1VerifyTests(UnreadableTraceTests):
+class ReviewRound1VerifyTests(_VerifyRunFixture, unittest.TestCase):
     """Round-1 review of #154 (.review ledger C1, F3, F9)."""
 
     def test_c1_a_missing_junit_report_is_no_verdicts_not_a_pass(self):
@@ -662,6 +667,15 @@ class ReviewRound1VerifyTests(UnreadableTraceTests):
                                   _runner=runner, _workdir=work, append=lambda r: True)
         self.assertIsNone(summary)
         self.assertIn("JUnit XML is truncated or not XML", err)
+
+    def test_r2_6_a_registry_that_is_not_an_object_is_refused(self):
+        bad = os.path.join(self.tmp, "list.json")
+        with open(bad, "w") as fh:
+            fh.write("[]")
+        summary, err = verify.run(self.repo, "HEAD~1", "HEAD", registry_path=bad,
+                                  db_path=self.db, append=lambda r: True)
+        self.assertIsNone(summary)
+        self.assertIn("not an object", err)
 
     def test_f9_an_unreadable_registry_is_a_json_refusal(self):
         out = io.StringIO()

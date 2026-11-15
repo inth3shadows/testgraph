@@ -170,6 +170,11 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         # Raised out of here before: a traceback and exit 1, the code for
         # "tests failed", and prose under --json (#154 review F9).
         return None, f"cannot read registry {registry_path}: {exc}"
+    if not isinstance(registry, dict):
+        # Parsed, but a list or a string crashed later in select with an
+        # AttributeError traceback (#154 review R2-6).
+        return None, (f"registry {registry_path} is a JSON "
+                      f"{type(registry).__name__}, not an object")
     db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")
     if not os.path.isfile(db_path):
         return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"

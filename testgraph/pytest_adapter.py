@@ -306,17 +306,25 @@ def payload_shape_error(trace):
     """What is wrong with a parsed trace object's shape, or None.
 
     tgtrace always writes `tests` as {nodeid: [[relpath, qualname], ...]} and
-    `declared` as {nodeid: [journey, ...]}. An object missing either shape
-    passed the old isinstance check and crashed later (#154 review F4)."""
+    `declared` as {nodeid: [journey, ...]}. Anything looser passed and then
+    crashed in `tuple(s)` or a dict lookup, exit 1 rather than a refusal
+    (#154 review F4, R2-3). `declared` may be absent or null: verify has
+    always read it as `trace.get("declared") or {}`."""
     tests = trace.get("tests")
     if not isinstance(tests, dict):
         return "`tests` is missing or not an object"
-    if any(not isinstance(v, list) for v in tests.values()):
-        return "a `tests` entry is not a list"
-    declared = trace.get("declared", {})
-    if not isinstance(declared, dict) or any(
-            not isinstance(v, list) for v in declared.values()):
-        return "`declared` is not an object of lists"
+    for nodeid, symbols in tests.items():
+        if not isinstance(symbols, list) or any(
+                not (isinstance(s, list) and len(s) == 2
+                     and all(isinstance(x, str) for x in s))
+                for s in symbols):
+            return f"`tests[{nodeid!r}]` is not a list of [relpath, qualname] pairs"
+    declared = trace.get("declared") or {}
+    if not isinstance(declared, dict):
+        return "`declared` is not an object"
+    for nodeid, journeys in declared.items():
+        if not isinstance(journeys, list) or any(not isinstance(j, str) for j in journeys):
+            return f"`declared[{nodeid!r}]` is not a list of journey ids"
     return None
 
 
@@ -365,23 +373,30 @@ def run_traced(repo, plugins, pytest_args, _runner=None, _workdir=None):
         return go(tmp)
 
 
-_STREAM_PREFIXES = ("/dev/", "/proc/")
+# Device and process paths are streams however they resolve: `/dev/stdout`
+# redirected to a file resolves to a REGULAR file. `/dev/shm` is ordinary
+# tmpfs storage, not a stream (#154 review R2-1).
+_DEVICE_PREFIXES = ("/dev/", "/proc/")
+_FILE_UNDER_DEV = ("/dev/shm/",)
 
 
-def is_stream(path):
-    """True when `path` must be written in place, not via temp + rename.
+def not_a_file_target(path):
+    """True when `path` cannot hold a trace file: a stream or device path.
 
-    `/dev/stdout` redirected to a file resolves to a REGULAR file, so the
-    prefix is checked on the unresolved path; anything else that exists and is
-    not a regular file (a FIFO) is a stream too. The same rule lives in
-    tgtrace (`_is_stream`), which cannot import this module;
-    tests/test_pytest_adapter.py:WriterParityTests holds the two in step."""
-    if os.path.abspath(path).startswith(_STREAM_PREFIXES):
+    Traces are written to `<path>.tmp.<pid>` and renamed over `path`, so the
+    reader sees either nothing or a whole file. A stream has nowhere to put
+    the temp file and nothing to rename over, and writing one in place was
+    tried and dropped: a second `open("/dev/stdout", "w")` gets its own file
+    offset, so pytest's output overwrote the JSON (#154 review R2-2). So
+    streams are refused up front, everywhere. #154 noted no caller uses one.
+
+    The same rule is in tgtrace (`_not_a_file_target`), which cannot import
+    this module; tests/test_pytest_adapter.py:WriterParityTests holds the two
+    copies to identical answers. harness/trace.py imports this one."""
+    p = os.path.abspath(path)
+    if p.startswith(_DEVICE_PREFIXES) and not p.startswith(_FILE_UNDER_DEV):
         return True
-    # A directory is neither: writing to it fails either way, and callers
-    # that can refuse one up front (`--trace-out`) need to see it as such.
-    return (os.path.exists(path) and not os.path.isfile(path)
-            and not os.path.isdir(path))
+    return os.path.exists(p) and not os.path.isfile(p)
 
 
 def trace_out_error(path):
@@ -389,10 +404,12 @@ def trace_out_error(path):
 
     Checked BEFORE the suite runs (#154 review F9): finding out after a
     half-hour run that the directory does not exist throws the run away."""
-    if is_stream(path):
-        return None
-    if os.path.isdir(path):
-        return f"--trace-out {path} is a directory"
+    if path.endswith(os.sep):
+        return f"--trace-out {path} names a directory, not a file"
+    if not_a_file_target(path):
+        return (f"--trace-out {path} is not a regular file path; the trace is "
+                f"written to a temp file and renamed, so streams and devices "
+                f"(/dev/stdout, pipes) are refused")
     parent = os.path.dirname(os.path.abspath(path))
     if not os.path.isdir(parent):
         return f"--trace-out directory {parent} does not exist"
@@ -407,12 +424,8 @@ def write_json_atomic(path, obj):
     Temp file beside the target, flushed and fsynced, then renamed: a plain
     `open(path, "w")` killed mid-dump leaves a truncated file that a later
     reader (reconcile) refuses. The temp is named `<path>.tmp.<pid>`, as
-    tgtrace names its own, so harness/trace.py's sweep finds both. A stream
-    target is written in place (see `is_stream`)."""
-    if is_stream(path):
-        with open(path, "w") as f:
-            json.dump(obj, f, indent=1, sort_keys=True)
-        return
+    tgtrace names its own, so harness/trace.py's sweep finds both. Callers
+    refuse stream targets first (`trace_out_error`)."""
     tmp = f"{path}.tmp.{os.getpid()}"
     try:
         with open(tmp, "w") as f:

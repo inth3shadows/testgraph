@@ -411,7 +411,7 @@ class RenderTests(unittest.TestCase):
 
 
 
-class RunTraceRefusalTests(unittest.TestCase):
+class _AdapterRunFixture:
     """#108 / #154: a broken run is refused, never attributed. Each case
     writes what a real pytest would have left in the work dir; `_workdir`
     stands in for the temp dir, so nothing patches the stdlib."""
@@ -444,6 +444,8 @@ class RunTraceRefusalTests(unittest.TestCase):
         return pa.run(self.repo, registry_path=self.registry, db_path=self.db,
                       _runner=runner, _workdir=work, append=lambda r: True, **kw)
 
+
+class RunTraceRefusalTests(_AdapterRunFixture, unittest.TestCase):
     def test_refusals(self):
         cases = [
             ("truncated", dict(trace='{"tests": {', junit=JUNIT_OK), "truncated or not JSON"),
@@ -482,7 +484,7 @@ class RunTraceRefusalTests(unittest.TestCase):
         self.assertEqual(os.listdir(out_dir), ["t.json"])
 
 
-JUNIT_OK = RunTraceRefusalTests.JUNIT
+JUNIT_OK = _AdapterRunFixture.JUNIT
 
 
 class WriteJsonAtomicTests(unittest.TestCase):
@@ -522,7 +524,7 @@ class MainJsonRefusalTests(unittest.TestCase):
 
 
 
-class ReviewRound1Tests(RunTraceRefusalTests):
+class ReviewRound1Tests(_AdapterRunFixture, unittest.TestCase):
     """Round-1 review of #154 (.review ledger F1, F3, F4, F8, F9)."""
 
     def test_f3_a_truncated_junit_report_is_refused_not_a_crash(self):
@@ -536,7 +538,12 @@ class ReviewRound1Tests(RunTraceRefusalTests):
 
     def test_f4_an_object_without_tgtrace_fields_is_refused(self):
         for text in ("{}", '{"tests": 3}', '{"tests": {}, "declared": 3}',
-                     '{"tests": {"t": 3}}'):
+                     '{"tests": {"t": 3}}',
+                     # element level (R2-3): each entry a [relpath, qualname]
+                     # pair, each declared journey a string
+                     '{"tests": {"t": [1]}}', '{"tests": {"t": [["x"]]}}',
+                     '{"tests": {"t": [["a", 1]]}}',
+                     '{"tests": {}, "declared": {"t": [["J1"]]}}'):
             with self.subTest(text):
                 for f in os.listdir(self.work):
                     os.remove(os.path.join(self.work, f))
@@ -546,7 +553,12 @@ class ReviewRound1Tests(RunTraceRefusalTests):
 
     def test_f9_a_trace_out_that_cannot_be_written_is_refused_before_the_run(self):
         ran = []
-        bad = [os.path.join(self.tmp, "no", "such", "t.json"), self.tmp]
+        fifo = os.path.join(self.tmp, "pipe")
+        os.mkfifo(fifo)
+        bad = [os.path.join(self.tmp, "no", "such", "t.json"), self.tmp,
+               os.path.join(self.tmp, "newdir") + os.sep,   # R2-5
+               fifo, "/dev/stdout", "/dev/stdot",           # R2-1/R2-2/R2-5
+               "/tmp/../dev/stdout"]
         for out in bad:
             with self.subTest(out):
                 def runner():
@@ -560,23 +572,35 @@ class ReviewRound1Tests(RunTraceRefusalTests):
                 self.assertIn("--trace-out", err)
         self.assertEqual(ran, [], "the suite ran before --trace-out was checked")
 
-    def test_f1_trace_out_to_a_fifo_is_written_through(self):
-        fifo = os.path.join(self.tmp, "pipe")
-        os.mkfifo(fifo)
-        got = []
-        import threading
-        t = threading.Thread(target=lambda: got.append(open(fifo).read()), daemon=True)
-        t.start()
-        summary, err = self._run(trace=self.WHOLE, junit=JUNIT_OK, trace_out=fifo)
-        t.join(5)
+    def test_declared_null_is_accepted_as_empty(self):
+        """verify has always read `declared` as `.get("declared") or {}`;
+        the shape check must not turn that into a refusal (R2-3 parity)."""
+        summary, err = self._run(trace='{"tests": {}, "declared": null}', junit=JUNIT_OK)
         self.assertIsNone(err)
-        self.assertEqual(json.loads(got[0]), json.loads(self.WHOLE))
-        self.assertTrue(__import__("stat").S_ISFIFO(os.stat(fifo).st_mode))
+
+    @unittest.skipUnless(os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK),
+                         "no writable /dev/shm")
+    def test_r2_1_a_trace_out_under_dev_shm_is_a_file_written_atomically(self):
+        out_dir = tempfile.mkdtemp(dir="/dev/shm")
+        self.addCleanup(shutil.rmtree, out_dir, ignore_errors=True)
+        out = os.path.join(out_dir, "t.json")
+        seen = []
+        real_replace = os.replace
+
+        def spy(src, dst):
+            seen.append(os.path.basename(src))
+            return real_replace(src, dst)
+        with unittest.mock.patch("os.replace", spy):
+            summary, err = self._run(trace=self.WHOLE, junit=JUNIT_OK, trace_out=out)
+        self.assertIsNone(err)
+        self.assertEqual(seen, [f"t.json.tmp.{os.getpid()}"])
+        with open(out) as fh:
+            self.assertEqual(json.load(fh), json.loads(self.WHOLE))
 
 
 class WriterParityTests(unittest.TestCase):
-    """F1/F2/F8: testgraph's atomic writer and tgtrace's are two copies of one
-    rule (tgtrace must stay standalone, so it cannot import the other). This
+    """F8/R2: testgraph's target rule and atomic writer and tgtrace's are two
+    copies (tgtrace must stay standalone, so it cannot import the other). This
     holds them to the same behaviour rather than a comment saying they match."""
 
     def _writers(self):
@@ -585,50 +609,82 @@ class WriterParityTests(unittest.TestCase):
             import tgtrace
         finally:
             sys.path.pop(0)
-        return {"adapter": pa.write_json_atomic, "tgtrace": tgtrace._write}
+        return {"adapter": pa.write_json_atomic, "tgtrace": tgtrace._write,
+                "tgtrace_rule": tgtrace._not_a_file_target}
 
-    def test_both_treat_dev_paths_as_streams(self):
-        """/dev/stdout redirected to a file resolves to a regular file, so an
-        `isfile` test alone sends it down the temp-and-rename path, which
-        cannot create a file in /dev (F2)."""
-        sys.path.insert(0, os.path.join(ROOT_DIR, "harness", "plugin"))
-        import tgtrace
-        sys.path.pop(0)
-        for path in ("/dev/stdout", "/dev/fd/1", "/proc/self/fd/1"):
-            with self.subTest(path):
-                self.assertTrue(pa.is_stream(path))
-                self.assertTrue(tgtrace._is_stream(path))
+    def test_both_copies_of_the_target_rule_agree(self):
+        """One rule, two copies (tgtrace cannot import testgraph): same
+        answer on every case, and the answer is the intended one."""
+        rules = self._writers()
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         regular = os.path.join(tmp, "t.json")
         open(regular, "w").close()
-        for path in (regular, os.path.join(tmp, "absent.json")):
-            self.assertFalse(pa.is_stream(path))
-            self.assertFalse(tgtrace._is_stream(path))
+        fifo = os.path.join(tmp, "pipe")
+        os.mkfifo(fifo)
+        cases = {
+            "/dev/stdout": True, "/dev/fd/1": True, "/proc/self/fd/1": True,
+            "/dev/stdot": True, "/dev/null": True, "/tmp/../dev/stdout": True,
+            fifo: True, tmp: True,
+            "/dev/shm/x.json": False, regular: False,
+            os.path.join(tmp, "absent.json"): False,
+        }
+        for path, expected in cases.items():
+            with self.subTest(path):
+                self.assertEqual(pa.not_a_file_target(path), expected)
+                self.assertEqual(rules["tgtrace_rule"](path), expected)
+        # relative paths are judged after abspath (R2-4)
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir("/dev")
+        self.assertTrue(pa.not_a_file_target("stdout"))
+        self.assertTrue(rules["tgtrace_rule"]("stdout"))
 
-    def test_both_write_dev_stdout_redirected_to_a_file(self):
-        """F2, end to end: a child whose stdout IS a regular file writes
-        through /dev/stdout with each writer."""
+    def test_relative_and_dotted_dev_paths_with_stdout_redirected_to_a_file(self):
+        """R2-4: with stdout redirected to a file, `/dev/stdout` resolves to a
+        regular file, so only the abspath + prefix test catches `stdout` from
+        cwd /dev or `/tmp/../dev/stdout`. Run in a child whose stdout IS a file."""
+        import subprocess
+        code = (
+            "import sys; sys.path[:0] = [sys.argv[1], sys.argv[1] + '/harness/plugin']\n"
+            "from testgraph import pytest_adapter as pa; import tgtrace\n"
+            "for p in ('stdout', '/tmp/../dev/stdout'):\n"
+            "    sys.stderr.write(f'{pa.not_a_file_target(p)} {tgtrace._not_a_file_target(p)}\\n')\n"
+        )
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with open(os.path.join(tmp, "out.txt"), "w") as fh:
+            proc = subprocess.run([sys.executable, "-c", code, ROOT_DIR], cwd="/dev",
+                                  stdout=fh, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr.split(), ["True"] * 4)
+
+    def test_tgtrace_refuses_a_stream_before_any_test_runs(self):
+        """R2-2: writing a stream in place corrupted it (a second open of
+        /dev/stdout has its own offset). Real pytest, stdout redirected to a
+        file: the run is refused at configure, and says why."""
         import subprocess
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        for name, code in (
-            ("adapter", "from testgraph import pytest_adapter as w; w.write_json_atomic('/dev/stdout', {'ok': 1})"),
-            ("tgtrace", "import sys; sys.path.insert(0, 'harness/plugin'); import tgtrace as w; w._write('/dev/stdout', {'ok': 1})"),
-        ):
-            with self.subTest(name):
-                out = os.path.join(tmp, name + ".json")
-                with open(out, "w") as fh:
-                    proc = subprocess.run([sys.executable, "-c", code], cwd=ROOT_DIR,
-                                          stdout=fh, stderr=subprocess.PIPE, text=True)
-                self.assertEqual(proc.returncode, 0, proc.stderr)
-                with open(out) as fh:
-                    self.assertEqual(json.load(fh), {"ok": 1})
+        with open(os.path.join(tmp, "test_x.py"), "w") as fh:
+            fh.write("def test_x():\n    assert True\n")
+        env = dict(os.environ, TGTRACE_OUT="/dev/stdout",
+                   PYTHONPATH=os.path.join(ROOT_DIR, "harness", "plugin"))
+        out = os.path.join(tmp, "out.txt")
+        with open(out, "w") as fh:
+            proc = subprocess.run([sys.executable, "-m", "pytest", "-p", "tgtrace",
+                                   "-q", "-p", "no:cacheprovider", tmp],
+                                  cwd=tmp, env=env, stdout=fh, stderr=subprocess.STDOUT)
+        with open(out) as fh:
+            text = fh.read()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not a regular file path", text)
+        self.assertNotIn("1 passed", text)
 
     def test_both_name_their_temp_file_the_same_way(self):
         """F8: the harness sweep matches `<out>.tmp.<pid>`; a killed adapter
         used to leave `.<name>.tmp.<pid>`, which nothing swept."""
-        for name, write in self._writers().items():
+        for name, write in list(self._writers().items())[:2]:
             with self.subTest(name):
                 tmp = tempfile.mkdtemp()
                 self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
