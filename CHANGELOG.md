@@ -128,6 +128,19 @@ below is on `main` or in the branch that introduced this file.
 
 ### Fixed
 
+- **A refusal under `--json` is JSON** (#154). `verify --json` and
+  `pytest_adapter --json` printed a refusal as prose, so a JSON consumer could not
+  parse the reason. They now print `{"refused": true, "error": "..."}`, still exit 2.
+- **`verify` and the pytest adapter refuse a broken run in the same order and
+  words** (#154). Both now run pytest through one helper: a missing trace (with
+  pytest's stderr tail), then a truncated one, then one that is not an object. The
+  adapter's missing-JUnit refusal now carries the stderr tail too.
+- **Trace files survive crashes** (#154). tgtrace flushes and fsyncs before its
+  atomic rename, so an OS crash can no longer leave a zero-length trace;
+  `pytest_adapter --trace-out` is written the same way instead of with a plain
+  open-and-dump; `TGTRACE_OUT=/dev/stdout` (or a FIFO) works again.
+  `harness/trace.py` reads an unreadable trace as no trace instead of raising, and
+  clears the `<out>.tmp.<pid>` files a killed run leaves behind.
 - **`verify` works from an installed wheel.** The wheel shipped `testgraph/` only, so
   the README's headline `verify` command failed after `pip install testgraph` with
   "cannot find harness/plugin/tgtrace.py". The wheel now carries the trace plugin as

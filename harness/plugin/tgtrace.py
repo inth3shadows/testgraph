@@ -180,17 +180,35 @@ def pytest_unconfigure(config):
         "tests": {tid: sorted(map(list, syms)) for tid, syms in _results.items()},
         "declared": {tid: list(j) for tid, j in sorted(_declared.items())},
     }
-    directory = os.path.dirname(os.path.abspath(_out_path))
+    _write(_out_path, payload)
+
+
+def _write(out_path, payload):
+    """Write the payload so `out_path` is either absent or whole.
+
+    Beside the target, then rename (#108): a run killed mid-dump used to leave
+    a truncated file where a reader expects a whole one. os.replace is atomic
+    on the same filesystem; the flush + fsync before it (#154) keeps an OS
+    crash from leaving a zero-length target, which ext4/xfs can otherwise do
+    when the rename reaches disk before the data.
+
+    A target that exists and is NOT a regular file (`/dev/stdout`, a FIFO) has
+    no directory to put a temp file in and nothing to rename over, so it is
+    written directly: atomicity is meaningless for a stream."""
+    if os.path.exists(out_path) and not os.path.isfile(out_path):
+        with open(out_path, "w") as f:
+            json.dump(payload, f, indent=1, sort_keys=True)
+        return
+    directory = os.path.dirname(os.path.abspath(out_path))
     if directory:
         os.makedirs(directory, exist_ok=True)
-    # Write beside the target and rename (#108): a run killed mid-dump used to
-    # leave a truncated file where a reader expects a whole one. os.replace is
-    # atomic on the same filesystem, so the target is either absent or complete.
-    tmp = f"{_out_path}.tmp.{os.getpid()}"
+    tmp = f"{out_path}.tmp.{os.getpid()}"
     try:
         with open(tmp, "w") as f:
             json.dump(payload, f, indent=1, sort_keys=True)
-        os.replace(tmp, _out_path)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, out_path)
     except BaseException:
         try:
             os.remove(tmp)

@@ -20,6 +20,7 @@ trace sees only what the suite covers, so a journey with no tests traces empty
 and is reported as `no_trace`, never as "nothing to select".
 """
 import argparse
+import glob
 import json
 import os
 import subprocess
@@ -50,6 +51,13 @@ def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
     out = os.path.abspath(out)
     if os.path.exists(out):
         os.remove(out)
+    # A run SIGKILLed mid-dump leaves tgtrace's `<out>.tmp.<pid>` behind
+    # (#154); nothing else ever removes it, so the traces dir collects them.
+    for stale in glob.glob(glob.escape(out) + ".tmp.*"):
+        try:
+            os.remove(stale)
+        except OSError:
+            pass
     env = dict(env if env is not None else os.environ)
     env["TGTRACE_OUT"] = out
     env["TGTRACE_ROOT"] = os.path.join(repo, root)
@@ -69,8 +77,16 @@ def run(repo, python, tests, root, out, extra_args=(), timeout=1800, env=None):
         return None, None
     payload = None
     if os.path.exists(out):
-        with open(out) as f:
-            payload = json.load(f)
+        # tgtrace writes atomically, but an OS crash or a hand-edited file can
+        # still leave something unreadable. That is the no-trace case the
+        # caller already handles, not a traceback (#154).
+        try:
+            with open(out) as f:
+                payload = json.load(f)
+        except (OSError, ValueError):
+            payload = None
+        if not isinstance(payload, dict):
+            payload = None
     return rc, payload
 
 
@@ -93,8 +109,9 @@ def main(argv=None):
         why = (
             f"timed out after {args.timeout}s"
             if rc is None
-            else f"exited {rc} before the plugin could report "
-            f"(a collection error, or the plugin was not loaded)"
+            else f"exited {rc} with no readable trace "
+            f"(a collection error, the plugin was not loaded, or the file is "
+            f"truncated or not a tgtrace object)"
         )
         print(f"no trace written to {args.out} — pytest {why}", file=sys.stderr)
         return 1

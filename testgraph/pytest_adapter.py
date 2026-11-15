@@ -31,6 +31,7 @@ Deliberately NOT here, and each for a stated reason:
     There is no second adapter to generalize against yet, and a one-adapter
     abstraction is a guess rather than a design (verification-direction D3).
 """
+import json
 import os
 import subprocess
 import sys
@@ -264,8 +265,99 @@ def plugin_dir(start=None):
     return None
 
 
+def load_trace(trace_path, proc):
+    """(trace, None) for a whole tgtrace payload, else (None, refusal).
+
+    A missing, truncated or non-object trace is a broken run, not a verdict
+    (#108). One function so verify and this adapter refuse in the same order
+    and the same words (#154); the substrings "wrote no trace", "truncated or
+    not JSON" and "not a tgtrace payload" are what callers and tests key on."""
+    if not os.path.isfile(trace_path):
+        # pytest's own stderr usually names the cause (a bad flag, the
+        # plugin's xdist refusal); the guess below is only a fallback.
+        tail = (getattr(proc, "stderr", "") or "").strip()[-400:]
+        return None, (
+            f"pytest exited {getattr(proc, 'returncode', '?')} and tgtrace "
+            f"wrote no trace — the run was killed, or the plugin did not "
+            f"load; no verdict was recorded"
+            + (f"\n  pytest stderr (tail): {tail}" if tail else "")
+        )
+    try:
+        with open(trace_path) as fh:
+            trace = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, (
+            f"the tgtrace trace is truncated or not JSON ({exc}) — the run "
+            f"was cut short; no verdict was recorded"
+        )
+    if not isinstance(trace, dict):
+        return None, (
+            f"the trace file is not a tgtrace payload (a JSON "
+            f"{type(trace).__name__}, not an object); no verdict was recorded"
+        )
+    return trace, None
+
+
+def run_traced(repo, plugins, pytest_args, _runner=None, _workdir=None):
+    """Run pytest once under tgtrace with JUnit XML on; read both back.
+
+    Returns `(proc, trace, verdicts, error)`. `verdicts` is None when pytest
+    wrote no JUnit XML: whether that refuses the run is the caller's call
+    (the adapter needs verdicts to attribute anything; verify reads a missing
+    report as no verdicts and reports the journeys incomplete).
+
+    `_workdir` stands in for the temp dir in tests, so they need not patch
+    `tempfile.TemporaryDirectory` for every caller in the process (#154)."""
+    def go(tmp):
+        trace_path = os.path.join(tmp, "trace.json")
+        junit_path = os.path.join(tmp, "junit.xml")
+        env = dict(os.environ)
+        env["TGTRACE_OUT"] = trace_path
+        env["TGTRACE_ROOT"] = os.path.abspath(repo)
+        env["PYTHONPATH"] = os.pathsep.join(
+            p for p in (plugins, env.get("PYTHONPATH")) if p
+        )
+        cmd = [sys.executable, "-m", "pytest", "-p", "tgtrace",
+               f"--junitxml={junit_path}", *pytest_args]
+        runner = _runner or (lambda: subprocess.run(
+            cmd, cwd=repo, env=env, capture_output=True, text=True))
+        proc = runner()
+        trace, err = load_trace(trace_path, proc)
+        if err:
+            return proc, None, None, err
+        verdicts = parse_junit(junit_path) if os.path.isfile(junit_path) else None
+        return proc, trace, verdicts, None
+
+    if _workdir is not None:
+        return go(_workdir)
+    with tempfile.TemporaryDirectory() as tmp:
+        return go(tmp)
+
+
+def write_json_atomic(path, obj):
+    """Write `obj` as JSON so `path` is either absent or whole (#154).
+
+    Temp file beside the target, flushed and fsynced, then renamed: a plain
+    `open(path, "w")` killed mid-dump leaves a truncated file that a later
+    reader (reconcile) refuses."""
+    directory = os.path.dirname(os.path.abspath(path))
+    tmp = os.path.join(directory, f".{os.path.basename(path)}.tmp.{os.getpid()}")
+    try:
+        with open(tmp, "w") as f:
+            json.dump(obj, f, indent=1, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
-        append=None, trace_out=None, _runner=None):
+        append=None, trace_out=None, _runner=None, _workdir=None):
     """Run the suite, attribute journeys from the trace, write the rows.
 
     Returns (summary, error). `error` is a string on any refusal; a suite whose
@@ -302,47 +394,19 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
             f"would sit in `unasked` forever"
         )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        trace_path = os.path.join(tmp, "trace.json")
-        junit_path = os.path.join(tmp, "junit.xml")
-        env = dict(os.environ)
-        env["TGTRACE_OUT"] = trace_path
-        env["TGTRACE_ROOT"] = os.path.abspath(repo)
-        env["PYTHONPATH"] = os.pathsep.join(
-            p for p in (plugins, env.get("PYTHONPATH")) if p
-        )
-        cmd = [
-            sys.executable, "-m", "pytest", "-p", "tgtrace",
-            f"--junitxml={junit_path}", *pytest_args,
-        ]
-        runner = _runner or (
-            lambda: subprocess.run(cmd, cwd=repo, env=env, capture_output=True, text=True)
-        )
-        proc = runner()
-
-        if not os.path.isfile(junit_path):
-            tail = (getattr(proc, "stderr", "") or "")[-400:]
-            return None, f"pytest wrote no JUnit XML (exit {getattr(proc, 'returncode', '?')}): {tail}"
-        if not os.path.isfile(trace_path):
-            return None, (
-                "pytest ran but tgtrace wrote nothing — the plugin was not "
-                "loaded (check that -p tgtrace resolved on PYTHONPATH)"
-            )
-
-        import json
-        try:
-            with open(trace_path) as f:
-                trace = json.load(f)
-        except (OSError, ValueError) as exc:
-            # Same refusal as verify (#108): a cut-short run is not a verdict.
-            return None, f"the tgtrace trace is truncated or not JSON ({exc})"
-        if not isinstance(trace, dict):
-            return None, (f"the trace file is not a tgtrace payload (a JSON "
-                          f"{type(trace).__name__}, not an object)")
-        if trace_out:
-            with open(trace_out, "w") as f:
-                json.dump(trace, f, indent=1, sort_keys=True)
-        verdicts = parse_junit(junit_path)
+    proc, trace, verdicts, err = run_traced(repo, plugins, pytest_args,
+                                            _runner=_runner, _workdir=_workdir)
+    if err:
+        return None, err
+    if verdicts is None:
+        # Attribution joins trace to verdict; with no report there is nothing
+        # to join, and every journey would read as covered-without-verdict.
+        tail = (getattr(proc, "stderr", "") or "").strip()[-400:]
+        return None, (f"pytest exited {getattr(proc, 'returncode', '?')} and wrote "
+                      f"no JUnit XML; no verdict was recorded"
+                      + (f"\n  pytest stderr (tail): {tail}" if tail else ""))
+    if trace_out:
+        write_json_atomic(trace_out, trace)
 
     conn = dbmod.connect(db_path)
     try:
@@ -478,7 +542,11 @@ def main(argv=None):
         append=(lambda row: False) if args.dry_run else None,
     )
     if err:
-        print(f"testgraph pytest-adapter: {err}", file=sys.stderr)
+        if args.json:
+            # A JSON consumer must be able to parse the refusal too (#154).
+            print(_json.dumps({"refused": True, "error": err}, indent=2, sort_keys=True))
+        else:
+            print(f"testgraph pytest-adapter: {err}", file=sys.stderr)
         return 2
     summary["dry_run"] = bool(args.dry_run)
 

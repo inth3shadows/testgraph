@@ -330,3 +330,44 @@ class CollectorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TraceRunnerTest(unittest.TestCase):
+    """#154: harness/trace.py read the trace with an unguarded `json.load`,
+    and never removed the `<out>.tmp.<pid>` a SIGKILLed tgtrace leaves."""
+
+    def _fake_python(self, tmp, body):
+        # Stands in for the target's interpreter: ignores pytest's argv and
+        # writes `body` (or nothing) to TGTRACE_OUT.
+        path = os.path.join(tmp, "fakepy")
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n")
+            if body is not None:
+                fh.write(f"printf '%s' '{body}' > \"$TGTRACE_OUT\"\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def _run(self, body):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "traces", "t.json")
+        os.makedirs(os.path.dirname(out))
+        stale = out + ".tmp.4242"
+        open(stale, "w").close()
+        rc, payload = htrace.run(tmp, self._fake_python(tmp, body), ".", ".", out)
+        return rc, payload, stale
+
+    def test_a_truncated_trace_is_the_no_trace_case(self):
+        rc, payload, _ = self._run('{"tests": {')
+        self.assertEqual(rc, 0)
+        self.assertIsNone(payload)
+
+    def test_a_non_object_trace_is_the_no_trace_case(self):
+        rc, payload, _ = self._run("[]")
+        self.assertIsNone(payload)
+
+    def test_a_stale_temp_file_is_removed_before_the_run(self):
+        rc, payload, stale = self._run('{"tests": {}}')
+        self.assertEqual(payload, {"tests": {}})
+        self.assertFalse(os.path.exists(stale))

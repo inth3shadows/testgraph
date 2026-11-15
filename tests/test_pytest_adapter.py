@@ -7,16 +7,24 @@ SMALLER than it was. A recall-first tool that silently under-reports is the
 one outcome this project exists to prevent, so each of those paths is asserted
 to be REPORTED rather than swallowed.
 """
+import contextlib
+import io
+import json
 import os
+import shutil
 import sqlite3
 import sys
+import tempfile
+import types
 import unittest
+import unittest.mock
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 from testgraph.results import covers  # noqa: E402
 from testgraph import ledger  # noqa: E402
 from testgraph import pytest_adapter as pa  # noqa: E402
+from test_core import _db_on_disk, _git_repo, _registry_file, build_fixture  # noqa: E402
 
 
 def build_conn():
@@ -404,3 +412,113 @@ class RenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunTraceRefusalTests(unittest.TestCase):
+    """#108 / #154: a broken run is refused, never attributed. Each case
+    writes what a real pytest would have left in the work dir; `_workdir`
+    stands in for the temp dir, so nothing patches the stdlib."""
+
+    WHOLE = '{"tests": {}, "declared": {}}'
+    JUNIT = "<testsuite/>"
+
+    def setUp(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.tmp = tmp
+        self.db = _db_on_disk(tmp, build_fixture())
+        self.registry = _registry_file(tmp, {
+            "J1": {"name": "ok", "entries": [{"name": "handler_a", "file": "app/svc.py"}]},
+        })
+        self.repo, _ = _git_repo(tmp, {"app/svc.py": 22})
+        self.work = os.path.join(tmp, "work")
+        os.makedirs(self.work)
+
+    def _run(self, trace=None, junit=None, stderr="", **kw):
+        work = self.work
+
+        def runner():
+            for name, text in (("trace.json", trace), ("junit.xml", junit)):
+                if text is not None:
+                    with open(os.path.join(work, name), "w") as fh:
+                        fh.write(text)
+            return types.SimpleNamespace(returncode=0, stderr=stderr)
+
+        return pa.run(self.repo, registry_path=self.registry, db_path=self.db,
+                      _runner=runner, _workdir=work, append=lambda r: True, **kw)
+
+    def test_refusals(self):
+        cases = [
+            ("truncated", dict(trace='{"tests": {', junit=JUNIT_OK), "truncated or not JSON"),
+            ("not an object", dict(trace="[]", junit=JUNIT_OK), "not a tgtrace payload"),
+            ("no trace", dict(junit=JUNIT_OK, stderr="boom: xdist"), "wrote no trace"),
+            ("no junit", dict(trace=self.WHOLE), "wrote no JUnit XML"),
+        ]
+        for label, kw, expect in cases:
+            with self.subTest(label):
+                for f in os.listdir(self.work):
+                    os.remove(os.path.join(self.work, f))
+                summary, err = self._run(**kw)
+                self.assertIsNone(summary)
+                self.assertIn(expect, err)
+
+    def test_the_trace_check_comes_before_the_junit_check(self):
+        """#154: verify and the adapter refused in different orders. With
+        both files missing, both now name the trace first."""
+        summary, err = self._run(stderr="ERROR: unrecognized arguments: --bogus")
+        self.assertIn("wrote no trace", err)
+        self.assertIn("--bogus", err)
+
+    def test_a_whole_run_attributes(self):
+        summary, err = self._run(trace=self.WHOLE, junit=JUNIT_OK)
+        self.assertIsNone(err)
+        self.assertEqual(summary["rows_written"], 0)
+
+    def test_trace_out_is_written_whole_and_leaves_no_temp_file(self):
+        out_dir = os.path.join(self.tmp, "out")
+        os.makedirs(out_dir)
+        out = os.path.join(out_dir, "t.json")
+        summary, err = self._run(trace=self.WHOLE, junit=JUNIT_OK, trace_out=out)
+        self.assertIsNone(err)
+        with open(out) as fh:
+            self.assertEqual(json.load(fh), json.loads(self.WHOLE))
+        self.assertEqual(os.listdir(out_dir), ["t.json"])
+
+
+JUNIT_OK = RunTraceRefusalTests.JUNIT
+
+
+class WriteJsonAtomicTests(unittest.TestCase):
+    """#154: `--trace-out` was copied with a plain open-and-dump."""
+
+    def test_a_dump_that_dies_leaves_neither_target_nor_temp(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "t.json")
+        # json.dump streams chunks, so the temp file is part-written when the
+        # unserializable value is reached: the real mid-dump death, without
+        # patching the json module for the whole process.
+        with self.assertRaises(TypeError):
+            pa.write_json_atomic(out, {"a": 1, "z": object()})
+        self.assertEqual(os.listdir(tmp), [])
+
+    def test_an_existing_target_survives_a_failed_write(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "t.json")
+        pa.write_json_atomic(out, {"old": True})
+        with self.assertRaises(TypeError):
+            pa.write_json_atomic(out, {"z": object()})
+        with open(out) as fh:
+            self.assertEqual(json.load(fh), {"old": True})
+
+
+class MainJsonRefusalTests(unittest.TestCase):
+    def test_a_json_refusal_is_json(self):
+        """#154: the refusal went to stderr as prose even under `--json`."""
+        out = io.StringIO()
+        with unittest.mock.patch.object(pa, "run", return_value=(None, "trace broke")), \
+                contextlib.redirect_stdout(out):
+            rc = pa.main(["--repo", "/x", "--json"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(out.getvalue()), {"refused": True, "error": "trace broke"})

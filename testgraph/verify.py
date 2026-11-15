@@ -34,9 +34,7 @@ zero journey-level ones, so `verify` on a diff touching the hook reports exactly
 that rather than a green.
 """
 import os
-import subprocess
 import sys
-import tempfile
 
 from . import db as dbmod
 from . import ledger
@@ -158,7 +156,7 @@ def _summary(repo, head, selection, **extra):
 
 
 def run(repo, base, head="HEAD", registry_path=None, db_path=None,
-        pytest_args=(), append=None, _runner=None):
+        pytest_args=(), append=None, _runner=None, _workdir=None):
     """Select, run the declared tests, validate the declarations, report.
 
     Returns (summary, error). A red suite is not an error — it is the signal."""
@@ -197,52 +195,14 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
             return _summary(repo, head, selection), None
 
         expr = marker_expression(journeys)
-        with tempfile.TemporaryDirectory() as tmp:
-            trace_path = os.path.join(tmp, "trace.json")
-            junit_path = os.path.join(tmp, "junit.xml")
-            env = dict(os.environ)
-            env["TGTRACE_OUT"] = trace_path
-            env["TGTRACE_ROOT"] = os.path.abspath(repo)
-            env["PYTHONPATH"] = os.pathsep.join(
-                p for p in (plugins, env.get("PYTHONPATH")) if p
-            )
-            cmd = [sys.executable, "-m", "pytest", "-p", "tgtrace",
-                   "-m", expr, f"--junitxml={junit_path}", *pytest_args]
-            runner = _runner or (lambda: subprocess.run(
-                cmd, cwd=repo, env=env, capture_output=True, text=True))
-            proc = runner()
-
-            import json
-            # A missing or unreadable trace is a broken run, not a verdict
-            # (#108). Read as `{}` it reported every selected journey as having
-            # no journey-level test (exit 3); a truncated one raised out of here
-            # and exited 1, the code for "tests failed".
-            if not os.path.isfile(trace_path):
-                # pytest's own stderr usually names the cause (a bad flag, the
-                # plugin's xdist refusal); the guess below is only a fallback.
-                tail = (getattr(proc, "stderr", "") or "").strip()[-400:]
-                return None, (
-                    f"pytest exited {getattr(proc, 'returncode', '?')} and tgtrace "
-                    f"wrote no trace — the run was killed, or the plugin did not "
-                    f"load; no verdict was recorded"
-                    + (f"\n  pytest stderr (tail): {tail}" if tail else "")
-                )
-            try:
-                with open(trace_path) as fh:
-                    trace = json.load(fh)
-            except (OSError, ValueError) as exc:
-                return None, (
-                    f"the tgtrace trace is truncated or not JSON ({exc}) — the run "
-                    f"was cut short; no verdict was recorded"
-                )
-            if not isinstance(trace, dict):
-                return None, (
-                    f"the trace file is not a tgtrace payload (a JSON "
-                    f"{type(trace).__name__}, not an object); no verdict was recorded"
-                )
-            verdicts = {}
-            if os.path.isfile(junit_path):
-                verdicts = pa.parse_junit(junit_path)
+        proc, trace, verdicts, err = pa.run_traced(
+            repo, plugins, ("-m", expr, *pytest_args),
+            _runner=_runner, _workdir=_workdir)
+        if err:
+            return None, err
+        # No JUnit XML reads as no verdicts: every selected journey then lands
+        # in `incomplete` or `uncovered`, never in a pass.
+        verdicts = verdicts or {}
 
         credited, unvalidated, per_journey = validate(conn, registry, trace, verdicts)
         uncovered = [j for j in journeys if j not in per_journey]
@@ -430,7 +390,11 @@ def main(argv=None):
         append=(lambda row: False) if args.dry_run else None,
     )
     if err:
-        print(err)
+        if args.json:
+            # A JSON consumer must be able to parse the refusal too (#154).
+            print(_json.dumps({"refused": True, "error": err}, indent=1, sort_keys=True))
+        else:
+            print(err)
         return EXIT_REFUSED
     if args.json:
         print(_json.dumps(summary, indent=1, sort_keys=True, default=str))
