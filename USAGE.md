@@ -309,6 +309,52 @@ Exit codes, and the third one is the point:
 A selected journey with nothing to run is not a pass, and sharing an exit code
 with success is how that would be read as one.
 
+### Browser journeys (Playwright)
+
+`--runner playwright` runs the Playwright tests tagged for the selected journeys.
+The registry says where they live:
+
+```json
+"e2e": {"runner": "playwright", "cwd": "frontend", "config": "playwright.real.config.js"}
+```
+
+A test declares its journey with Playwright's own tag, `@tg:<id>`, either as an
+option or in its title:
+
+```js
+test("a submitter adds a task", { tag: "@tg:J1" }, async ({ page }) => { /* ... */ });
+```
+
+```bash
+python3 -m testgraph.verify --repo . --base origin/main --runner playwright
+```
+
+Selection is `--grep '/(@tg:J1|@tg:J2)(\s|$)/'`. The trailing boundary keeps
+`@tg:J1` from selecting `@tg:J10`. No leading boundary is needed, because Playwright
+reads any `@…` run in a title as a tag, `x@tg:J1` included. The `/…/` form makes the
+match case-sensitive; a bare `--grep` would also run `@tg:j1`.
+
+verify owns `--grep`, `--reporter` and `--config`, and refuses them after `--`. Narrow
+the run with a spec path or `--project` instead. The registry's `cwd` and `config`
+must stay inside the repo.
+
+**These verdicts are declared, not trace-validated.** Nothing traces the backend
+during a browser run yet, so a tagged test that mocks the app's own API passes just
+the same. Rows carry `edge_provenance=e2e-declared`, and the summary says so (backend
+tracing is #157). Point the config at a real backend, not the mocked smoke suite.
+
+Verdicts per selected journey:
+- **fail (exit 1):** any tagged test failed, timed out or crashed.
+- **fail (exit 1)** also covers a run that `-x` or `maxFailures` stopped early after
+  a tagged test failed.
+- **incomplete (exit 3):** a tagged test passed only on a retry (flaky), every
+  tagged test was skipped, or a `test.fail()` test failed as it declared.
+- **uncovered (exit 3):** no test carries the journey's tag.
+- **refused (exit 2):** a test outside the selected journeys failed, tagged or not
+  (the login or seed setup project, meaning a broken environment, not a verdict
+  about any journey). Also refused: any other global error in the report, no
+  report at all, or a malformed `e2e` block.
+
 ## What to Do When Something Breaks
 
 - **"STATUS: BLOCKED — index not trustworthy"** — the underlying code map is

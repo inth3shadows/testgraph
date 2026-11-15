@@ -14,6 +14,13 @@ below is on `main` or in the branch that introduced this file.
 
 ### Added
 
+- **`verify --runner playwright`** (#122): runs the Playwright tests tagged `@tg:<id>`
+  for the selected journeys, from the registry's `e2e` block (`cwd`, `config`).
+  Verdicts are declared, not trace-validated (`edge_provenance=e2e-declared`; backend
+  tracing is #157). A flaky pass or an all-skipped journey is incomplete (exit 3). A
+  failing untagged setup test, global report errors or a missing report are a
+  refusal (exit 2). Checked on honeyslate's real-backend J1 test: green credits J1,
+  and a broken `create_task` exits 1.
 - **`verify --runner vitest`** (#122): runs only the selected journeys' Vitest tests,
   chosen by an `@tg:<id>` tag in a test or describe title (Vitest's `-t`, with whole-tag
   boundaries so `@tg:J1` never selects `@tg:J10`). Each tagged test's own V8 trace must

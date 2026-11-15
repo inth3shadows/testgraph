@@ -37,6 +37,7 @@ import os
 import sys
 
 from . import db as dbmod
+from . import e2e
 from . import ledger
 from . import pytest_adapter as pa
 from . import registry as reg
@@ -59,7 +60,13 @@ EXIT_REFUSED = 2
 #: into an integer.
 EXIT_INCOMPLETE = 3
 
-RUNNERS = ("pytest", "vitest")
+RUNNERS = ("pytest", "vitest", "playwright")
+#: What an uncovered journey lacked, per runner, in the rendered summary.
+_UNCOVERED_WHY = {
+    "pytest": "nothing declared `covers(...)`",
+    "vitest": "no test in this run carries `@tg:<id>` in its title or a describe title",
+    "playwright": "no Playwright test in this run carries a `@tg:<id>` tag",
+}
 #: Vitest's name filter, which `verify --runner vitest` owns (review W3).
 _VITEST_NAME_FLAGS = ("-t", "--t", "--testNamePattern", "--test-name-pattern")
 
@@ -181,9 +188,13 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     `runner="vitest"` runs the Vitest tests tagged `@tg:<journey>` in their
     title or a describe title instead (#122); `pytest_args` then go to Vitest.
     Validation is the same: each tagged test's own trace must reach the
-    journey's entry symbols.
+    journey's entry symbols. `runner="playwright"` is `run_e2e`: the registry's
+    e2e block, declared verdicts with no trace yet.
 
     Returns (summary, error). A red suite is not an error — it is the signal."""
+    if runner == "playwright":
+        return run_e2e(repo, base, head, registry_path=registry_path, db_path=db_path,
+                       runner_args=pytest_args, append=append, _runner=_runner)
     registry_path = registry_path or reg.resolve_for_repo(repo)
     if registry_path is None:
         return None, (f"no journey registry for {reg.repo_name(repo)} — looked "
@@ -328,6 +339,53 @@ def _unknown_because(selection):
     return selection.get("unknown_because") or sel.none_is_unknown(selection)
 
 
+def run_e2e(repo, base, head="HEAD", registry_path=None, db_path=None,
+            runner_args=(), append=None, _runner=None):
+    """`run`, for the registry's e2e runner (Playwright) instead of pytest (#122).
+
+    Same selection and the same refusals; the journeys' tagged browser tests run
+    instead of `covers(...)` pytest tests. No trace validates them yet, so every
+    verdict is declared (see testgraph/e2e.py) and the summary says so."""
+    registry_path = registry_path or reg.resolve_for_repo(repo)
+    if registry_path is None:
+        return None, (f"no journey registry for {reg.repo_name(repo)} — looked "
+                      f"in {reg.where_it_looked(repo)}")
+    try:
+        registry = reg.load(registry_path)
+    except (OSError, ValueError) as exc:
+        # As in `run`: a traceback would exit 1, the "tests failed" code (#154 F9).
+        return None, f"cannot read registry {registry_path}: {exc}"
+    if not registry.get("e2e"):
+        return None, (f"{registry_path} has no `e2e` block — add "
+                      f'{{"runner": "playwright", "cwd": ..., "config": ...}}')
+    # Checked before selection, so a bad block is refused on every run, not
+    # only on the ones that select something (review P12).
+    _cwd, _cfg, err = e2e.check_config(repo, registry["e2e"])
+    if err:
+        return None, err
+    own = e2e.owned_flag(runner_args)
+    if own:
+        return None, e2e.owned_refusal(own)
+    db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")
+    if not os.path.isfile(db_path):
+        return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"
+    selection = sel.select(repo, base, head, db_path, registry_path)
+    if selection.get("status") == "BLOCKED" or selection.get("blocking"):
+        return _summary(repo, head, selection, refused=True, runner="playwright",
+                        runner_exit=None), None
+    journeys = [j["id"] if isinstance(j, dict) else j
+                for j in selection.get("journeys", [])]
+    if not journeys:
+        return _summary(repo, head, selection, runner="playwright", runner_exit=None), None
+    fields, err = e2e.run(repo, journeys, registry["e2e"], runner_args, _runner)
+    if err:
+        return None, err
+    sha = ledger.resolve_commit(repo, head)
+    written = e2e.write_rows(reg.repo_name(repo), sha, fields, append)
+    return _summary(repo, head, selection, journeys=journeys, rows_written=written,
+                    commit=sha, **fields), None
+
+
 def exit_code(summary):
     """OK / tests-failed / refused / incomplete, as distinct answers.
 
@@ -366,8 +424,9 @@ def exit_code(summary):
         return EXIT_INCOMPLETE
     if summary.get("pytest_exit") not in (None, 0, 5):
         return EXIT_INCOMPLETE
-    # Vitest's own exit (#122): non-zero with nothing credited `fail` means the
-    # run went wrong somewhere the report did not name.
+    # The runner's own exit (#122, Vitest and Playwright): non-zero with
+    # nothing credited `fail` means the run went wrong somewhere the report
+    # did not name.
     if summary.get("runner_exit") not in (None, 0):
         return EXIT_INCOMPLETE
     return EXIT_OK
@@ -406,11 +465,19 @@ def render(summary, registry=None):
         return "\n".join(lines)
 
     lines.append(f"  journeys selected: {', '.join(summary['journeys'])}")
-    vitest = summary.get("runner") == "vitest"
+    runner = summary.get("runner")
+    vitest, e2e_run = runner == "vitest", runner == "playwright"
     if vitest:
         lines.append(f"  vitest -t '{summary['marker_expression']}'  "
                      f"-> {summary['collected']} tagged test(s), exit "
                      f"{summary.get('runner_exit')}")
+    elif e2e_run:
+        lines.append(f"  playwright --grep '{summary['marker_expression']}'  "
+                     f"-> {summary['collected']} tagged test(s), exit "
+                     f"{summary.get('runner_exit')}")
+        lines.append("  DECLARED, not trace-validated: a tagged test that passes is "
+                     "credited without proof it reached the journey's backend "
+                     "(backend tracing is #157)")
     else:
         lines.append(f"  pytest -m '{summary['marker_expression']}'  "
                      f"-> {summary['collected']} test(s), exit {summary['pytest_exit']}")
@@ -435,12 +502,14 @@ def render(summary, registry=None):
         lines.append(
             f"  ! NO JOURNEY-LEVEL TEST: {', '.join(uncovered)} — "
             f"selected, and "
-            f"{'no test in this run carries `@tg:<id>` in its title or a describe title' if vitest else 'nothing declared `covers(...)`'}"
+            f"{_UNCOVERED_WHY.get(runner, _UNCOVERED_WHY['pytest'])}"
             f" for them. This run "
             f"says NOTHING about those journeys; it is not a pass."
         )
     if summary.get("incomplete"):
-        why = {"skip": "skipped", "no verdict": "no verdict"}
+        why = {"skip": "skipped", "no verdict": "no verdict",
+               "flaky": "flaky — passed only on a retry",
+               "expected-fail": "failed as test.fail() expected"}
         lines.append(
             "  ! ran, but not a pass: "
             + ", ".join(f"{j} ({why.get(r, r)})" for j, r in summary["incomplete"])
@@ -455,8 +524,12 @@ def render(summary, registry=None):
         )
         for nodeid, jid in summary["unvalidated"][:8]:
             lines.append(f"      {jid}  {nodeid}")
+    if summary.get("unknown_tags"):
+        lines.append(f"  ! tests tagged with journeys this registry does not "
+                     f"select or define: {', '.join(summary['unknown_tags'])}")
     lines.append(f"  {summary['rows_written']} ledger row(s) written, tagged "
-                 f"edge_provenance={JOURNEY_PROVENANCE}")
+                 f"edge_provenance="
+                 f"{e2e.PROVENANCE if e2e_run else JOURNEY_PROVENANCE}")
     return "\n".join(lines)
 
 
@@ -485,7 +558,9 @@ def main(argv=None):
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--runner", choices=RUNNERS, default="pytest",
                     help="pytest: tests marked covers(...); vitest: tests with "
-                         "@tg:<journey> in their title or a describe title")
+                         "@tg:<journey> in their title or a describe title; "
+                         "playwright: the registry's e2e block, tests tagged "
+                         "@tg:<journey>")
     ap.add_argument("pytest_args", nargs="*", metavar="runner_args")
     args = ap.parse_args(argv)
 

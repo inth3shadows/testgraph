@@ -7,6 +7,7 @@
     "frontend: src/routes/** (+layout.js, +layout.svelte, gantt/+page.svelte, login/+page.svelte), service-worker.js, playwright.config.js, svelte.config.js, vite.config.js — 8 files. TECHNICAL.md states no journey has a frontend entry point, so a frontend change is visible only where it reaches a backend entry."
   ],
   "approved": true,
+  "e2e": {"runner": "playwright", "cwd": "frontend", "config": "playwright.real.config.js"},
   "journeys": {
     "J1": {
       "name": "submit task",
