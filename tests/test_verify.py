@@ -637,5 +637,43 @@ class CoversTests(unittest.TestCase):
         self.assertEqual(res.declared_journeys(C), ("J1",))
 
 
+
+class ReviewRound1VerifyTests(UnreadableTraceTests):
+    """Round-1 review of #154 (.review ledger C1, F3, F9)."""
+
+    def test_c1_a_missing_junit_report_is_no_verdicts_not_a_pass(self):
+        summary, err = self._run('{"tests": {}, "declared": {}}')
+        self.assertIsNone(err)
+        self.assertNotEqual(verify.exit_code(summary), verify.EXIT_OK)
+        self.assertEqual(summary["collected"], 0)
+
+    def test_f3_a_truncated_junit_report_refuses_verify(self):
+        work = self.work
+
+        def runner():
+            with open(os.path.join(work, "trace.json"), "w") as fh:
+                fh.write('{"tests": {}, "declared": {}}')
+            with open(os.path.join(work, "junit.xml"), "w") as fh:
+                fh.write("<testsuites><testsuite>")
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
+                                  registry_path=self.registry, db_path=self.db,
+                                  _runner=runner, _workdir=work, append=lambda r: True)
+        self.assertIsNone(summary)
+        self.assertIn("JUnit XML is truncated or not XML", err)
+
+    def test_f9_an_unreadable_registry_is_a_json_refusal(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = verify.main(["--repo", self.repo, "--base", "HEAD~1",
+                              "--registry", os.path.join(self.tmp, "nope.json"),
+                              "--db", self.db, "--json"])
+        self.assertEqual(rc, verify.EXIT_REFUSED)
+        body = json.loads(out.getvalue())
+        self.assertTrue(body["refused"])
+        self.assertIn("nope.json", body["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

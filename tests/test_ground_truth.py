@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -328,9 +329,6 @@ class CollectorTest(unittest.TestCase):
         self.assertIsNone(sys.getprofile())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TraceRunnerTest(unittest.TestCase):
     """#154: harness/trace.py read the trace with an unguarded `json.load`,
@@ -371,3 +369,57 @@ class TraceRunnerTest(unittest.TestCase):
         rc, payload, stale = self._run('{"tests": {}}')
         self.assertEqual(payload, {"tests": {}})
         self.assertFalse(os.path.exists(stale))
+
+
+
+class TraceRunnerReviewTest(TraceRunnerTest):
+    """Round-1 review of #154 (.review ledger F4, F5, F6)."""
+
+    def test_f4_an_object_without_tgtrace_fields_is_the_no_trace_case(self):
+        for body in ("{}", '{"tests": 3}', '{"tests": {"t": 3}}'):
+            with self.subTest(body):
+                rc, payload, _ = self._run(body)
+                self.assertIsNone(payload)
+
+    def test_f4_a_minimal_tgtrace_object_is_kept(self):
+        rc, payload, _ = self._run('{"tests": {"t": [["a", "b"]]}}')
+        self.assertEqual(payload, {"tests": {"t": [["a", "b"]]}})
+
+    def test_f4_main_survives_a_trace_without_backend(self):
+        from harness import trace as htrace
+        import contextlib, io
+        with unittest.mock.patch.object(
+                htrace, "run", return_value=(0, {"tests": {"t": [["a", "b"]]}})), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = htrace.main(["--repo", ".", "--python", "x", "--out", "o.json"])
+        self.assertEqual(rc, 0)
+
+    def test_f5_a_non_regular_out_is_refused_and_left_alone(self):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        fifo = os.path.join(tmp, "pipe")
+        os.mkfifo(fifo)
+        import stat
+        with self.assertRaises(ValueError):
+            htrace.run(tmp, "/bin/false", ".", ".", fifo)
+        self.assertTrue(stat.S_ISFIFO(os.stat(fifo).st_mode))
+
+    def test_f6_the_sweep_takes_only_dead_pids(self):
+        from harness import trace as htrace
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
+        out = os.path.join(tmp, "a.json")
+        live = f"{out}.tmp.{os.getpid()}"
+        keep = [live, out + ".tmp.json", out + ".tmp.12x"]
+        dead = out + ".tmp.999999999"
+        for f in keep + [dead]:
+            open(f, "w").close()
+        htrace.run(tmp, self._fake_python(tmp, '{"tests": {}}'), ".", ".", out)
+        for f in keep:
+            self.assertTrue(os.path.exists(f), f)
+        self.assertFalse(os.path.exists(dead))
+
+
+if __name__ == "__main__":
+    unittest.main()

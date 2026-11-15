@@ -164,6 +164,12 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     if registry_path is None:
         return None, (f"no journey registry for {reg.repo_name(repo)} — looked "
                       f"in {reg.where_it_looked(repo)}")
+    try:
+        registry = reg.load(registry_path)
+    except (OSError, ValueError) as exc:
+        # Raised out of here before: a traceback and exit 1, the code for
+        # "tests failed", and prose under --json (#154 review F9).
+        return None, f"cannot read registry {registry_path}: {exc}"
     db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")
     if not os.path.isfile(db_path):
         return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"
@@ -187,7 +193,6 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     # the plain-string form is what a caller passing a hand-built selection uses.
     journeys = [j["id"] if isinstance(j, dict) else j
                 for j in selection.get("journeys", [])]
-    registry = reg.load(registry_path)
     conn = dbmod.connect(db_path)
     try:
 

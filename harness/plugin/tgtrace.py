@@ -183,6 +183,26 @@ def pytest_unconfigure(config):
     _write(_out_path, payload)
 
 
+# Paths that name a stream however they resolve: `/dev/stdout` redirected to a
+# file resolves to a REGULAR file, so `isfile` alone would send it down the
+# temp-and-rename path, which cannot create a file in /dev (#154 review F2).
+_STREAM_PREFIXES = ("/dev/", "/proc/")
+
+
+def _is_stream(path):
+    """True when `path` must be written in place, not via temp + rename.
+
+    Kept in step with `testgraph.pytest_adapter.is_stream` by
+    tests/test_pytest_adapter.py:WriterParityTests — this plugin imports
+    nothing from testgraph, so the rule exists twice."""
+    if os.path.abspath(path).startswith(_STREAM_PREFIXES):
+        return True
+    # A directory is neither: writing to it fails either way, and callers
+    # that can refuse one up front (`--trace-out`) need to see it as such.
+    return (os.path.exists(path) and not os.path.isfile(path)
+            and not os.path.isdir(path))
+
+
 def _write(out_path, payload):
     """Write the payload so `out_path` is either absent or whole.
 
@@ -192,10 +212,10 @@ def _write(out_path, payload):
     crash from leaving a zero-length target, which ext4/xfs can otherwise do
     when the rename reaches disk before the data.
 
-    A target that exists and is NOT a regular file (`/dev/stdout`, a FIFO) has
-    no directory to put a temp file in and nothing to rename over, so it is
-    written directly: atomicity is meaningless for a stream."""
-    if os.path.exists(out_path) and not os.path.isfile(out_path):
+    A stream target (`/dev/stdout`, `/proc/self/fd/N`, a FIFO; see
+    `_is_stream`) has no directory to put a temp file in and nothing to rename
+    over, so it is written directly: atomicity is meaningless for a stream."""
+    if _is_stream(out_path):
         with open(out_path, "w") as f:
             json.dump(payload, f, indent=1, sort_keys=True)
         return

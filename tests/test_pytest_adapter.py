@@ -410,9 +410,6 @@ class RenderTests(unittest.TestCase):
         self.assertIn("coverage may be overstated", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class RunTraceRefusalTests(unittest.TestCase):
     """#108 / #154: a broken run is refused, never attributed. Each case
@@ -522,3 +519,130 @@ class MainJsonRefusalTests(unittest.TestCase):
             rc = pa.main(["--repo", "/x", "--json"])
         self.assertEqual(rc, 2)
         self.assertEqual(json.loads(out.getvalue()), {"refused": True, "error": "trace broke"})
+
+
+
+class ReviewRound1Tests(RunTraceRefusalTests):
+    """Round-1 review of #154 (.review ledger F1, F3, F4, F8, F9)."""
+
+    def test_f3_a_truncated_junit_report_is_refused_not_a_crash(self):
+        for text in ("<testsuites><testsuite>", ""):
+            with self.subTest(repr(text)):
+                for f in os.listdir(self.work):
+                    os.remove(os.path.join(self.work, f))
+                summary, err = self._run(trace=self.WHOLE, junit=text)
+                self.assertIsNone(summary)
+                self.assertIn("JUnit XML is truncated or not XML", err)
+
+    def test_f4_an_object_without_tgtrace_fields_is_refused(self):
+        for text in ("{}", '{"tests": 3}', '{"tests": {}, "declared": 3}',
+                     '{"tests": {"t": 3}}'):
+            with self.subTest(text):
+                for f in os.listdir(self.work):
+                    os.remove(os.path.join(self.work, f))
+                summary, err = self._run(trace=text, junit=JUNIT_OK)
+                self.assertIsNone(summary)
+                self.assertIn("not a tgtrace payload", err)
+
+    def test_f9_a_trace_out_that_cannot_be_written_is_refused_before_the_run(self):
+        ran = []
+        bad = [os.path.join(self.tmp, "no", "such", "t.json"), self.tmp]
+        for out in bad:
+            with self.subTest(out):
+                def runner():
+                    ran.append(out)
+                    return types.SimpleNamespace(returncode=0, stderr="")
+                summary, err = pa.run(self.repo, registry_path=self.registry,
+                                      db_path=self.db, _runner=runner,
+                                      _workdir=self.work, append=lambda r: True,
+                                      trace_out=out)
+                self.assertIsNone(summary)
+                self.assertIn("--trace-out", err)
+        self.assertEqual(ran, [], "the suite ran before --trace-out was checked")
+
+    def test_f1_trace_out_to_a_fifo_is_written_through(self):
+        fifo = os.path.join(self.tmp, "pipe")
+        os.mkfifo(fifo)
+        got = []
+        import threading
+        t = threading.Thread(target=lambda: got.append(open(fifo).read()), daemon=True)
+        t.start()
+        summary, err = self._run(trace=self.WHOLE, junit=JUNIT_OK, trace_out=fifo)
+        t.join(5)
+        self.assertIsNone(err)
+        self.assertEqual(json.loads(got[0]), json.loads(self.WHOLE))
+        self.assertTrue(__import__("stat").S_ISFIFO(os.stat(fifo).st_mode))
+
+
+class WriterParityTests(unittest.TestCase):
+    """F1/F2/F8: testgraph's atomic writer and tgtrace's are two copies of one
+    rule (tgtrace must stay standalone, so it cannot import the other). This
+    holds them to the same behaviour rather than a comment saying they match."""
+
+    def _writers(self):
+        sys.path.insert(0, os.path.join(ROOT_DIR, "harness", "plugin"))
+        try:
+            import tgtrace
+        finally:
+            sys.path.pop(0)
+        return {"adapter": pa.write_json_atomic, "tgtrace": tgtrace._write}
+
+    def test_both_treat_dev_paths_as_streams(self):
+        """/dev/stdout redirected to a file resolves to a regular file, so an
+        `isfile` test alone sends it down the temp-and-rename path, which
+        cannot create a file in /dev (F2)."""
+        sys.path.insert(0, os.path.join(ROOT_DIR, "harness", "plugin"))
+        import tgtrace
+        sys.path.pop(0)
+        for path in ("/dev/stdout", "/dev/fd/1", "/proc/self/fd/1"):
+            with self.subTest(path):
+                self.assertTrue(pa.is_stream(path))
+                self.assertTrue(tgtrace._is_stream(path))
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        regular = os.path.join(tmp, "t.json")
+        open(regular, "w").close()
+        for path in (regular, os.path.join(tmp, "absent.json")):
+            self.assertFalse(pa.is_stream(path))
+            self.assertFalse(tgtrace._is_stream(path))
+
+    def test_both_write_dev_stdout_redirected_to_a_file(self):
+        """F2, end to end: a child whose stdout IS a regular file writes
+        through /dev/stdout with each writer."""
+        import subprocess
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        for name, code in (
+            ("adapter", "from testgraph import pytest_adapter as w; w.write_json_atomic('/dev/stdout', {'ok': 1})"),
+            ("tgtrace", "import sys; sys.path.insert(0, 'harness/plugin'); import tgtrace as w; w._write('/dev/stdout', {'ok': 1})"),
+        ):
+            with self.subTest(name):
+                out = os.path.join(tmp, name + ".json")
+                with open(out, "w") as fh:
+                    proc = subprocess.run([sys.executable, "-c", code], cwd=ROOT_DIR,
+                                          stdout=fh, stderr=subprocess.PIPE, text=True)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                with open(out) as fh:
+                    self.assertEqual(json.load(fh), {"ok": 1})
+
+    def test_both_name_their_temp_file_the_same_way(self):
+        """F8: the harness sweep matches `<out>.tmp.<pid>`; a killed adapter
+        used to leave `.<name>.tmp.<pid>`, which nothing swept."""
+        for name, write in self._writers().items():
+            with self.subTest(name):
+                tmp = tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+                out = os.path.join(tmp, "t.json")
+                seen = []
+                real_replace = os.replace
+
+                def spy(src, dst):
+                    seen.append(os.path.basename(src))
+                    return real_replace(src, dst)
+                with unittest.mock.patch("os.replace", spy):
+                    write(out, {"a": 1})
+                self.assertEqual(seen, [f"t.json.tmp.{os.getpid()}"])
+
+
+if __name__ == "__main__":
+    unittest.main()

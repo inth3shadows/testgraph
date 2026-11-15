@@ -295,7 +295,29 @@ def load_trace(trace_path, proc):
             f"the trace file is not a tgtrace payload (a JSON "
             f"{type(trace).__name__}, not an object); no verdict was recorded"
         )
+    shape = payload_shape_error(trace)
+    if shape:
+        return None, (f"the trace file is not a tgtrace payload ({shape}); "
+                      f"no verdict was recorded")
     return trace, None
+
+
+def payload_shape_error(trace):
+    """What is wrong with a parsed trace object's shape, or None.
+
+    tgtrace always writes `tests` as {nodeid: [[relpath, qualname], ...]} and
+    `declared` as {nodeid: [journey, ...]}. An object missing either shape
+    passed the old isinstance check and crashed later (#154 review F4)."""
+    tests = trace.get("tests")
+    if not isinstance(tests, dict):
+        return "`tests` is missing or not an object"
+    if any(not isinstance(v, list) for v in tests.values()):
+        return "a `tests` entry is not a list"
+    declared = trace.get("declared", {})
+    if not isinstance(declared, dict) or any(
+            not isinstance(v, list) for v in declared.values()):
+        return "`declared` is not an object of lists"
+    return None
 
 
 def run_traced(repo, plugins, pytest_args, _runner=None, _workdir=None):
@@ -325,7 +347,16 @@ def run_traced(repo, plugins, pytest_args, _runner=None, _workdir=None):
         trace, err = load_trace(trace_path, proc)
         if err:
             return proc, None, None, err
-        verdicts = parse_junit(junit_path) if os.path.isfile(junit_path) else None
+        verdicts = None
+        if os.path.isfile(junit_path):
+            try:
+                verdicts = parse_junit(junit_path)
+            except (ET.ParseError, OSError) as exc:
+                # Killed while writing the report: a broken run, not a red
+                # suite. Raising here exited 1, the "tests failed" code (F3).
+                return proc, None, None, (
+                    f"pytest's JUnit XML is truncated or not XML ({exc}) — the "
+                    f"run was cut short; no verdict was recorded")
         return proc, trace, verdicts, None
 
     if _workdir is not None:
@@ -334,14 +365,55 @@ def run_traced(repo, plugins, pytest_args, _runner=None, _workdir=None):
         return go(tmp)
 
 
+_STREAM_PREFIXES = ("/dev/", "/proc/")
+
+
+def is_stream(path):
+    """True when `path` must be written in place, not via temp + rename.
+
+    `/dev/stdout` redirected to a file resolves to a REGULAR file, so the
+    prefix is checked on the unresolved path; anything else that exists and is
+    not a regular file (a FIFO) is a stream too. The same rule lives in
+    tgtrace (`_is_stream`), which cannot import this module;
+    tests/test_pytest_adapter.py:WriterParityTests holds the two in step."""
+    if os.path.abspath(path).startswith(_STREAM_PREFIXES):
+        return True
+    # A directory is neither: writing to it fails either way, and callers
+    # that can refuse one up front (`--trace-out`) need to see it as such.
+    return (os.path.exists(path) and not os.path.isfile(path)
+            and not os.path.isdir(path))
+
+
+def trace_out_error(path):
+    """Why `--trace-out path` cannot be written, or None.
+
+    Checked BEFORE the suite runs (#154 review F9): finding out after a
+    half-hour run that the directory does not exist throws the run away."""
+    if is_stream(path):
+        return None
+    if os.path.isdir(path):
+        return f"--trace-out {path} is a directory"
+    parent = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(parent):
+        return f"--trace-out directory {parent} does not exist"
+    if not os.access(parent, os.W_OK):
+        return f"--trace-out directory {parent} is not writable"
+    return None
+
+
 def write_json_atomic(path, obj):
     """Write `obj` as JSON so `path` is either absent or whole (#154).
 
     Temp file beside the target, flushed and fsynced, then renamed: a plain
     `open(path, "w")` killed mid-dump leaves a truncated file that a later
-    reader (reconcile) refuses."""
-    directory = os.path.dirname(os.path.abspath(path))
-    tmp = os.path.join(directory, f".{os.path.basename(path)}.tmp.{os.getpid()}")
+    reader (reconcile) refuses. The temp is named `<path>.tmp.<pid>`, as
+    tgtrace names its own, so harness/trace.py's sweep finds both. A stream
+    target is written in place (see `is_stream`)."""
+    if is_stream(path):
+        with open(path, "w") as f:
+            json.dump(obj, f, indent=1, sort_keys=True)
+        return
+    tmp = f"{path}.tmp.{os.getpid()}"
     try:
         with open(tmp, "w") as f:
             json.dump(obj, f, indent=1, sort_keys=True)
@@ -386,6 +458,11 @@ def run(repo, registry_path=None, db_path=None, pytest_args=(), commit=None,
     db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")
     if not os.path.isfile(db_path):
         return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"
+
+    if trace_out:
+        bad = trace_out_error(trace_out)
+        if bad:
+            return None, bad
 
     sha = ledger.resolve_commit(repo, commit or "HEAD")
     if sha is None:
