@@ -191,11 +191,19 @@ def parse_report(report, root):
                 return None, (f"test {tid!r} never finished (status pending: a worker "
                               f"died or the run was cut short); no verdict was recorded")
             key = pa._join_key(tid)
+            status = STATUS.get(case.get("status"), "skip")
             if key in out:
+                # Two skips sharing an id cannot mask anything: neither ran, and
+                # both read the same. `verify` filters with `-t`, so every
+                # deselected `test.each` repeat lands here (review W1).
+                if status == "skip" and out[key]["status"] == "skip":
+                    continue
                 return None, (f"two tests share the id {tid!r} (the same title in the "
                               f"same describe, e.g. test.each with a repeated row); the "
                               f"verdicts cannot be told apart, so no verdict was recorded")
-            out[key] = {"status": STATUS.get(case.get("status"), "skip"), "test_id": tid}
+            # `full_name` is the string Vitest matches `-t` against.
+            out[key] = {"status": status, "test_id": tid,
+                        "full_name": " ".join([rel, *ancestors, title])}
     return out, None
 
 
@@ -345,21 +353,31 @@ def name_pattern(journeys):
     return f"(^|\\s)({alts})(\\s|$)"
 
 
+#: JavaScript's `\\s`, which is what Vitest's `-t` (a `new RegExp`) means by
+#: whitespace. Python's `\\s` and str.split() differ from it (U+001C-U+001F and
+#: U+0085 are whitespace to Python only, U+FEFF to JavaScript only), and any
+#: difference is a test `-t` ran but nothing declared, or the reverse (W5).
+_JS_SPACE = "[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+
+
 def declared(verdicts, journey_ids, selected):
     """{test_id: [journey, ...]} for the tests `name_pattern(selected)` ran.
 
-    A test declares every registry journey whose tag is a whole token of its
-    describe chain or title; tags the registry does not define are ignored, as
-    an unknown `covers(...)` id would be. A test whose tags name no selected
-    journey was filtered out by `-t` and declares nothing in this run."""
+    A test declares every registry journey whose tag is a whole token of the
+    name Vitest matches `-t` against (file, describe chain, title), with the
+    same boundaries `name_pattern` uses. Tags the registry does not define are
+    ignored, as an unknown `covers(...)` id would be. A test whose tags name no
+    selected journey was filtered out by `-t` and declares nothing here."""
     wanted = set(selected)
+    tags = [(j, re.compile(f"(?:^|{_JS_SPACE}){re.escape(res.format_tag(TAG_TEMPLATE, j))}"
+                           f"(?={_JS_SPACE}|\\Z)"))
+            for j in journey_ids]
     out = {}
     for v in verdicts.values():
-        tid = v["test_id"]
-        tokens = set(tid.split("::", 1)[-1].split())
-        js = [j for j in journey_ids if res.format_tag(TAG_TEMPLATE, j) in tokens]
+        name = v.get("full_name", v["test_id"])
+        js = [j for j, rx in tags if rx.search(name)]
         if wanted.intersection(js):
-            out[tid] = js
+            out[v["test_id"]] = js
     return out
 
 

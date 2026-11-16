@@ -84,6 +84,51 @@ class TagTests(unittest.TestCase):
         self.assertEqual(va.declared(v, ["J1"], ["J1"]),
                          {"src/a.test.ts::x @tg:J1 @tg:J99": ["J1"]})
 
+    def test_W5_declared_splits_on_exactly_javascripts_whitespace(self):
+        """`-t` is a JS regex, so `\\s` is JS's set: U+FEFF counts, U+001F and
+        U+0085 do not. Python's str.split() disagrees on all three."""
+        v = _verdicts([
+            ("src/a.test.ts", [], "bom\ufeff@tg:J1", "passed"),
+            ("src/a.test.ts", [], "unit\x1f@tg:J1", "skipped"),
+            ("src/a.test.ts", [], "nel\x85@tg:J1", "skipped"),
+            ("src/a.test.ts", [], "tab\t@tg:J1", "passed"),
+            ("src/a.test.ts", [], "nl @tg:J1\n", "passed"),
+        ])
+        self.assertEqual(sorted(va.declared(v, ["J1"], ["J1"])), [
+            "src/a.test.ts::bom\ufeff@tg:J1",
+            "src/a.test.ts::nl @tg:J1\n",
+            "src/a.test.ts::tab\t@tg:J1",
+        ])
+
+    def test_W5_the_trailing_boundary_is_javascripts_too(self):
+        v = _verdicts([
+            ("src/a.test.ts", [], "@tg:J1\ufeffx", "passed"),
+            ("src/a.test.ts", [], "@tg:J1\x1fx", "skipped"),
+        ])
+        self.assertEqual(list(va.declared(v, ["J1"], ["J1"])),
+                         ["src/a.test.ts::@tg:J1\ufeffx"])
+
+    def test_W5_declared_reads_the_file_part_of_the_name_as_vitest_does(self):
+        v = _verdicts([("src/x @tg:J1 y.test.ts", [], "plain", "passed")])
+        self.assertEqual(list(va.declared(v, ["J1"], ["J1"])),
+                         ["src/x @tg:J1 y.test.ts::plain"])
+
+    def test_W1_two_skipped_tests_sharing_an_id_are_not_a_refusal(self):
+        verdicts, err = va.parse_report(_report("/r", [
+            ("src/o.test.ts", [], "dup", "skipped"),
+            ("src/o.test.ts", [], "dup", "skipped")]), "/r")
+        self.assertIsNone(err)
+        self.assertEqual([v["status"] for v in verdicts.values()], ["skip"])
+
+    def test_W1_a_duplicate_that_ran_is_still_a_refusal(self):
+        for pair in (("skipped", "passed"), ("passed", "skipped"), ("failed", "failed")):
+            with self.subTest(pair):
+                verdicts, err = va.parse_report(_report("/r", [
+                    ("src/o.test.ts", [], "dup", pair[0]),
+                    ("src/o.test.ts", [], "dup", pair[1])]), "/r")
+                self.assertIsNone(verdicts)
+                self.assertIn("share the id", err)
+
 
 class _VitestVerifyFixture:
     def setUp(self):
@@ -163,6 +208,8 @@ class VitestVerifyTests(_VitestVerifyFixture, unittest.TestCase):
         self.assertIsNone(err)
         self.assertEqual(summary["unvalidated"], [("src/a.test.ts::claims @tg:J1", "J1")])
         self.assertEqual(summary["credited"], {})
+        self.assertEqual(summary["uncovered"], ["J1"])
+        self.assertEqual(summary["incomplete"], [])
         self.assertEqual(verify.exit_code(summary), verify.EXIT_INCOMPLETE)
 
     def test_no_tagged_test_is_uncovered(self):
@@ -176,6 +223,64 @@ class VitestVerifyTests(_VitestVerifyFixture, unittest.TestCase):
         summary, err = self._run([((), "ten @tg:J10", "skipped")], {})
         self.assertIsNone(err)
         self.assertEqual(summary["uncovered"], ["J1"])
+
+    def test_W4_a_tagged_test_that_was_skipped_is_incomplete_not_uncovered(self):
+        summary, err = self._run([((), "pays @tg:J1", "skipped")], {})
+        self.assertIsNone(err)
+        self.assertEqual(summary["uncovered"], [])
+        self.assertEqual(summary["incomplete"], [("J1", "skip")])
+        self.assertEqual(verify.exit_code(summary), verify.EXIT_INCOMPLETE)
+        self.assertNotIn("NO JOURNEY-LEVEL TEST", verify.render(summary))
+
+    def test_W4_an_unvalidated_tag_keeps_the_journey_uncovered_beside_a_skip(self):
+        summary, err = self._run([((), "claims @tg:J1", "passed"),
+                                  ((), "later @tg:J1", "skipped")],
+                                 {"src/a.test.ts::claims @tg:J1": LEAF})
+        self.assertIsNone(err)
+        self.assertEqual(summary["uncovered"], ["J1"])
+        self.assertEqual(summary["incomplete"], [])
+
+    def test_W4_the_uncovered_message_speaks_of_this_run(self):
+        summary, _ = self._run([((), "plain", "skipped")], {})
+        self.assertIn("no test in this run carries `@tg:<id>`", verify.render(summary))
+
+    def test_W1_an_unrelated_skipped_duplicate_does_not_block_verify(self):
+        summary, err = self._run([((), "pays @tg:J1", "passed"),
+                                  ((), "dup", "skipped"), ((), "dup", "skipped")],
+                                 {"src/a.test.ts::pays @tg:J1": SVC})
+        self.assertIsNone(err)
+        self.assertEqual(verify.exit_code(summary), verify.EXIT_OK)
+
+    def test_W2_a_quiet_vitest_run_says_vitest(self):
+        def runner():
+            raise AssertionError("nothing is selected, so vitest must not run")
+        summary, err = verify.run(self.repo, "HEAD", "HEAD", registry_path=self.registry,
+                                  db_path=self.db, runner="vitest", _runner=runner,
+                                  _workdir=self.work, append=lambda r: True)
+        self.assertIsNone(err)
+        self.assertEqual(summary["journeys"], [])
+        self.assertEqual(summary["runner"], "vitest")
+        self.assertIn("runner_exit", summary)
+        self.assertIsNone(summary["runner_exit"])
+
+    def test_W3_a_name_filter_of_your_own_is_refused_up_front(self):
+        def runner():
+            raise AssertionError("refused before vitest runs")
+        for args in (("-t", "smoke"), ("-t=smoke",), ("--testNamePattern", "smoke"),
+                     ("--testNamePattern=smoke",), ("--test-name-pattern=smoke",)):
+            with self.subTest(args):
+                summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
+                                          registry_path=self.registry, db_path=self.db,
+                                          runner="vitest", pytest_args=args,
+                                          _runner=runner, _workdir=self.work,
+                                          append=lambda r: True)
+                self.assertIsNone(summary)
+                self.assertIn("selects tests by name itself", err)
+
+    def test_W3_other_vitest_flags_pass_through(self):
+        summary, err = self._run([((), "pays @tg:J1", "passed")],
+                                 {"src/a.test.ts::pays @tg:J1": SVC})
+        self.assertIsNone(err)
 
     def test_a_nonzero_vitest_exit_downgrades_a_pass(self):
         summary, err = self._run([((), "pays @tg:J1", "passed")],
@@ -338,6 +443,24 @@ class RealVitestVerifyTests(unittest.TestCase):
         s = self._verify('it("claims @tg:J1", () => { expect(1).toBe(1); });\n')
         self.assertEqual(len(s["unvalidated"]), 1)
         self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
+
+    def test_W1_an_untagged_duplicate_elsewhere_does_not_block(self):
+        s = self._verify('it("pays @tg:J1", () => { expect(handlerA()).toBe(1); });\n'
+                         'it.each([1, 1])("dup", () => {});\n')
+        self.assertEqual(verify.exit_code(s), verify.EXIT_OK)
+
+    def test_W4_a_skipped_tagged_test_is_incomplete(self):
+        s = self._verify('it.skip("pays @tg:J1", () => { expect(handlerA()).toBe(1); });\n')
+        self.assertEqual(s["incomplete"], [("J1", "skip")])
+        self.assertEqual(s["uncovered"], [])
+
+    def test_W5_selection_and_declaration_agree_on_odd_whitespace(self):
+        # U+FEFF is JS whitespace: -t runs it, so it must be declared and credited.
+        s = self._verify('it("pays\\uFEFF@tg:J1", () => { expect(handlerA()).toBe(1); });\n')
+        self.assertEqual((s["collected"], s["credited"]), (1, {"J1": "pass"}))
+        # U+001F is not: -t skips it, so it must not be counted as collected.
+        s = self._verify('it("pays\\u001F@tg:J1", () => { expect(handlerA()).toBe(1); });\n')
+        self.assertEqual((s["collected"], s["uncovered"]), (0, ["J1"]))
 
     def test_a_J10_tag_is_not_run_for_J1(self):
         s = self._verify('it("ten @tg:J10", () => { expect(1).toBe(2); });\n')

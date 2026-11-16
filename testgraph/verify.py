@@ -60,6 +60,8 @@ EXIT_REFUSED = 2
 EXIT_INCOMPLETE = 3
 
 RUNNERS = ("pytest", "vitest")
+#: Vitest's name filter, which `verify --runner vitest` owns (review W3).
+_VITEST_NAME_FLAGS = ("-t", "--testNamePattern", "--test-name-pattern")
 
 
 def marker_expression(journeys, template=None):
@@ -185,6 +187,16 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"
     if runner not in RUNNERS:
         return None, f"unknown runner {runner!r} — one of {', '.join(RUNNERS)}"
+    if runner == "vitest":
+        own = [a for a in pytest_args if a.split("=", 1)[0] in _VITEST_NAME_FLAGS]
+        if own:
+            # A second -t either replaces the journey filter or crashes Vitest
+            # with no report; neither is a run this can vouch for (review W3).
+            return None, (f"verify --runner vitest selects tests by name itself "
+                          f"(-t on the journeys' @tg: tags); drop {own[0]!r} and "
+                          f"narrow the run with a file path instead")
+    # Every return carries the runner, so a quiet vitest run's --json says so (W2).
+    quiet = {"runner": runner, **({"runner_exit": None} if runner == "vitest" else {})}
     plugins = pa.plugin_dir()
     if plugins is None:
         return None, pa.PLUGIN_MISSING
@@ -203,7 +215,7 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     if selection.get("status") == "BLOCKED" or selection.get("blocking"):
         # The index is not trustworthy. Running tests off it would produce a
         # verdict about a journey set chosen from a graph the guard refused.
-        return _summary(repo, head, selection, refused=True), None
+        return _summary(repo, head, selection, refused=True, **quiet), None
 
     # `select` returns journey dicts keyed `id` (with name/rank/confidence);
     # the plain-string form is what a caller passing a hand-built selection uses.
@@ -213,7 +225,7 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     try:
 
         if not journeys:
-            return _summary(repo, head, selection), None
+            return _summary(repo, head, selection, **quiet), None
 
         if runner == "vitest":
             expr = va.name_pattern(journeys)
@@ -250,6 +262,18 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         for j in journeys:
             if j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
                 incomplete.append((j, "skip" if credited.get(j) == "skip" else "no verdict"))
+        if runner == "vitest":
+            # A tagged test that never ran its body (it.skip, todo, describe.skip)
+            # has no trace, so validate() passes it over and the journey would
+            # read "no test carries the tag", which is false (review W4). It is
+            # a skip; a journey with an unvalidated tag keeps its own message.
+            claimed = {j for _, j in unvalidated}
+            for j in list(uncovered):
+                if j not in claimed and any(
+                        j in js and verdicts.get(pa._join_key(t), {}).get("status") == "skip"
+                        for t, js in trace["declared"].items()):
+                    uncovered.remove(j)
+                    incomplete.append((j, "skip"))
 
         written = []
         append = append or ledger.append
@@ -382,7 +406,7 @@ def render(summary, registry=None):
         lines.append(
             f"  ! NO JOURNEY-LEVEL TEST: {', '.join(summary['uncovered'])} — "
             f"selected, and "
-            f"{'no test or describe title carries `@tg:<id>`' if vitest else 'nothing declared `covers(...)`'}"
+            f"{'no test in this run carries `@tg:<id>` in its title or a describe title' if vitest else 'nothing declared `covers(...)`'}"
             f" for them. This run "
             f"says NOTHING about those journeys; it is not a pass."
         )

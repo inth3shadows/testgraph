@@ -225,7 +225,9 @@ python3 -m testgraph.verify --repo . --base origin/main --runner vitest
 Selection is Vitest's `-t`, so untagged tests and tests of other journeys do not run.
 Each tagged test is validated as a `covers(...)` test is: its own trace must reach the
 journey's entry symbols, or the declaration is reported `unvalidated` and the journey
-is not credited. The exit codes are pytest's, plus one rule: a Vitest exit other than 0
+is not credited. A journey whose tagged tests were all skipped is incomplete, not
+uncovered. Narrow the run with a file path after `--`, not with your own `-t`: verify
+owns the name filter and refuses a second one. The exit codes are pytest's, plus one rule: a Vitest exit other than 0
 with no failing journey is incomplete (3).
 
 ## Checking the Graph Against Reality
