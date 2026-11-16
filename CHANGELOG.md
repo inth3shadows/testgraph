@@ -14,6 +14,21 @@ below is on `main` or in the branch that introduced this file.
 
 ### Added
 
+- **`testgraph.vitest_adapter`** (#122): the pytest adapter's journey attribution for
+  Vitest suites. A TypeScript setup file (`tgtrace-vitest.ts`, shipped beside
+  `tgtrace.py`) records each test's named functions through V8 precise coverage;
+  Vitest's JSON reporter supplies verdicts; the join, the attribution and the ledger
+  rows are the pytest adapter's own. Injected through a generated config in a temp
+  dir, so nothing is written into the target repo (Vitest's own `node_modules/.vite`
+  cache aside). A broken or partial run is a refusal (exit 2), never a verdict: a
+  passed or failed test with no trace (a dead worker, a hook that threw), a
+  never-finished test, a duplicate test id, a file that failed outside any test
+  (import error, throwing `beforeAll`/`afterAll`), a malformed report, and a
+  `test.projects`/workspace config (projects do not inherit `setupFiles`). The trace
+  is recorded in `onTestFinished`, so a repo `afterEach` that throws no longer loses
+  it; the repo is resolved through `realpath`; the repo's own `root` is kept; coverage
+  is forced off for the run. On a real Next.js repo (167 Vitest tests) it attributes
+  5 journeys with no unjoined test.
 - **`testgraph.reconcile`** — two-sided reconciliation of the static graph
   against a real test run, classifying every disagreement as a **STATIC MISS**
   (a symbol the journey's tests executed, outside its static footprint) or a

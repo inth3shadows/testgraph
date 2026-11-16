@@ -542,9 +542,13 @@ def render(summary, registry=None):
     gap is the actionable half — measured on testgraph itself, J6 (the harness
     CLIs) has zero covering tests in a 359-test suite, and nothing but this
     line would say so."""
+    # One renderer for every runner's adapter (vitest_adapter sets `runner`
+    # and `runner_exit`); pytest summaries keep their `pytest_exit` key.
+    runner = summary.get("runner", "pytest")
+    rc = summary.get("runner_exit", summary.get("pytest_exit"))
     lines = [
-        f"testgraph pytest-adapter[{summary['repo']}] @ {summary['commit'][:9]}  "
-        f"(pytest exit {summary['pytest_exit']}, {summary['backend']})"
+        f"testgraph {runner}-adapter[{summary['repo']}] @ {summary['commit'][:9]}  "
+        f"({runner} exit {rc}, {summary['backend']})"
     ]
     covered = summary["journeys"]
     names = {}

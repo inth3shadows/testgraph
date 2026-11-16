@@ -17,8 +17,16 @@ class PluginPackaging(unittest.TestCase):
         with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
             conf = tomllib.load(f)
         inc = conf["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
-        self.assertEqual(inc, {"harness/plugin/tgtrace.py": "testgraph/_plugin/tgtrace.py"})
-        self.assertTrue(os.path.isfile(os.path.join(ROOT, "harness/plugin/tgtrace.py")))
+        self.assertEqual(inc, {
+            "harness/plugin/tgtrace.py": "testgraph/_plugin/tgtrace.py",
+            # the Vitest setup file (#122) ships beside it; plugin_dir finds both
+            "harness/plugin/tgtrace-vitest.ts": "testgraph/_plugin/tgtrace-vitest.ts",
+        })
+        for src in inc:
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, src)), src)
+        sdist = conf["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+        for src in inc:
+            self.assertIn(src, sdist)
 
     def test_an_installed_package_finds_the_packaged_plugin(self):
         with tempfile.TemporaryDirectory() as site:
