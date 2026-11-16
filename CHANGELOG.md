@@ -14,6 +14,11 @@ below is on `main` or in the branch that introduced this file.
 
 ### Added
 
+- **`verify --runner vitest`** (#122): runs only the selected journeys' Vitest tests,
+  chosen by an `@tg:<id>` tag in a test or describe title (Vitest's `-t`, with whole-tag
+  boundaries so `@tg:J1` never selects `@tg:J10`). Each tagged test's own V8 trace must
+  reach the journey's entry symbols, exactly as a `covers(...)` pytest test's must; a
+  Vitest exit other than 0 with no failing journey is incomplete (exit 3).
 - **`testgraph.vitest_adapter`** (#122): the pytest adapter's journey attribution for
   Vitest suites. A TypeScript setup file (`tgtrace-vitest.ts`, shipped beside
   `tgtrace.py`) records each test's named functions through V8 precise coverage;
