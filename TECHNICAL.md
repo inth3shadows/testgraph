@@ -80,6 +80,9 @@ leaving edges wrong) — only a full `codegraph index` did. Three checks:
   line is skipped rather than fatal.
 - `testgraph/record.py` — the `outcome` writer and the `--summary` /
   `--export-kb` readers. Refuses a journey id the registry does not know.
+- `testgraph/e2e.py` — `verify --runner playwright` (#122): the `--grep` for the
+  selected journeys' `@tg:` tags, Playwright's JSON report into per-journey
+  verdicts, `e2e-declared` rows. No trace yet, so nothing validates a pass (#157).
 - `journeys/honeyslate.json` — 8 journeys (submit, browse, edit, reschedule,
   comments, auth, gcal sync, scheduler) + `spot_checks` floors for the guard.
 - `harness/plugin/tgtrace.py` — pytest plugin, loaded into the TARGET's
