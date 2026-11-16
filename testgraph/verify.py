@@ -61,7 +61,20 @@ EXIT_INCOMPLETE = 3
 
 RUNNERS = ("pytest", "vitest")
 #: Vitest's name filter, which `verify --runner vitest` owns (review W3).
-_VITEST_NAME_FLAGS = ("-t", "--testNamePattern", "--test-name-pattern")
+_VITEST_NAME_FLAGS = ("-t", "--t", "--testNamePattern", "--test-name-pattern")
+
+
+def _vitest_name_flag(args):
+    """The first arg Vitest's CLI parser (mri) would read as its `t` option, or
+    None: the spelled-out flags, plus a short cluster holding `t` (`-ut x`,
+    `-tx`), which mri splits into one option per letter (round 2, R2-2)."""
+    for a in args:
+        head = a.split("=", 1)[0]
+        if head in _VITEST_NAME_FLAGS or (
+                len(head) > 2 and head[0] == "-" and head[1:].isalpha()
+                and head[1:].isascii() and "t" in head[1:]):
+            return a
+    return None
 
 
 def marker_expression(journeys, template=None):
@@ -188,12 +201,12 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     if runner not in RUNNERS:
         return None, f"unknown runner {runner!r} — one of {', '.join(RUNNERS)}"
     if runner == "vitest":
-        own = [a for a in pytest_args if a.split("=", 1)[0] in _VITEST_NAME_FLAGS]
+        own = _vitest_name_flag(pytest_args)
         if own:
             # A second -t either replaces the journey filter or crashes Vitest
             # with no report; neither is a run this can vouch for (review W3).
             return None, (f"verify --runner vitest selects tests by name itself "
-                          f"(-t on the journeys' @tg: tags); drop {own[0]!r} and "
+                          f"(-t on the journeys' @tg: tags); drop {own!r} and "
                           f"narrow the run with a file path instead")
     # Every return carries the runner, so a quiet vitest run's --json says so (W2).
     quiet = {"runner": runner, **({"runner_exit": None} if runner == "vitest" else {})}
@@ -254,26 +267,29 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
         verdicts = verdicts or {}
 
         credited, unvalidated, per_journey = validate(conn, registry, trace, verdicts)
-        uncovered = [j for j in journeys if j not in per_journey]
-        # Selected, has declared tests, but not a pass: the tests ran (or were
-        # collected) and no passing verdict came out. Distinct from `uncovered`
-        # (nothing declared) and from a credited fail (reported as a failure).
-        incomplete = []
-        for j in journeys:
-            if j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
-                incomplete.append((j, "skip" if credited.get(j) == "skip" else "no verdict"))
+        skipped_only = set()
         if runner == "vitest":
             # A tagged test that never ran its body (it.skip, todo, describe.skip)
             # has no trace, so validate() passes it over and the journey would
             # read "no test carries the tag", which is false (review W4). It is
             # a skip; a journey with an unvalidated tag keeps its own message.
             claimed = {j for _, j in unvalidated}
-            for j in list(uncovered):
-                if j not in claimed and any(
-                        j in js and verdicts.get(pa._join_key(t), {}).get("status") == "skip"
-                        for t, js in trace["declared"].items()):
-                    uncovered.remove(j)
-                    incomplete.append((j, "skip"))
+            skipped_only = {
+                j for j in journeys
+                if j not in per_journey and j not in claimed and any(
+                    j in js and verdicts.get(pa._join_key(t), {}).get("status") == "skip"
+                    for t, js in trace["declared"].items())}
+        uncovered = [j for j in journeys if j not in per_journey and j not in skipped_only]
+        # Selected, has declared tests, but not a pass: the tests ran (or were
+        # collected) and no passing verdict came out. Distinct from `uncovered`
+        # (nothing declared) and from a credited fail (reported as a failure).
+        # One pass in selection order, as every other list here (R2-7).
+        incomplete = []
+        for j in journeys:
+            if j in skipped_only:
+                incomplete.append((j, "skip"))
+            elif j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
+                incomplete.append((j, "skip" if credited.get(j) == "skip" else "no verdict"))
 
         written = []
         append = append or ledger.append
@@ -402,9 +418,22 @@ def render(summary, registry=None):
         lines.append(f"    {jid}  {names.get(jid, ''):<38.38} "
                      f"{summary['credited'][jid]:<5} "
                      f"{len(summary['per_journey'].get(jid, ()))} declared test(s)")
-    if summary["uncovered"]:
+    uncovered = summary["uncovered"]
+    if vitest:
+        # A journey whose tagged tests ran but never reached its entry is in
+        # `uncovered` (it is not a pass), but "no test carries the tag" would be
+        # false for it (round 2, R2-1).
+        claimed = {j for _, j in summary["unvalidated"]}
+        ran = [j for j in uncovered if j in claimed]
+        uncovered = [j for j in uncovered if j not in claimed]
+        if ran:
+            lines.append(
+                f"  ! {', '.join(ran)}: tagged tests ran, but none reached the "
+                f"journey's entry symbols (listed below). This run says NOTHING "
+                f"about those journeys; it is not a pass.")
+    if uncovered:
         lines.append(
-            f"  ! NO JOURNEY-LEVEL TEST: {', '.join(summary['uncovered'])} — "
+            f"  ! NO JOURNEY-LEVEL TEST: {', '.join(uncovered)} — "
             f"selected, and "
             f"{'no test in this run carries `@tg:<id>` in its title or a describe title' if vitest else 'nothing declared `covers(...)`'}"
             f" for them. This run "

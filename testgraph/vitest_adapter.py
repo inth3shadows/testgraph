@@ -201,9 +201,10 @@ def parse_report(report, root):
                 return None, (f"two tests share the id {tid!r} (the same title in the "
                               f"same describe, e.g. test.each with a repeated row); the "
                               f"verdicts cannot be told apart, so no verdict was recorded")
-            # `full_name` is the string Vitest matches `-t` against.
+            # `full_name` is the string Vitest matches `-t` against: the
+            # describe chain and the title, never the file (round 2, F1).
             out[key] = {"status": status, "test_id": tid,
-                        "full_name": " ".join([rel, *ancestors, title])}
+                        "full_name": " ".join([*ancestors, title])}
     return out, None
 
 
@@ -345,8 +346,8 @@ TAG_TEMPLATE = res.DEFAULT_TAG_CONVENTIONS["playwright"]
 def name_pattern(journeys):
     """`(^|\\s)(@tg:J1|@tg:J2)(\\s|$)`: a Vitest `-t` for exactly these journeys.
 
-    Vitest matches `-t` against the test's full name, the file and every
-    describe title joined by single spaces. Both boundaries are load-bearing:
+    Vitest matches `-t` against the test's full name: every describe title
+    and the test title joined by single spaces, without the file path. Both boundaries are load-bearing:
     without the trailing one `@tg:J1` also selects `@tg:J10`, without the
     leading one `x@tg:J1` would select J1."""
     alts = "|".join(re.escape(res.format_tag(TAG_TEMPLATE, j)) for j in journeys)
@@ -364,7 +365,7 @@ def declared(verdicts, journey_ids, selected):
     """{test_id: [journey, ...]} for the tests `name_pattern(selected)` ran.
 
     A test declares every registry journey whose tag is a whole token of the
-    name Vitest matches `-t` against (file, describe chain, title), with the
+    name Vitest matches `-t` against (describe chain and title), with the
     same boundaries `name_pattern` uses. Tags the registry does not define are
     ignored, as an unknown `covers(...)` id would be. A test whose tags name no
     selected journey was filtered out by `-t` and declares nothing here."""
@@ -374,7 +375,7 @@ def declared(verdicts, journey_ids, selected):
             for j in journey_ids]
     out = {}
     for v in verdicts.values():
-        name = v.get("full_name", v["test_id"])
+        name = v["full_name"]  # no fallback: a test id would hide a leading tag
         js = [j for j, rx in tags if rx.search(name)]
         if wanted.intersection(js):
             out[v["test_id"]] = js

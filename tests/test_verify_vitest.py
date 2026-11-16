@@ -108,10 +108,17 @@ class TagTests(unittest.TestCase):
         self.assertEqual(list(va.declared(v, ["J1"], ["J1"])),
                          ["src/a.test.ts::@tg:J1\ufeffx"])
 
-    def test_W5_declared_reads_the_file_part_of_the_name_as_vitest_does(self):
-        v = _verdicts([("src/x @tg:J1 y.test.ts", [], "plain", "passed")])
-        self.assertEqual(list(va.declared(v, ["J1"], ["J1"])),
-                         ["src/x @tg:J1 y.test.ts::plain"])
+    def test_F1_the_file_path_is_not_part_of_the_name(self):
+        """Vitest's `-t` sees the describe chain and the title, never the file
+        (`-t '^src'` selects nothing), so a path token must not declare."""
+        v = _verdicts([("src/x @tg:J1 y.test.ts", [], "plain", "passed"),
+                       ("src/x @tg:J1 y.test.ts", [], "t @tg:J2", "passed")])
+        self.assertEqual(va.declared(v, ["J1", "J2"], ["J1", "J2"]),
+                         {"src/x @tg:J1 y.test.ts::t @tg:J2": ["J2"]})
+
+    def test_R2_4_a_verdict_without_a_full_name_fails_loudly(self):
+        with self.assertRaises(KeyError):
+            va.declared({"k": {"status": "pass", "test_id": "f::@tg:J1 > t"}}, ["J1"], ["J1"])
 
     def test_W1_two_skipped_tests_sharing_an_id_are_not_a_refusal(self):
         verdicts, err = va.parse_report(_report("/r", [
@@ -240,6 +247,28 @@ class VitestVerifyTests(_VitestVerifyFixture, unittest.TestCase):
         self.assertEqual(summary["uncovered"], ["J1"])
         self.assertEqual(summary["incomplete"], [])
 
+    def test_R2_1_an_unvalidated_journey_is_not_called_untagged(self):
+        summary, _ = self._run([((), "claims @tg:J1", "passed")],
+                               {"src/a.test.ts::claims @tg:J1": LEAF})
+        text = verify.render(summary)
+        self.assertNotIn("no test in this run carries", text)
+        self.assertIn("J1: tagged tests ran, but none reached the journey's entry", text)
+        self.assertEqual(verify.exit_code(summary), verify.EXIT_INCOMPLETE)
+
+    def test_R2_7_incomplete_follows_selection_order(self):
+        real = verify.sel.select
+
+        def two(*a, **kw):
+            out = real(*a, **kw)
+            out["journeys"] = ["J10", "J1"]
+            return out
+        with unittest.mock.patch.object(verify.sel, "select", two):
+            summary, err = self._run([((), "ten @tg:J10", "skipped"),
+                                      ((), "one @tg:J1", "skipped")],
+                                     {"src/a.test.ts::one @tg:J1": SVC})
+        self.assertIsNone(err)
+        self.assertEqual(summary["incomplete"], [("J10", "skip"), ("J1", "skip")])
+
     def test_W4_the_uncovered_message_speaks_of_this_run(self):
         summary, _ = self._run([((), "plain", "skipped")], {})
         self.assertIn("no test in this run carries `@tg:<id>`", verify.render(summary))
@@ -267,7 +296,9 @@ class VitestVerifyTests(_VitestVerifyFixture, unittest.TestCase):
         def runner():
             raise AssertionError("refused before vitest runs")
         for args in (("-t", "smoke"), ("-t=smoke",), ("--testNamePattern", "smoke"),
-                     ("--testNamePattern=smoke",), ("--test-name-pattern=smoke",)):
+                     ("--testNamePattern=smoke",), ("--test-name-pattern=smoke",),
+                     # R2-2: mri also reads these as the `t` option
+                     ("--t", "smoke"), ("--t=smoke",), ("-ut", "smoke"), ("-tx",)):
             with self.subTest(args):
                 summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
                                           registry_path=self.registry, db_path=self.db,
@@ -278,9 +309,11 @@ class VitestVerifyTests(_VitestVerifyFixture, unittest.TestCase):
                 self.assertIn("selects tests by name itself", err)
 
     def test_W3_other_vitest_flags_pass_through(self):
-        summary, err = self._run([((), "pays @tg:J1", "passed")],
-                                 {"src/a.test.ts::pays @tg:J1": SVC})
-        self.assertIsNone(err)
+        for args in ((), ("--testTimeout=5000",), ("--testTimeout", "5000"), ("-u",),
+                     ("--typecheck",), ("--teardownTimeout=1",), ("src/a.test.ts",),
+                     ("-r", "src"), ("-T", "x")):
+            with self.subTest(args):
+                self.assertIsNone(verify._vitest_name_flag(args))
 
     def test_a_nonzero_vitest_exit_downgrades_a_pass(self):
         summary, err = self._run([((), "pays @tg:J1", "passed")],
@@ -408,12 +441,13 @@ class RealVitestVerifyTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
-    def _verify(self, body):
-        for name in os.listdir(os.path.join(self.repo, "src")):
-            if name.endswith(".test.ts"):
-                os.remove(os.path.join(self.repo, "src", name))
+    def _verify(self, body, name=None):
+        for old in os.listdir(os.path.join(self.repo, "src")):
+            if old.endswith(".test.ts"):
+                os.remove(os.path.join(self.repo, "src", old))
         self._n = getattr(self, "_n", 0) + 1
-        with open(os.path.join(self.repo, "src", f"case{self._n}.test.ts"), "w") as fh:
+        name = name or f"case{self._n}.test.ts"
+        with open(os.path.join(self.repo, "src", name), "w") as fh:
             fh.write(HEADER + body)
         summary, err = verify.run(self.repo, "HEAD~1", "HEAD",
                                   registry_path=self.registry, db_path=self.db,
@@ -461,6 +495,12 @@ class RealVitestVerifyTests(unittest.TestCase):
         # U+001F is not: -t skips it, so it must not be counted as collected.
         s = self._verify('it("pays\\u001F@tg:J1", () => { expect(handlerA()).toBe(1); });\n')
         self.assertEqual((s["collected"], s["uncovered"]), (0, ["J1"]))
+
+    def test_F1_a_tag_in_the_file_path_neither_selects_nor_declares(self):
+        s = self._verify('it("plain", () => { expect(handlerA()).toBe(1); });\n',
+                         name="x @tg:J1 y.test.ts")
+        self.assertEqual((s["collected"], s["uncovered"], s["credited"]), (0, ["J1"], {}))
+        self.assertEqual(verify.exit_code(s), verify.EXIT_INCOMPLETE)
 
     def test_a_J10_tag_is_not_run_for_J1(self):
         s = self._verify('it("ten @tg:J10", () => { expect(1).toBe(2); });\n')
