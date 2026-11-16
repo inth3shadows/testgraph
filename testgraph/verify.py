@@ -42,6 +42,7 @@ from . import pytest_adapter as pa
 from . import registry as reg
 from . import results as res
 from . import select as sel
+from . import vitest_adapter as va
 
 #: Rows written here are DECLARED and validated, not inferred. Phase 4's bare
 #: `"trace"` stays valid and means the older unqualified inference (D2
@@ -57,6 +58,23 @@ EXIT_REFUSED = 2
 #: read the second as the first — this module's own failure mode, relocated
 #: into an integer.
 EXIT_INCOMPLETE = 3
+
+RUNNERS = ("pytest", "vitest")
+#: Vitest's name filter, which `verify --runner vitest` owns (review W3).
+_VITEST_NAME_FLAGS = ("-t", "--t", "--testNamePattern", "--test-name-pattern")
+
+
+def _vitest_name_flag(args):
+    """The first arg Vitest's CLI parser (mri) would read as its `t` option, or
+    None: the spelled-out flags, plus a short cluster holding `t` (`-ut x`,
+    `-tx`), which mri splits into one option per letter (round 2, R2-2)."""
+    for a in args:
+        head = a.split("=", 1)[0]
+        if head in _VITEST_NAME_FLAGS or (
+                len(head) > 2 and head[0] == "-" and head[1:].isalpha()
+                and head[1:].isascii() and "t" in head[1:]):
+            return a
+    return None
 
 
 def marker_expression(journeys, template=None):
@@ -150,14 +168,20 @@ def _summary(repo, head, selection, **extra):
         "incomplete": [],
         "rows_written": 0,
         "pytest_exit": None,
+        "runner": "pytest",
     }
     base.update(extra)
     return base
 
 
 def run(repo, base, head="HEAD", registry_path=None, db_path=None,
-        pytest_args=(), append=None, _runner=None, _workdir=None):
+        pytest_args=(), append=None, runner="pytest", _runner=None, _workdir=None):
     """Select, run the declared tests, validate the declarations, report.
+
+    `runner="vitest"` runs the Vitest tests tagged `@tg:<journey>` in their
+    title or a describe title instead (#122); `pytest_args` then go to Vitest.
+    Validation is the same: each tagged test's own trace must reach the
+    journey's entry symbols.
 
     Returns (summary, error). A red suite is not an error — it is the signal."""
     registry_path = registry_path or reg.resolve_for_repo(repo)
@@ -174,9 +198,25 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")
     if not os.path.isfile(db_path):
         return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"
+    if runner not in RUNNERS:
+        return None, f"unknown runner {runner!r} — one of {', '.join(RUNNERS)}"
+    if runner == "vitest":
+        own = _vitest_name_flag(pytest_args)
+        if own:
+            # A second -t either replaces the journey filter or crashes Vitest
+            # with no report; neither is a run this can vouch for (review W3).
+            return None, (f"verify --runner vitest selects tests by name itself "
+                          f"(-t on the journeys' @tg: tags); drop {own!r} and "
+                          f"narrow the run with a file path instead")
+    # Every return carries the runner, so a quiet vitest run's --json says so (W2).
+    quiet = {"runner": runner, **({"runner_exit": None} if runner == "vitest" else {})}
     plugins = pa.plugin_dir()
     if plugins is None:
         return None, pa.PLUGIN_MISSING
+    if runner == "vitest":
+        vplugin, node_modules, err = va.locate(repo, _runner)
+        if err:
+            return None, err
 
     # Strict (the default): an unresolvable journey BLOCKs and the run is
     # refused. `strict_registry=False` is reserved for history analysis
@@ -188,7 +228,7 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     if selection.get("status") == "BLOCKED" or selection.get("blocking"):
         # The index is not trustworthy. Running tests off it would produce a
         # verdict about a journey set chosen from a graph the guard refused.
-        return _summary(repo, head, selection, refused=True), None
+        return _summary(repo, head, selection, refused=True, **quiet), None
 
     # `select` returns journey dicts keyed `id` (with name/rank/confidence);
     # the plain-string form is what a caller passing a hand-built selection uses.
@@ -198,26 +238,57 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
     try:
 
         if not journeys:
-            return _summary(repo, head, selection), None
+            return _summary(repo, head, selection, **quiet), None
 
-        expr = marker_expression(journeys)
-        proc, trace, verdicts, err = pa.run_traced(
-            repo, plugins, ("-m", expr, *pytest_args),
-            _runner=_runner, _workdir=_workdir)
-        if err:
-            return None, err
+        if runner == "vitest":
+            expr = va.name_pattern(journeys)
+            proc, trace, verdicts, err = va.run_traced(
+                repo, vplugin, node_modules, ("-t", expr, *pytest_args),
+                _runner=_runner, _workdir=_workdir)
+            if err:
+                return None, err
+            # Vitest reports the tests `-t` filtered out as skipped; only the
+            # tagged ones it selected are declarations.
+            trace["declared"] = va.declared(verdicts, list(registry.get("journeys", {})),
+                                            journeys)
+            collected = len(trace["declared"])
+            exits = {"runner_exit": getattr(proc, "returncode", None)}
+        else:
+            expr = marker_expression(journeys)
+            proc, trace, verdicts, err = pa.run_traced(
+                repo, plugins, ("-m", expr, *pytest_args),
+                _runner=_runner, _workdir=_workdir)
+            if err:
+                return None, err
+            collected = len(verdicts or {})
+            exits = {"pytest_exit": getattr(proc, "returncode", None)}
         # No JUnit XML reads as no verdicts: every selected journey then lands
         # in `incomplete` or `uncovered`, never in a pass.
         verdicts = verdicts or {}
 
         credited, unvalidated, per_journey = validate(conn, registry, trace, verdicts)
-        uncovered = [j for j in journeys if j not in per_journey]
+        skipped_only = set()
+        if runner == "vitest":
+            # A tagged test that never ran its body (it.skip, todo, describe.skip)
+            # has no trace, so validate() passes it over and the journey would
+            # read "no test carries the tag", which is false (review W4). It is
+            # a skip; a journey with an unvalidated tag keeps its own message.
+            claimed = {j for _, j in unvalidated}
+            skipped_only = {
+                j for j in journeys
+                if j not in per_journey and j not in claimed and any(
+                    j in js and verdicts.get(pa._join_key(t), {}).get("status") == "skip"
+                    for t, js in trace["declared"].items())}
+        uncovered = [j for j in journeys if j not in per_journey and j not in skipped_only]
         # Selected, has declared tests, but not a pass: the tests ran (or were
         # collected) and no passing verdict came out. Distinct from `uncovered`
         # (nothing declared) and from a credited fail (reported as a failure).
+        # One pass in selection order, as every other list here (R2-7).
         incomplete = []
         for j in journeys:
-            if j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
+            if j in skipped_only:
+                incomplete.append((j, "skip"))
+            elif j in per_journey and credited.get(j) != "pass" and credited.get(j) != "fail":
                 incomplete.append((j, "skip" if credited.get(j) == "skip" else "no verdict"))
 
         written = []
@@ -236,15 +307,16 @@ def run(repo, base, head="HEAD", registry_path=None, db_path=None,
             repo, head, selection,
             journeys=journeys,
             marker_expression=expr,
-            collected=len(verdicts),
+            collected=collected,
             credited=credited,
             unvalidated=unvalidated,
             per_journey={k: sorted(v) for k, v in per_journey.items()},
             uncovered=uncovered,
             incomplete=incomplete,
             rows_written=len(written),
-            pytest_exit=getattr(proc, "returncode", None),
+            runner=runner,
             commit=sha,
+            **exits,
         ), None
     finally:
         # Close deterministically (audit M6): a long-lived MCP server calls this per
@@ -294,6 +366,10 @@ def exit_code(summary):
         return EXIT_INCOMPLETE
     if summary.get("pytest_exit") not in (None, 0, 5):
         return EXIT_INCOMPLETE
+    # Vitest's own exit (#122): non-zero with nothing credited `fail` means the
+    # run went wrong somewhere the report did not name.
+    if summary.get("runner_exit") not in (None, 0):
+        return EXIT_INCOMPLETE
     return EXIT_OK
 
 
@@ -330,16 +406,37 @@ def render(summary, registry=None):
         return "\n".join(lines)
 
     lines.append(f"  journeys selected: {', '.join(summary['journeys'])}")
-    lines.append(f"  pytest -m '{summary['marker_expression']}'  "
-                 f"-> {summary['collected']} test(s), exit {summary['pytest_exit']}")
+    vitest = summary.get("runner") == "vitest"
+    if vitest:
+        lines.append(f"  vitest -t '{summary['marker_expression']}'  "
+                     f"-> {summary['collected']} tagged test(s), exit "
+                     f"{summary.get('runner_exit')}")
+    else:
+        lines.append(f"  pytest -m '{summary['marker_expression']}'  "
+                     f"-> {summary['collected']} test(s), exit {summary['pytest_exit']}")
     for jid in sorted(summary["credited"], key=reg.journey_sort_key):
         lines.append(f"    {jid}  {names.get(jid, ''):<38.38} "
                      f"{summary['credited'][jid]:<5} "
                      f"{len(summary['per_journey'].get(jid, ()))} declared test(s)")
-    if summary["uncovered"]:
+    uncovered = summary["uncovered"]
+    if vitest:
+        # A journey whose tagged tests ran but never reached its entry is in
+        # `uncovered` (it is not a pass), but "no test carries the tag" would be
+        # false for it (round 2, R2-1).
+        claimed = {j for _, j in summary["unvalidated"]}
+        ran = [j for j in uncovered if j in claimed]
+        uncovered = [j for j in uncovered if j not in claimed]
+        if ran:
+            lines.append(
+                f"  ! {', '.join(ran)}: tagged tests ran, but none reached the "
+                f"journey's entry symbols (listed below). This run says NOTHING "
+                f"about those journeys; it is not a pass.")
+    if uncovered:
         lines.append(
-            f"  ! NO JOURNEY-LEVEL TEST: {', '.join(summary['uncovered'])} — "
-            f"selected, and nothing declared `covers(...)` for them. This run "
+            f"  ! NO JOURNEY-LEVEL TEST: {', '.join(uncovered)} — "
+            f"selected, and "
+            f"{'no test in this run carries `@tg:<id>` in its title or a describe title' if vitest else 'nothing declared `covers(...)`'}"
+            f" for them. This run "
             f"says NOTHING about those journeys; it is not a pass."
         )
     if summary.get("incomplete"):
@@ -375,7 +472,7 @@ def main(argv=None):
                "3 incomplete — at "
                "least one selected journey had no passing declared test, or "
                "the selection was NONE but UNKNOWN.\n"
-               "Put pytest's own flags after `--`.",
+               "Put the runner's own flags after `--`.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--repo", required=True)
@@ -386,7 +483,10 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true",
                     help="run and report, but write NO ledger rows")
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("pytest_args", nargs="*")
+    ap.add_argument("--runner", choices=RUNNERS, default="pytest",
+                    help="pytest: tests marked covers(...); vitest: tests with "
+                         "@tg:<journey> in their title or a describe title")
+    ap.add_argument("pytest_args", nargs="*", metavar="runner_args")
     args = ap.parse_args(argv)
 
     summary, err = run(
@@ -394,6 +494,7 @@ def main(argv=None):
         registry_path=args.registry, db_path=args.db,
         pytest_args=tuple(args.pytest_args),
         append=(lambda row: False) if args.dry_run else None,
+        runner=args.runner,
     )
     if err:
         if args.json:

@@ -25,13 +25,14 @@ passed or failed, a duplicate test id, a file that failed outside any test, a
 report of the wrong shape, and a `projects`/workspace config (which does not
 inherit `setupFiles`) are all refusals.
 
-Deliberately not here yet: selecting only some journeys' tests (verify's job;
-next step), and anonymous functions (they need source maps, which only
+Selecting only some journeys' tests is `verify --runner vitest`'s job (the
+`@tg:` tag helpers below). Deliberately not here yet: anonymous functions (they need source maps, which only
 `reconcile` would use). See `~/.claude/plans/testgraph-154-then-vitest-adapter.md`.
 """
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,7 @@ from . import db as dbmod
 from . import ledger
 from . import pytest_adapter as pa
 from . import registry as reg
+from . import results as res
 
 PLUGIN_NAME = "tgtrace-vitest.ts"
 BACKEND = "v8-precise-coverage"
@@ -189,11 +191,20 @@ def parse_report(report, root):
                 return None, (f"test {tid!r} never finished (status pending: a worker "
                               f"died or the run was cut short); no verdict was recorded")
             key = pa._join_key(tid)
+            status = STATUS.get(case.get("status"), "skip")
             if key in out:
+                # Two skips sharing an id cannot mask anything: neither ran, and
+                # both read the same. `verify` filters with `-t`, so every
+                # deselected `test.each` repeat lands here (review W1).
+                if status == "skip" and out[key]["status"] == "skip":
+                    continue
                 return None, (f"two tests share the id {tid!r} (the same title in the "
                               f"same describe, e.g. test.each with a repeated row); the "
                               f"verdicts cannot be told apart, so no verdict was recorded")
-            out[key] = {"status": STATUS.get(case.get("status"), "skip"), "test_id": tid}
+            # `full_name` is the string Vitest matches `-t` against: the
+            # describe chain and the title, never the file (round 2, F1).
+            out[key] = {"status": status, "test_id": tid,
+                        "full_name": " ".join([*ancestors, title])}
     return out, None
 
 
@@ -303,6 +314,74 @@ def execute(repo, plugin, node_modules, tmp, vitest_args=(), runner=None):
     return proc, trace, verdicts, None
 
 
+def locate(repo, _runner=None):
+    """(plugin, node_modules, error): what a traced run needs, or why it can't."""
+    plugins = pa.plugin_dir()
+    plugin = os.path.join(plugins, PLUGIN_NAME) if plugins else None
+    if not plugin or not os.path.isfile(plugin):
+        return None, None, (f"cannot find {PLUGIN_NAME}: it ships beside tgtrace.py "
+                            f"(testgraph/_plugin/ installed, harness/plugin/ in a checkout)")
+    # From the real path: `execute` resolves the repo the same way.
+    node_modules = find_node_modules(os.path.realpath(repo))
+    if node_modules is None and _runner is None:
+        return None, None, (f"no node_modules with vitest at or above {repo} — install "
+                            f"the repo's dependencies first")
+    return plugin, node_modules, None
+
+
+def run_traced(repo, plugin, node_modules, vitest_args=(), _runner=None, _workdir=None):
+    """`execute` in a temp dir that dies with the run: (proc, trace, verdicts, error).
+    The one traced-run path for this adapter and `verify --runner vitest`."""
+    if _workdir is not None:
+        return execute(repo, plugin, node_modules, _workdir, vitest_args, _runner)
+    with tempfile.TemporaryDirectory() as tmp:
+        return execute(repo, plugin, node_modules, tmp, vitest_args, _runner)
+
+
+#: A test declares a journey with this tag in its own title or a describe title,
+#: the same string Playwright's tag uses (results.DEFAULT_TAG_CONVENTIONS).
+TAG_TEMPLATE = res.DEFAULT_TAG_CONVENTIONS["playwright"]
+
+
+def name_pattern(journeys):
+    """`(^|\\s)(@tg:J1|@tg:J2)(\\s|$)`: a Vitest `-t` for exactly these journeys.
+
+    Vitest matches `-t` against the test's full name: every describe title
+    and the test title joined by single spaces, without the file path. Both boundaries are load-bearing:
+    without the trailing one `@tg:J1` also selects `@tg:J10`, without the
+    leading one `x@tg:J1` would select J1."""
+    alts = "|".join(re.escape(res.format_tag(TAG_TEMPLATE, j)) for j in journeys)
+    return f"(^|\\s)({alts})(\\s|$)"
+
+
+#: JavaScript's `\\s`, which is what Vitest's `-t` (a `new RegExp`) means by
+#: whitespace. Python's `\\s` and str.split() differ from it (U+001C-U+001F and
+#: U+0085 are whitespace to Python only, U+FEFF to JavaScript only), and any
+#: difference is a test `-t` ran but nothing declared, or the reverse (W5).
+_JS_SPACE = "[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+
+
+def declared(verdicts, journey_ids, selected):
+    """{test_id: [journey, ...]} for the tests `name_pattern(selected)` ran.
+
+    A test declares every registry journey whose tag is a whole token of the
+    name Vitest matches `-t` against (describe chain and title), with the
+    same boundaries `name_pattern` uses. Tags the registry does not define are
+    ignored, as an unknown `covers(...)` id would be. A test whose tags name no
+    selected journey was filtered out by `-t` and declares nothing here."""
+    wanted = set(selected)
+    tags = [(j, re.compile(f"(?:^|{_JS_SPACE}){re.escape(res.format_tag(TAG_TEMPLATE, j))}"
+                           f"(?={_JS_SPACE}|\\Z)"))
+            for j in journey_ids]
+    out = {}
+    for v in verdicts.values():
+        name = v["full_name"]  # no fallback: a test id would hide a leading tag
+        js = [j for j, rx in tags if rx.search(name)]
+        if wanted.intersection(js):
+            out[v["test_id"]] = js
+    return out
+
+
 def run(repo, registry_path=None, db_path=None, vitest_args=(), commit=None,
         append=None, trace_out=None, _runner=None, _workdir=None):
     """Run the suite, attribute journeys from the trace, write the rows.
@@ -310,7 +389,6 @@ def run(repo, registry_path=None, db_path=None, vitest_args=(), commit=None,
     Returns (summary, error), as `pytest_adapter.run` does: a red suite is a
     result, a run that cannot be read is a refusal."""
     repo = os.path.abspath(repo)
-    real = os.path.realpath(repo)  # `execute` resolves it too; node_modules is looked up from it
     registry_path = registry_path or reg.resolve_for_repo(repo)
     if registry_path is None:
         return None, (f"no journey registry for {reg.repo_name(repo)} — looked in "
@@ -320,20 +398,13 @@ def run(repo, registry_path=None, db_path=None, vitest_args=(), commit=None,
     except (OSError, ValueError) as exc:
         return None, f"cannot read {registry_path}: {exc}"
 
-    plugins = pa.plugin_dir()
-    plugin = os.path.join(plugins, PLUGIN_NAME) if plugins else None
-    if not plugin or not os.path.isfile(plugin):
-        return None, (f"cannot find {PLUGIN_NAME}: it ships beside tgtrace.py "
-                      f"(testgraph/_plugin/ installed, harness/plugin/ in a checkout)")
-
     db_path = db_path or os.path.join(repo, ".codegraph", "codegraph.db")
     if not os.path.isfile(db_path):
         return None, f"no codegraph index at {db_path} — run `codegraph init` in {repo}"
 
-    node_modules = find_node_modules(real)
-    if node_modules is None and _runner is None:
-        return None, (f"no node_modules with vitest at or above {repo} — install "
-                      f"the repo's dependencies first")
+    plugin, node_modules, err = locate(repo, _runner)
+    if err:
+        return None, err
 
     if trace_out:
         bad = pa.trace_out_error(trace_out)
@@ -345,11 +416,8 @@ def run(repo, registry_path=None, db_path=None, vitest_args=(), commit=None,
         return None, (f"cannot resolve {commit or 'HEAD'!r} in {repo} — an "
                       f"unjoinable key would sit in `unasked` forever")
 
-    if _workdir is not None:
-        proc, trace, verdicts, err = execute(repo, plugin, node_modules, _workdir, vitest_args, _runner)
-    else:
-        with tempfile.TemporaryDirectory() as tmp:
-            proc, trace, verdicts, err = execute(repo, plugin, node_modules, tmp, vitest_args, _runner)
+    proc, trace, verdicts, err = run_traced(repo, plugin, node_modules, vitest_args,
+                                            _runner=_runner, _workdir=_workdir)
     if err:
         return None, err
     if trace_out:

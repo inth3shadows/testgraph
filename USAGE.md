@@ -205,8 +205,30 @@ do not inherit `setupFiles`, so nothing would be traced) and are refused up fron
 anonymous functions are not recorded (attribution matches named entry symbols, so this
 costs nothing there); tests marked `.concurrent` in one file share a coverage window,
 so their traces can bleed into each other; a failing test next to tests skipped by a
-throwing `beforeAll` in the same file is not distinguishable from `it.skip`; `verify`
-does not run Vitest suites yet.
+throwing `beforeAll` in the same file is not distinguishable from `it.skip`.
+
+`verify` runs only the selected journeys' Vitest tests with `--runner vitest`. A test
+declares its journey with `@tg:<id>` in its title or in a describe title, the same
+string a Playwright tag uses:
+
+```ts
+describe("checkout @tg:J4", () => {
+  it("charges the card", async () => { /* ... */ });
+});
+it("submits a task @tg:J1 @tg:J7", () => { /* ... */ });
+```
+
+```bash
+python3 -m testgraph.verify --repo . --base origin/main --runner vitest
+```
+
+Selection is Vitest's `-t`, so untagged tests and tests of other journeys do not run.
+Each tagged test is validated as a `covers(...)` test is: its own trace must reach the
+journey's entry symbols, or the declaration is reported `unvalidated` and the journey
+is not credited. A journey whose tagged tests were all skipped is incomplete, not
+uncovered. Narrow the run with a file path after `--`, not with your own `-t`: verify
+owns the name filter and refuses a second one. The exit codes are pytest's, plus one rule: a Vitest exit other than 0
+with no failing journey is incomplete (3).
 
 ## Checking the Graph Against Reality
 
