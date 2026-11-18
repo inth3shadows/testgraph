@@ -33,17 +33,19 @@ on:
   push:
     tags: ["v*"]
 
+# Write access is granted per job, only where it is used.
 permissions:
-  contents: write   # create the tag and the GitHub Release
-  id-token: write   # PyPI trusted publishing (OIDC)
+  contents: read
 
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create and push the tag
     outputs:
       tag: ${{ steps.pick.outputs.tag }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1  # zizmor: ignore[artipacked] -- this job pushes a tag with the checkout's token
         with:
           fetch-depth: 0   # tag-derived versioning needs full history
 
@@ -111,6 +113,9 @@ jobs:
 
   release:
     needs: version
+    permissions:
+      contents: write   # create the GitHub Release
+      id-token: write   # PyPI trusted publishing (OIDC)
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
@@ -118,8 +123,11 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.tag }}
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: false
       - run: uv build
 
       - name: Assert built version matches the tag
@@ -141,7 +149,7 @@ jobs:
         # owner/repo/workflow. Runs BEFORE the GitHub Release: a PyPI upload
         # cannot be undone (a version may be yanked, never re-uploaded), so if it
         # is going to fail, fail before announcing anything.
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
       - name: GitHub Release
         env:
